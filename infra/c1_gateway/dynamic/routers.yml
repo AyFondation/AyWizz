@@ -1,0 +1,279 @@
+# =============================================================================
+# File: routers.yml
+# Version: 7
+# Path: infra/c1_gateway/dynamic/routers.yml
+# Description: Traefik HTTP router definitions. v3 adds the UI catch-all
+#              (priority 1) so the Next.js standalone server receives
+#              everything not claimed by an explicit backend route
+#              (`/`, `/login`, `/dashboard`, `/_next/*`, etc.).
+#              v2 aligns with real router paths and adds C7 / C9 public surfaces.
+#
+#   Route table (matches actual FastAPI routers as of session of 2026-04-23):
+#     /auth/login     POST → C2 [rate-limit-auth]                          public
+#     /auth/token     POST → C2 [rate-limit-auth]                          public
+#     /auth/*              → C2  []                                        public
+#     /ux/*                → C2  []                                        public
+#     /api/v1/conversations/*          → C3 [forward-auth-c2, secure-hdrs]
+#     /api/v1/orchestrator/*           → C4 [forward-auth-c2, secure-hdrs]
+#     /api/v1/projects/*/requirements/* → C5 [forward-auth-c2, secure-hdrs]
+#     /api/v1/validation/*             → C6 [forward-auth-c2, secure-hdrs]
+#     /api/v1/memory/*                 → C7 [forward-auth-c2, secure-hdrs]
+#     /api/v1/mcp, /api/v1/mcp/*       → C9 [forward-auth-c2, secure-hdrs]
+#     /uploads/*                       → C12 [forward-auth-c2, secure-hdrs]
+#     <everything else>                → UI (priority 1)                   public
+#
+# @relation R-100-039 R-100-042 R-100-015 A-C1-1
+# =============================================================================
+
+http:
+  routers:
+
+    # -------------------------------------------------------------------------
+    # C2 — Auth Service (public endpoints, rate-limited login/token)
+    # -------------------------------------------------------------------------
+
+    c2-auth-login:
+      rule: "Path(`/auth/login`) && Method(`POST`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - rate-limit-auth
+      priority: 100
+
+    c2-auth-token:
+      rule: "Path(`/auth/token`) && Method(`POST`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - rate-limit-auth
+      priority: 100
+
+    c2-auth:
+      rule: "PathPrefix(`/auth`)"
+      service: c2
+      entryPoints:
+        - web
+      priority: 10
+
+    # UX bootstrap config — public, no forward-auth.
+    c2-ux-config:
+      rule: "PathPrefix(`/ux`)"
+      service: c2
+      entryPoints:
+        - web
+      priority: 10
+
+    # -------------------------------------------------------------------------
+    # C3 — Conversation Service
+    # -------------------------------------------------------------------------
+
+    c3-conversations:
+      rule: "PathPrefix(`/api/v1/conversations`)"
+      service: c3
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C4 — Orchestrator
+    # -------------------------------------------------------------------------
+
+    c4-orchestrator:
+      rule: "PathPrefix(`/api/v1/orchestrator`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # C4 — Project artifacts (transparent MinIO surface). Pinned with
+    # priority 100 so it WINS over `c2-projects` (also under
+    # `/api/v1/projects/*`, priority 50) for the artifacts subpath.
+    # R-200-131. Per-tenant member ; tenant_manager rejected in-app.
+    c4-artifacts:
+      rule: "PathRegexp(`^/api/v1/projects/[^/]+/artifacts(/.*)?$`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # C4 — Project versioning proxy (R-200-147). Pinned with priority
+    # 100 same as the artifacts surface for the same precedence
+    # reason against c2-projects.
+    c4-git:
+      rule: "PathRegexp(`^/api/v1/projects/[^/]+/git(/.*)?$`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # C4 — Chat-direct DocGen document CRUD (D-015 / R-200-153..156).
+    # Same precedence (100) as c4-artifacts so it wins over the
+    # generic c2-projects route. Regexp matches
+    # `/api/v1/projects/<pid>/documents` and any sub-path.
+    c4-documents:
+      rule: "PathRegexp(`^/api/v1/projects/[^/]+/documents(/.*)?$`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # C4 — Admin seed endpoint (dev-only). Different path prefix
+    # `/api/v1/admin/projects/*` so it doesn't collide with
+    # c4-artifacts above. Gated to admin/tenant_admin in-app.
+    c4-artifacts-admin:
+      rule: "PathPrefix(`/api/v1/admin/projects`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # -------------------------------------------------------------------------
+    # C2 — Admin (tenants lifecycle, tenant_manager only)
+    # -------------------------------------------------------------------------
+
+    c2-admin:
+      rule: "PathPrefix(`/admin`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C2 — Projects (lifecycle + membership grants)
+    # -------------------------------------------------------------------------
+
+    c2-projects:
+      rule: "PathPrefix(`/api/v1/projects`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C2 — Self-service per-user preferences (trigram, LLM user prompt,
+    # bubble colour). Any authenticated tenant member ; gated server-side.
+    # -------------------------------------------------------------------------
+
+    c2-preferences:
+      rule: "PathPrefix(`/api/v1/users/me/preferences`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C5 — Requirements Service
+    # (routes ONLY under /api/v1/projects/<pid>/requirements/*).
+    # PathRegexp + priority 100 wins over c2-projects (priority 50)
+    # for the `/requirements/...` subpath, leaving C2 to handle bare
+    # /api/v1/projects, /api/v1/projects/<pid>, and members endpoints.
+    # -------------------------------------------------------------------------
+
+    c5-requirements:
+      rule: "PathRegexp(`^/api/v1/projects/[^/]+/requirements(/.*)?$`)"
+      service: c5
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # -------------------------------------------------------------------------
+    # C6 — Validation Pipeline Registry
+    # -------------------------------------------------------------------------
+
+    c6-validation:
+      rule: "PathPrefix(`/api/v1/validation`)"
+      service: c6
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C7 — Memory Service
+    # -------------------------------------------------------------------------
+
+    c7-memory:
+      rule: "PathPrefix(`/api/v1/memory`)"
+      service: c7
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C9 — MCP Server (public MCP surface for external LLM agents)
+    # -------------------------------------------------------------------------
+
+    c9-mcp:
+      rule: "PathPrefix(`/api/v1/mcp`)"
+      service: c9
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C12 — n8n Ingestion Workflow (upload reception)
+    # -------------------------------------------------------------------------
+
+    c12-uploads:
+      rule: "PathPrefix(`/uploads`)"
+      service: c12
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # UI catch-all (priority 1). Routes EVERYTHING not claimed above to
+    # the Next.js standalone server. Priority 1 = lowest, so any backend
+    # route wins. In `e2e_stack.sh up` (without dev override) the `ui`
+    # service doesn't exist ; Traefik returns 502 only if `/` is hit,
+    # which the pytest e2e tier never does.
+    # -------------------------------------------------------------------------
+    ui-catchall:
+      rule: "PathPrefix(`/`)"
+      service: ui
+      entryPoints:
+        - web
+      priority: 1

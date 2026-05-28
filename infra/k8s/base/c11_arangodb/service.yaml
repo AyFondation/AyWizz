@@ -1,0 +1,29 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c11_arangodb/service.yaml
+# Description: Headless Service for the ArangoDB StatefulSet. ClusterIP
+#              `None` means clients resolve `arangodb` to the pod IP via
+#              DNS — required for stable identity StatefulSet semantics
+#              even though v1 has only 1 replica.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: arangodb
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: arangodb
+    app.kubernetes.io/component: c11
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: arangodb
+    app.kubernetes.io/component: c11
+  ports:
+    - name: arangodb
+      port: 8529
+      targetPort: arangodb
+      protocol: TCP

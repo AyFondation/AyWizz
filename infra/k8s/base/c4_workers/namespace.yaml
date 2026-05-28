@@ -1,0 +1,26 @@
+# =============================================================================
+# File: namespace.yaml
+# Version: 1
+# Path: infra/k8s/base/c4_workers/namespace.yaml
+# Description: Dedicated namespace for C4 ephemeral sub-agent pods
+#              (Q-200-002 — isolated namespace `c4-workers` for
+#              network-policy scoping). The orchestrator (running in
+#              `aywizz`) creates pods here via the K8sDispatcher
+#              (R-200-030). Cross-namespace RBAC grants are wired in
+#              rbac.yaml.
+#
+# @relation implements:R-200-030
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-workers
+  labels:
+    app.kubernetes.io/name: c4-workers
+    app.kubernetes.io/part-of: aywizz-platform
+    # Pod Security Standards (1.25+) — restricted profile enforces
+    # the security context we set on each pod (non-root, RO rootfs,
+    # capabilities drop ALL) at admission time. Belt-and-braces over
+    # the pod-level securityContext the K8sDispatcher already renders.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

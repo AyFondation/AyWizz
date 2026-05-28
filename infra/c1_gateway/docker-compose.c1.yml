@@ -1,0 +1,29 @@
+# =============================================================================
+# File: docker-compose.c1.yml
+# Version: 1
+# Path: infra/c1_gateway/docker-compose.c1.yml
+# Description: Traefik v3 service definition for local development.
+#              Merge with the platform-level docker-compose.yml via:
+#                docker compose -f docker-compose.yml -f infra/c1_gateway/docker-compose.c1.yml up
+#              The Traefik API dashboard is available at http://localhost:8080.
+# =============================================================================
+
+services:
+  c1:
+    image: traefik:v3.3
+    container_name: c1_gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP entry point
+      - "8080:8080"   # Traefik dashboard (local dev only)
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - platform
+
+networks:
+  platform:
+    external: true
+    name: platform

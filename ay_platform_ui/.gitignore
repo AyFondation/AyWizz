@@ -1,0 +1,29 @@
+# Next.js
+.next/
+out/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editors
+.DS_Store
+*.swp
+
+# Biome / ts build cache
+.biomejs/
+*.tsbuildinfo
+
+# Test artefacts (Vitest + Playwright)
+coverage/
+playwright-report/
+test-results/
+.playwright/
+blob-report/

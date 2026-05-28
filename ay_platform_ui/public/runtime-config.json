@@ -1,0 +1,5 @@
+{
+  "_comment": "ay_platform_ui/public/runtime-config.json — DEPLOYMENT-TIME runtime config. Mountable from a K8s ConfigMap so the API URL can change without rebuilding the Next.js bundle. Empty `apiBaseUrl` means relative URLs (same-origin via Traefik in prod, Next.js dev rewrites in dev). Override to e.g. `https://api.example.com` when the UX is hosted on a different origin.",
+  "apiBaseUrl": "",
+  "publicBaseUrl": ""
+}

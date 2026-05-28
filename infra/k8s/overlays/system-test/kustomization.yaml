@@ -1,0 +1,129 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 2
+# Path: infra/k8s/overlays/system-test/kustomization.yaml
+# Description: Overlay for K8s system tests run by pytest
+#              (`tests/system/k8s/`). Differs from `overlays/dev` on 3
+#              points to keep the test run cheap + deterministic on a
+#              CI runner / kind cluster:
+#
+#                1. **Ollama excluded.** Pulling all-minilm in-cluster
+#                   takes ~2 min on a cold cache and consumes 2 GB.
+#                   System tests use the deterministic-hash embedder
+#                   instead — same C7 code path, no Ollama dependency.
+#                2. **Local image.** `aywizz-api:test` rather than
+#                   `ghcr.io/ayfondation/aywizz-api:latest`. The CI runner
+#                   builds the image and `kind load`s it before apply.
+#                3. **Replicas pinned to 1.** Same as dev but documented
+#                   for clarity — multi-replica scenarios are not in
+#                   v1 system-test scope.
+#
+#              Each base/<component>/ is referenced explicitly (rather
+#              than going through `../../base`) so we can omit the
+#              ollama dir cleanly. _init/ is split per-file so we can
+#              omit ollama-seed without affecting arangodb-init or
+#              minio-init.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+resources:
+  - ../../base/_namespace
+  - ../../base/c11_arangodb
+  - ../../base/c10_minio
+  # ollama directory included so we can target its resources for $patch:
+  # delete below. Kustomize rejects file-level resource references
+  # outside the overlay root, so dir-level + patch-delete is the
+  # canonical exclusion pattern.
+  - ../../base/ollama
+  - ../../base/c2_auth
+  - ../../base/c3_conversation
+  - ../../base/c4_orchestrator
+  - ../../base/c5_requirements
+  - ../../base/c6_validation
+  - ../../base/c7_memory
+  - ../../base/c9_mcp
+  - ../../base/c12_workflow
+  - ../../base/ay_platform_ui
+  - ../../base/c1_gateway
+  # Test-only mock LLM — system-test overlay opt-ins; never shipped
+  # to dev/prod overlays per R-100-121 (underscore-prefixed modules
+  # forbidden in staging/production).
+  - ../../base/_mock_llm
+  - ../../base/_init
+
+# Excise the Ollama Deployment, Service, PVC + the ollama-seed Job.
+# Each $patch: delete strips the matching resource from the build.
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ollama
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ollama
+  - target:
+      version: v1
+      kind: Service
+      name: ollama
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ollama
+  - target:
+      version: v1
+      kind: PersistentVolumeClaim
+      name: ollama-data
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: ollama-data
+  - target:
+      group: batch
+      version: v1
+      kind: Job
+      name: ollama-seed
+    patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: ollama-seed
+
+configMapGenerator:
+  - name: aywizz-config
+    behavior: create
+    envs:
+      - .env
+
+secretGenerator:
+  - name: aywizz-secrets
+    behavior: create
+    envs:
+      - .env.secret
+    type: Opaque
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Override the image to a locally-built tag. The system-tests wrapper
+# runs `docker build -t aywizz-api:test -f infra/docker/Dockerfile.api .`
+# then `kind load docker-image aywizz-api:test --name <cluster>` before
+# applying this overlay.
+images:
+  - name: ghcr.io/ayfondation/aywizz-api
+    newName: aywizz-api
+    newTag: test
+  - name: ghcr.io/ayfondation/aywizz-ui
+    newName: aywizz-ui
+    newTag: test

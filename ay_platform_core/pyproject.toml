@@ -1,0 +1,332 @@
+# =============================================================================
+# File: pyproject.toml
+# Version: 11
+# Path: ay_platform_core/pyproject.toml
+# Description: Python project configuration for the ay_platform_core
+#              sub-project of the monorepo. Targets Python 3.13.
+#              Dependency versions pinned to May 2026 latest stable releases.
+#              v11: tree-sitter (0.25) + tree-sitter-language-pack (1.8) added
+#                   as base deps for the C7 code-domain structural extractor
+#                   (V2 #3-A.a / R-400-200, D-004). Existing pins keep their
+#                   `>=x,<next-major` ranges — they already resolve to the
+#                   latest stable WITHIN each major at install, so a rebuild
+#                   picks up current stable without an untested major bump.
+#              v10: `openhands` optional extra (openhands-sdk + openhands-tools)
+#                   for the C4 generate-phase harness (V2 #2 / R-200-029).
+#                   Installed ONLY in the C15 runner image, never in `all`.
+#              v4: coverage gate enabled (80% line blocking, branch reported).
+#              v5: ruff per-file-ignores extended — B008 suppressed on FastAPI
+#                  router modules (Depends() in defaults is framework idiom,
+#                  not the mutable-default bug B008 targets).
+#              v6: mypy overrides extended — yaml/requests/docker stubs absent
+#                  (third-party libs without py.typed), and check_* modules
+#                  are loaded via sys.path manipulation from scripts/checks/
+#                  (not an installable package).
+#              v7: `system` pytest marker registered + tests/system excluded
+#                  from the default pytest run (`--ignore=tests/system`).
+#              v8: server-runtime deps (FastAPI, uvicorn, pyjwt[crypto],
+#                  argon2-cffi, python-multipart, cryptography) promoted to
+#                  main dependencies so the Dockerfile installs everything
+#                  from pyproject.toml without hard-coded `pip install` calls.
+#              v9: `docker>=7.1,<8.0` added to main deps — consumed by the
+#                  test-tier `_observability` module (R-100-120) which
+#                  ships in the same `ay-api:local` image as every other
+#                  component. Test-only in scope; runtime guard at
+#                  module level.
+# =============================================================================
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ay_platform_core"
+version = "0.1.0"
+description = "AY platform - domain-agnostic backbone + pluggable production domains"
+requires-python = ">=3.13"
+# No README declared — the monorepo-level CLAUDE.md plays that role, and
+# setuptools builds reject a dangling `readme = …` reference when the
+# file is absent. Add a real README here and restore this field if one is
+# authored.
+license = { text = "Proprietary" }
+
+dependencies = [
+    # Core data & validation
+    "pydantic>=2.13,<3.0",
+    "pydantic-settings>=2.14,<3.0",
+
+    # HTTP server + client — every component exposes a FastAPI app; uvicorn
+    # with the [standard] extra includes `watchfiles` which enables the
+    # --reload behaviour that the docker-compose bind-mount relies on.
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+    "python-multipart>=0.0.20,<1.0",  # OAuth2 password grant + file uploads
+    "httpx>=0.28,<1.0",
+
+    # Auth (C2) — JWT signing/verification + password hashing. Declared here
+    # rather than in a `[server]` extra because C2 is always part of the
+    # deployed topology; a deployment without C2 does not exist.
+    "pyjwt[crypto]>=2.9,<3.0",
+    "argon2-cffi>=23,<24",
+    "cryptography>=44,<45",
+
+    # Storage SDKs
+    # NOTE: python-arango is SYNCHRONOUS. For async components (C5, C7),
+    #       the established pattern is asyncio.to_thread() per C2/C3 usage.
+    "python-arango>=8.3,<9.0",
+    "minio>=7.2,<8.0",
+
+    # C7 source parsers (Phase B of v1 plan): pure-Python where possible.
+    # `pypdf` is pure Python; `python-docx` pulls in lxml as a transitive
+    # native dep (acceptable, install ships wheels for major platforms).
+    # `beautifulsoup4` defaults to stdlib `html.parser` if lxml is absent;
+    # since python-docx already brings lxml, BS4 will use it automatically.
+    "pypdf>=4.0,<6.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "python-docx>=1.1,<2.0",
+
+    # Utilities
+    "python-dotenv>=1.0,<2.0",
+    "pyyaml>=6.0,<7.0",
+
+    # Docker SDK — consumed by the test-tier `_observability` module
+    # (R-100-120) to subscribe to live container log streams. Test-only
+    # in spirit, but bundled in the main image because the module rides
+    # on the same `ay-api:local` Dockerfile as every other component.
+    "docker>=7.1,<8.0",
+
+    # NATS client (R-200-070 / R-200-071) — at-least-once via JetStream
+    # for the C4 orchestrator's hybrid-exposure event channel. Python
+    # client `nats-py` covers Core NATS + JetStream from one package.
+    "nats-py>=2.6,<3.0",
+
+    # Kubernetes async client (R-200-030..033) — the C4 K8sDispatcher
+    # creates ephemeral sub-agent pods in the `c4-workers` namespace and
+    # watches them to completion. `kubernetes_asyncio` is the async
+    # fork of the official `kubernetes` client and matches the platform's
+    # FastAPI-async style. Optional in spirit (orchestrator falls back
+    # to InProcessDispatcher when not installed) but bundled in the main
+    # `ay-api:local` image — same shared-image rule as `R-100-114`.
+    "kubernetes_asyncio>=33.0,<34.0",
+
+    # C7 schema-guided L1 structural extraction — code domain (V2 #3-A.a /
+    # R-400-200, D-004, E-400-006). `tree-sitter` is the parsing engine for
+    # the code-AST extractor (MODULE/CLASS/FUNCTION/METHOD + IMPORTS /
+    # INHERITS_FROM) ; `tree-sitter-language-pack` ships the pre-compiled
+    # grammars (Python / TypeScript / YAML / Markdown per R-200-030) so no
+    # per-grammar build step is needed. Base deps — C7 ships in the shared
+    # `ay-api` image (R-100-114) and the structural extractor is core, not a
+    # gated experiment.
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-language-pack>=1.8,<2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=6.0,<8.0",
+    "pytest-xdist>=3.8,<4.0",
+    "testcontainers[arangodb,minio]>=4.14,<5.0",
+    "libcst>=1.8,<2.0",
+]
+
+dev = [
+    "ruff>=0.15,<1.0",
+    "mypy>=1.20,<2.0",
+]
+
+# OpenHands `generate`-phase harness (V2 #2 / R-200-029). DELIBERATELY
+# NOT in `all` : this heavy extra (libtmux, tree-sitter, browser-use,
+# litellm) is installed ONLY in the C15 runner image
+# (infra/docker/Dockerfile.c15-runner), never in the shared `ay-api`
+# image nor in the dev/CI install. The `openhands.*` import is confined
+# to `pipeline/generate_engine.py` and gated behind
+# `C4_GENERATE_ENGINE=openhands`. Pins reviewed monthly (R-200-030 v2).
+openhands = [
+    "openhands-sdk>=1.23,<2.0",
+    "openhands-tools>=1.23,<2.0",
+]
+
+all = [
+    "ay_platform_core[test,dev]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# -----------------------------------------------------------------------------
+# pytest
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.4"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Coverage gate: 80% line coverage required (blocking).
+# Branch coverage is measured and reported (see [tool.coverage]) but NOT
+# blocking - per CLAUDE.md §11 policy (visible, not enforced, to avoid
+# coverage-for-coverage-sake anti-patterns).
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+    "--cov=src",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-fail-under=80",
+    # System tests require a running docker-compose stack; they are opted
+    # in by invoking `pytest tests/system/` explicitly (or via the
+    # dedicated run_tests.sh target). Excluded from the default run so
+    # CI does not require docker.
+    "--ignore=tests/system",
+]
+markers = [
+    "unit: fast, isolated tests (no containers, no network)",
+    "contract: component contract/schema tests (no containers)",
+    "integration: integration tests requiring testcontainers",
+    "e2e: cross-component end-to-end tests against the shared stack",
+    "system: tests against a running docker-compose stack (opt-in)",
+    "system_k8s: tests against a live K8s deployment (opt-in, kind cluster)",
+    "coherence: spec<->code and code<->code coherence tests",
+    "slow: tests taking more than 1 second",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:testcontainers.*",
+    "ignore::DeprecationWarning:docker.*",
+]
+
+# -----------------------------------------------------------------------------
+# coverage
+# -----------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+# Lines excluded from coverage counting. These are legitimate cases where
+# code is not runtime-reachable by tests (type-checking imports, abstract
+# method guards, debug representations, __main__ guards, unreachable
+# defensive branches). Extending this list counts as a SIGNIFICANT change
+# per CLAUDE.md §11: requires user approval and written justification.
+exclude_also = [
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "pass",
+    "\\.\\.\\.",
+    "def __repr__",
+    "def __str__",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+skip_covered = false
+# Do not fail here - pytest's --cov-fail-under is the authoritative gate.
+# This value is advisory for standalone `coverage report` invocations.
+fail_under = 80
+precision = 2
+
+[tool.coverage.xml]
+# Relative to this pyproject's directory (ay_platform_core/).
+output = "reports/latest/coverage.xml"
+
+[tool.coverage.html]
+directory = "reports/latest/htmlcov"
+
+# -----------------------------------------------------------------------------
+# ruff
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "PL",   # pylint
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "PLR0913",  # too many arguments (often legitimate in factories)
+    "PLR2004",  # magic values (often legitimate in tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101"]
+# FastAPI routers: Depends(), Header(), Query(), Body(), File(), Form(), Path(),
+# Cookie() in argument defaults are framework markers resolved per-request, not
+# the mutable-default pitfall B008 targets. Silencing B008 for router modules is
+# the standard FastAPI convention (see ruff FAQ).
+"**/router.py" = ["B008"]
+"**/*_router.py" = ["B008"]
+"**/routers/*.py" = ["B008"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# -----------------------------------------------------------------------------
+# mypy
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = [
+    "testcontainers.*",
+    "arango.*",
+    "libcst.*",
+    # C1 integration/contract tests depend on these third-party libs which
+    # either ship without py.typed (docker, testcontainers) or have stubs in
+    # a separate package we don't want to pin (types-PyYAML, types-requests,
+    # types-docker add little value for the narrow use here).
+    "yaml",
+    "requests",
+    "requests.*",
+    "docker",
+    "docker.*",
+    # nats-py ships without type stubs ; covered by the project-wide
+    # ignore_missing_imports below but also listed explicitly so mypy's
+    # error message points operators at this block when nats-py isn't
+    # installed (P1.2 — R-200-070 publisher).
+    "nats",
+    "nats.*",
+    # kubernetes_asyncio same story — async fork of the official client
+    # ships without py.typed (P2.1.c — R-200-030 K8s sub-agent dispatcher).
+    "kubernetes_asyncio",
+    "kubernetes_asyncio.*",
+    # openhands-sdk / openhands-tools — the OPTIONAL `openhands` extra
+    # (V2 #2 / R-200-029). Not installed in the shared image nor in CI ;
+    # imported lazily ONLY in pipeline/generate_engine.py. Ignore the
+    # missing stubs so mypy passes without the heavy extra present.
+    "openhands.*",
+    # Coherence scripts under scripts/checks/ are standalone executables
+    # loaded at test time via sys.path insertion — not an installable package.
+    "check_pydantic_schemas_valid",
+    "check_schema_isolation",
+    "check_router_typing",
+    "check_no_parallel_definitions",
+    "check_canonical_imports",
+]
+ignore_missing_imports = true

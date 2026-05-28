@@ -1,0 +1,119 @@
+# =============================================================================
+# File: Dockerfile.api
+# Version: 4
+# Path: infra/docker/Dockerfile.api
+# Description: Shared image for the platform's Python API tier.
+#
+#   The Python tier is a SINGLE package — `ay_platform_core` — that bundles
+#   every in-process FastAPI component (C2 Auth, C3 Conversation,
+#   C4 Orchestrator, C5 Requirements, C6 Validation, C7 Memory, C9 MCP,
+#   plus the test-only `_mock_llm`). One image, N containers.
+#
+#   The component to start is selected at RUNTIME via the env variable
+#   `COMPONENT_MODULE` (lowercase Python module name under
+#   `ay_platform_core`, e.g. `c2_auth`, `c4_orchestrator`, `_mock_llm`).
+#   It is NEVER a build-arg — that lets the same image power any number
+#   of containers in compose / Deployments in K8s, differing only by env.
+#
+#   The CMD is production-grade: no `--reload`, no `--reload-dir`. Dev
+#   workflows enable live reload by overriding `command:` in the compose
+#   file (per R-100-114 v2 + CLAUDE.md §4.5 "Tier Dockerfiles").
+#
+#   Build context is the monorepo ROOT (declared in compose via
+#   `context: ../..`), so the COPY paths reference `ay_platform_core/`
+#   directly without a relative-path dance.
+#
+#   v2 (2026-04-28): adds OCI image labels (title, description,
+#   licenses, vendor, source) so the GHCR / Docker Hub package page is
+#   self-describing rather than blank. Dynamic labels (revision,
+#   created, version) are layered on top by `metadata-action@v5` in
+#   `.github/workflows/ci-build-images.yml`.
+# =============================================================================
+
+ARG PYTHON_VERSION=3.13-slim
+# Build-time version stamp baked into the runtime image. Defaults to a
+# placeholder so a CI build without --build-arg still produces a valid
+# image ; `e2e_stack.sh dev` injects the current timestamp so every
+# manual rebuild gets a fresh stamp visible in the UX footer.
+ARG BUILD_VERSION=dev
+
+
+# ----------------------------------------------------------------------------
+# Builder stage: install build deps, create venv, install ay_platform_core
+# in editable mode from pyproject.toml. The editable install registers a
+# `.pth` entry pointing at /app/ay_platform_core/src; that path is also the
+# bind-mount target in dev compose, so source edits on the host are picked
+# up live without a rebuild (with `--reload` opt-in via compose `command:`).
+# ----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION} AS builder
+
+# Builder stage labels (informational — propagate via FROM but Docker only
+# keeps the LAST stage's labels). Repeated below on the runtime stage.
+LABEL stage="builder"
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ay_platform_core/pyproject.toml /app/ay_platform_core/pyproject.toml
+COPY ay_platform_core/src /app/ay_platform_core/src
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install -e /app/ay_platform_core
+
+
+# ----------------------------------------------------------------------------
+# Runtime stage: minimal Python image with the prepared venv + source tree.
+# No build deps, no dev tooling. Self-contained: runnable with no host
+# bind-mount (required for K8s where there is no host filesystem to bind).
+# ----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION} AS runtime
+
+# Static OCI image labels (org.opencontainers.image.*). These describe the
+# image to registries (GHCR, Docker Hub) — title / description show on the
+# package page, source / documentation deep-link back to the repo. Dynamic
+# labels (revision = git sha, created = build timestamp, version = ref
+# name) are layered by `metadata-action@v5` in `ci-build-images.yml`,
+# overriding any default we set here.
+LABEL org.opencontainers.image.title="AyWizz API" \
+      org.opencontainers.image.description="Shared FastAPI image for the AyWizz platform Python tier. Hosts every backbone component (C2 Auth, C3 Conversation, C4 Orchestrator, C5 Requirements, C6 Validation, C7 Memory, C9 MCP). The active component is selected at runtime via the COMPONENT_MODULE env variable — one image, N containers." \
+      org.opencontainers.image.vendor="AyWizz" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/AyFondation/AyWizz" \
+      org.opencontainers.image.documentation="https://github.com/AyFondation/AyWizz/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md"
+
+# Re-declare ARG in the runtime stage so the BUILD_VERSION from the top
+# of the file flows into the final image's ENV. Docker scopes ARG per
+# stage — without this line, the `${BUILD_VERSION}` inside ENV below
+# would expand to empty.
+ARG BUILD_VERSION=dev
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    BUILD_VERSION="${BUILD_VERSION}"
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app /app
+
+RUN groupadd --system app && useradd --system --gid app --no-create-home app \
+    && chown -R app:app /app
+
+USER app
+WORKDIR /app
+
+EXPOSE 8000
+
+# Production-grade CMD. `${COMPONENT_MODULE}` is read from the runtime
+# environment supplied by compose / K8s. No `--reload`: dev compose
+# overrides `command:` to enable it on top of this image.
+CMD exec uvicorn "ay_platform_core.${COMPONENT_MODULE}.main:app" \
+      --host 0.0.0.0 --port 8000

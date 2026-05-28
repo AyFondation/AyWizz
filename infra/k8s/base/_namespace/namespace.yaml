@@ -1,0 +1,18 @@
+# =============================================================================
+# File: namespace.yaml
+# Version: 1
+# Path: infra/k8s/base/_namespace/namespace.yaml
+# Description: Single namespace `aywizz` shared by every platform component.
+#              Component isolation in v1 is achieved at the database
+#              (ArangoDB collections prefixed by component id) and MinIO
+#              (per-component buckets) level — see R-100-012 v3,
+#              R-100-118 v2. NetworkPolicy can later restrict cross-pod
+#              traffic but is not in v1 scope.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aywizz
+  labels:
+    app.kubernetes.io/name: aywizz
+    app.kubernetes.io/part-of: aywizz-platform

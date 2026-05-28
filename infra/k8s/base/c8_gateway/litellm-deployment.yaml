@@ -1,0 +1,106 @@
+# =============================================================================
+# File: litellm-deployment.yaml
+# Version: 3
+# Path: infra/k8s/base/c8_gateway/litellm-deployment.yaml
+# Description: C8 LLM gateway — the off-the-shelf LiteLLM proxy (R-800-001).
+#              Image pinned by tag, consumed UNMODIFIED (§4.5) : the config
+#              and the cost forwarder are MOUNTED from ConfigMaps, never
+#              baked. Per-agent routing is client-side (R-800-030 v1) ; the
+#              proxy maps model aliases → providers and enforces the shared
+#              `C8_GATEWAY_API_KEY` (master_key) read from `aywizz-secrets`.
+#              `ANTHROPIC_API_KEY` (provider key) also comes from the Secret.
+#
+# @relation implements:R-800-001
+# @relation implements:R-800-070
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+      app.kubernetes.io/component: c8
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/component: c8
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: litellm
+          image: ghcr.io/berriai/litellm:main-stable
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config"
+            - "/app/config.yaml"
+            - "--port"
+            - "4000"
+            - "--host"
+            - "0.0.0.0"
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          env:
+            # Point the mounted cost forwarder at the AyWizz cost receiver.
+            - name: COST_RECEIVER_URL
+              value: http://c8-cost-receiver:8000
+          envFrom:
+            # Provides C8_GATEWAY_API_KEY (master_key) + ANTHROPIC_API_KEY.
+            - secretRef:
+                name: aywizz-secrets
+          volumeMounts:
+            - name: litellm-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            # LiteLLM resolves the `callbacks` entry
+            # (`cost_forwarder.cost_forwarder_instance`) as a FILE NEXT TO the
+            # config (`/app/cost_forwarder.py`), NOT via PYTHONPATH — so mount
+            # the module there directly (mirrors the compose dev override fix).
+            - name: litellm-forwarder
+              mountPath: /app/cost_forwarder.py
+              subPath: cost_forwarder.py
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1"
+              # 768Mi OOM-killed the proxy under k8s cgroup enforcement at
+              # startup (config + cost-forwarder callback load). 2Gi gives
+              # comfortable headroom ; tune down per-env in an overlay.
+              memory: "2Gi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+      volumes:
+        - name: litellm-config
+          configMap:
+            name: c8-litellm-config
+        - name: litellm-forwarder
+          configMap:
+            name: c8-litellm-forwarder

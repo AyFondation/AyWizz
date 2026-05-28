@@ -1,0 +1,53 @@
+# =============================================================================
+# File: docker-compose.c13.yml
+# Version: 1
+# Path: infra/c13_extractor/docker-compose.c13.yml
+# Description: Local-dev compose fragment for C13 (AyExtractor). Builds
+#              the image from `infra/c13_extractor/docker/Dockerfile`
+#              (context = monorepo root so the COPY paths reference
+#              `ay_extractor/`) and wires the env so MinIO + C8 are
+#              reachable on the dev network.
+#
+#              Bundled into the dev stack via `e2e_stack.sh dev` once
+#              session 5 adds the service to the wrapper.
+# =============================================================================
+
+services:
+  c13-extractor:
+    build:
+      context: ../..
+      dockerfile: infra/c13_extractor/docker/Dockerfile
+      args:
+        MONOREPO_GIT_SHA: ${MONOREPO_GIT_SHA:-dev}
+    image: ay-c13-extractor:local
+    container_name: ay-c13-extractor
+    restart: unless-stopped
+    ports:
+      # Host-side dev access for manual smoke tests; not exposed via
+      # Traefik (C13 is internal-only per R-100-125 v2).
+      - "${PORT_BASE:-56000}+1300:8000"
+    environment:
+      # --- LLM routing through C8 (dev compose service name) ---
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://litellm:4000/v1}
+      OPENAI_API_KEY: ${C8_GATEWAY_API_KEY:-}
+      # --- MinIO writer ---
+      OUTPUT_WRITER: minio
+      OUTPUT_MINIO_BUCKET: ${C13_BUCKET:-c13-extractor-artifacts}
+      OUTPUT_MINIO_ENDPOINT: ${OUTPUT_MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # --- Embedding ---
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-voyage-3}
+      # --- Logging ---
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    depends_on:
+      - minio
+      - litellm
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

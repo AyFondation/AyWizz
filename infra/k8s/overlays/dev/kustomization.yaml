@@ -1,0 +1,106 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 3
+# Path: infra/k8s/overlays/dev/kustomization.yaml
+# Description: Dev overlay. Wires the base manifests with the dev
+#              ConfigMap (.env) and Secret (.env.secret) sources.
+#              `kustomize build infra/k8s/overlays/dev` produces a
+#              ready-to-apply manifest stream.
+#
+#              v2 (2026-05-26): reference each base/<component>/ EXPLICITLY
+#              (like overlays/system-test) instead of `../../base`, and OMIT
+#              c4_workers. Reason: the `namespace: aywizz` transformer renames
+#              the separate `c4-workers` Namespace to `aywizz` → ID conflict,
+#              breaking `kubectl kustomize`. c4_workers (the K8s sub-agent
+#              dispatch namespace) is only needed when C4_DISPATCHER=k8s ; the
+#              default in-process dispatcher does not use it, so dev excludes
+#              it. The separate-namespace isolation is preserved for prod
+#              (see Q-100-023).
+#
+#              configMapGenerator + secretGenerator hash the source
+#              file contents into the ConfigMap / Secret name (e.g.
+#              `aywizz-config-7c4f...`); Deployments are auto-patched
+#              to reference the hashed name, so a change to .env
+#              triggers a fresh rollout. Set `disableNameSuffixHash:
+#              true` if you prefer stable names + manual rollouts.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+# Explicit component list (NOT `../../base`) so the `namespace: aywizz`
+# transformer never sweeps the separate `c4-workers` namespace. Mirrors the
+# overlays/system-test pattern. c4_workers + _mock_llm are intentionally absent.
+resources:
+  - ../../base/_namespace
+  - ../../base/c11_arangodb
+  - ../../base/c10_minio
+  - ../../base/ollama
+  - ../../base/c12_workflow
+  - ../../base/ay_platform_ui
+  - ../../base/c2_auth
+  - ../../base/c3_conversation
+  - ../../base/c4_orchestrator
+  - ../../base/c5_requirements
+  - ../../base/c6_validation
+  - ../../base/c7_memory
+  - ../../base/c8_gateway
+  - ../../base/c9_mcp
+  - ../../base/c1_gateway
+  - ../../base/_init
+
+configMapGenerator:
+  - name: aywizz-config
+    behavior: create
+    envs:
+      - .env
+    # Dev-parity with `e2e_stack.sh dev` : seed the demo tenant + 4 users on
+    # C2 startup AND surface their credentials on the login page. Dev-only
+    # conveniences (NOT for prod) — added as literals since overlays/dev/.env
+    # is Tier-2 (operator-owned). §4.6 semantic flags, scoped to this overlay.
+    literals:
+      - C2_DEMO_SEED_ENABLED=true
+      - C2_UX_DEV_MODE_ENABLED=true
+
+secretGenerator:
+  - name: aywizz-secrets
+    behavior: create
+    envs:
+      - .env.secret
+    type: Opaque
+
+# Stable names so the Deployments' `envFrom` references survive across
+# overlay rebuilds. Tradeoff: changes to .env / .env.secret do NOT
+# auto-trigger a rollout — you must `kubectl rollout restart` the
+# affected Deployments. Worth it for dev predictability.
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Pin the platform image to `:latest` for dev; production overlays
+# should pin to a specific sha-* tag for reproducibility.
+images:
+  - name: ghcr.io/ayfondation/aywizz-api
+    newTag: latest
+  - name: ghcr.io/ayfondation/aywizz-ui
+    newTag: latest
+
+# DEV-LOCAL access : expose ONLY the ingress (Traefik) via a LoadBalancer so
+# docker-desktop binds it on the host at `localhost:56000` (mirrors the compose
+# URL) — no `kubectl port-forward` host/container gap. Every other service
+# stays ClusterIP : access is still "only via the ingress" (Traefik routes
+# everything; nothing else is reachable from the host). The dashboard Service
+# (c1-gateway-dashboard) is untouched → stays ClusterIP. Prod overlays choose
+# their own edge (cloud LoadBalancer / IngressClass).
+patches:
+  - target:
+      version: v1
+      kind: Service
+      name: c1-gateway
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer
+      - op: replace
+        path: /spec/ports/0/port
+        value: 56000

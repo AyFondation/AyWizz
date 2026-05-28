@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from ay_platform_core.c2_auth import auth_router, AuthService; print\\('Import OK'\\)\")",
+      "Bash(python -m pytest tests/unit/c2_auth/ tests/contract/c2_auth/ -x --tb=short -q)"
+    ]
+  }
+}

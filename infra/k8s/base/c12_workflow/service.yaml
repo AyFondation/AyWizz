@@ -1,0 +1,25 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c12_workflow/service.yaml
+# Description: ClusterIP Service for C12 n8n.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c12-workflow
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c12-workflow
+    app.kubernetes.io/component: c12
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c12-workflow
+    app.kubernetes.io/component: c12
+  ports:
+    - name: http
+      port: 5678
+      targetPort: http
+      protocol: TCP

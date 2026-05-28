@@ -1,0 +1,31 @@
+# =============================================================================
+# File: configmap-runtime.yaml
+# Version: 1
+# Path: infra/k8s/base/ay_platform_ui/configmap-runtime.yaml
+# Description: Runtime config served at the UI's `/runtime-config.json`
+#              path. Mounted into the UI Pod at
+#              `/app/public/runtime-config.json` (subPath, see
+#              deployment.yaml). Change values + restart the pod to
+#              re-point the UI at a different backend WITHOUT
+#              rebuilding the image.
+#
+#              Default `apiBaseUrl=""` means the UI uses RELATIVE
+#              URLs (same-origin via Traefik). Override to e.g.
+#              `https://api.example.com` when the UI is hosted on a
+#              different origin (CDN, separate hostname, etc.).
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aywizz-ui-runtime-config
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ay-platform-ui
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: aywizz-platform
+data:
+  runtime-config.json: |
+    {
+      "apiBaseUrl": "",
+      "publicBaseUrl": ""
+    }

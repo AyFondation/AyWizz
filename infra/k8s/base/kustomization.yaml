@@ -1,0 +1,42 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/kustomization.yaml
+# Description: Root base for all platform components. Overlays
+#              (`overlays/dev/`, `overlays/prod/`) reference this base
+#              and add the ConfigMap + Secret generators that drive
+#              every Deployment's runtime config.
+#
+#              Order is informational — Kubernetes' API server applies
+#              resources in dependency-aware order; we list dependencies
+#              first for human readability.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Namespace first.
+  - _namespace
+  # Data tier.
+  - c11_arangodb
+  - c10_minio
+  - ollama
+  # Workflow engine.
+  - c12_workflow
+  # UI tier.
+  - ay_platform_ui
+  # API tier.
+  - c2_auth
+  - c3_conversation
+  - c4_orchestrator
+  - c4_workers    # Sub-agent dispatch namespace + SAs + RBAC + NetworkPolicy.
+  - c5_requirements
+  - c6_validation
+  - c7_memory
+  - c8_gateway    # LiteLLM proxy + cost receiver (R-800-001 / R-800-070).
+  - c9_mcp
+  # Ingress tier.
+  - c1_gateway
+  # Bootstrap Jobs — last, so the Services / StatefulSets are
+  # already declared by the time the Jobs are created.
+  - _init

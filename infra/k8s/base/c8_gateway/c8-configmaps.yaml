@@ -1,0 +1,320 @@
+# =============================================================================
+# File: c8-configmaps.yaml
+# Path: infra/k8s/base/c8_gateway/c8-configmaps.yaml
+# Description: GENERATED — do not edit by hand. Two ConfigMaps for the C8
+#              tier : `c8-litellm-config` (the LiteLLM proxy config) and
+#              `c8-litellm-forwarder` (the cost forwarder mounted into the
+#              off-the-shelf proxy, §4.5). Single sources :
+#                infra/c8_gateway/config/litellm-config.yaml
+#                infra/c8_gateway/callbacks/cost_forwarder.py
+#              Regenerate with:
+#                python3 infra/c8_gateway/scripts/gen_k8s_c8_configmaps.py
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c8-litellm-config
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c8-litellm-config
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+data:
+  config.yaml: |-
+    # =============================================================================
+    # File: litellm-config.yaml
+    # Version: 2
+    # Path: infra/c8_gateway/config/litellm-config.yaml
+    # Description: Canonical (prod-shaped) LiteLLM configuration. The shape
+    #              mirrors Appendix 8.1 of 800-SPEC-LLM-ABSTRACTION and validates
+    #              against ay_platform_core.c8_llm.config.LiteLLMConfig.
+    #              API keys are references to environment variables; production
+    #              deployments SHALL populate these via Kubernetes Secrets + ESO
+    #              (R-800-021). Per-agent routing for the orchestrator roles is
+    #              client-side (R-800-030 v1) ; `agent_routes` below is the prod
+    #              map. Dev uses `litellm-config.dev.yaml` (adds a local Ollama
+    #              model) + `C8_AGENT_ROUTES_INLINE` for the cost policy.
+    #
+    #              v2 (2026-05-21) : `general_settings` (proxy master key) +
+    #              `litellm_settings.callbacks` wire the cost forwarder
+    #              (R-800-070) — a mounted CustomLogger that POSTs each call to
+    #              the AyWizz cost receiver. Keys read from env (os.environ/...).
+    # =============================================================================
+
+    model_list:
+      - model_name: claude-opus-flagship
+        litellm_params:
+          model: anthropic/claude-opus-4-7
+          api_key: os.environ/ANTHROPIC_API_KEY
+        model_info:
+          display_name: "Claude Opus 4.7"
+          features:
+            - chat_completion
+            - streaming
+            - long_context
+            - prompt_caching
+            - extended_thinking
+            - tool_calling
+            - structured_outputs
+            - vision
+          context_window: 200000
+          cost_per_million_input: 15.00
+          cost_per_million_output: 75.00
+          rate_limit_rpm: 4000
+          rate_limit_tpm: 400000
+
+      - model_name: claude-sonnet-midtier
+        litellm_params:
+          model: anthropic/claude-sonnet-4-6
+          api_key: os.environ/ANTHROPIC_API_KEY
+        model_info:
+          display_name: "Claude Sonnet 4.6"
+          features:
+            - chat_completion
+            - streaming
+            - long_context
+            - prompt_caching
+            - tool_calling
+            - structured_outputs
+          context_window: 200000
+          cost_per_million_input: 3.00
+          cost_per_million_output: 15.00
+
+      - model_name: claude-haiku-fast
+        litellm_params:
+          model: anthropic/claude-haiku-4-5-20251001
+          api_key: os.environ/ANTHROPIC_API_KEY
+        model_info:
+          display_name: "Claude Haiku 4.5"
+          features:
+            - chat_completion
+            - streaming
+            - tool_calling
+          context_window: 200000
+          cost_per_million_input: 0.80
+          cost_per_million_output: 4.00
+
+    # Per-agent routing by best quality/cost ratio (R-800-030 v1, client-side).
+    # Orchestrator roles : deep reasoning → Opus (architect), balanced → Sonnet,
+    # cheap leaf work → Haiku. The C3/C7 service agents (chat RAG, the DocGen
+    # tool loop, KG extraction) are routed to Haiku — it carries reliable
+    # tool-calling at the lowest cost, sufficient for these tasks. Ollama is NOT
+    # a proxy route : it stays the separate local-dev-only path (revert the two
+    # C8_GATEWAY_URL/C8_DEFAULT_MODEL lines in .env.dev to use it offline).
+    agent_routes:
+      architect: claude-opus-flagship
+      planner: claude-sonnet-midtier
+      implementer: claude-sonnet-midtier
+      spec-reviewer: claude-sonnet-midtier
+      quality-reviewer: claude-sonnet-midtier
+      sub-agent: claude-haiku-fast
+      c3-rag: claude-haiku-fast
+      c3-docgen: claude-haiku-fast
+      c7-kg-extractor: claude-haiku-fast
+      default: claude-sonnet-midtier
+
+    budgets:
+      default_hard_cap_usd_per_month: 100.0
+      default_soft_cap_ratio: 0.8
+      window: calendar_month_utc
+
+    archival:
+      enabled: false
+      minio_bucket: llm-archive
+      encryption: none
+
+    rate_limits:
+      per_tenant_rpm: 1000
+      per_user_rpm: 100
+
+    # Proxy-native sections (consumed by the off-the-shelf LiteLLM proxy ;
+    # opaque to the AyWizz validator). Values are env references resolved by
+    # LiteLLM at startup.
+    general_settings:
+      # The single shared gateway credential clients must present
+      # (R-800-012) — the SAME `C8_GATEWAY_API_KEY` the C8 client sends as
+      # its Bearer. Injected via K8s Secret / ESO in prod, `.env.secret` in
+      # dev. The real provider key (ANTHROPIC_API_KEY) is separate and lives
+      # ONLY here in the proxy.
+      master_key: os.environ/C8_GATEWAY_API_KEY
+
+    litellm_settings:
+      # Cost forwarder (R-800-070) : a mounted CustomLogger that POSTs one
+      # envelope per completed call to the AyWizz cost receiver
+      # (`COST_RECEIVER_URL`). The proxy image is unmodified (§4.5) — the
+      # callback file is mounted + put on PYTHONPATH ; only `litellm` +
+      # `httpx` (already in the image) are imported.
+      callbacks: ["cost_forwarder.cost_forwarder_instance"]
+      drop_params: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c8-litellm-forwarder
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c8-litellm-forwarder
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+data:
+  cost_forwarder.py: |-
+    # =============================================================================
+    # File: cost_forwarder.py
+    # Version: 1
+    # Path: infra/c8_gateway/callbacks/cost_forwarder.py
+    # Description: Standalone LiteLLM CustomLogger mounted into the off-the-shelf
+    #              LiteLLM proxy (§4.5 — image unmodified, this file is mounted
+    #              + put on PYTHONPATH ; only `litellm` + `httpx`, both already
+    #              in the proxy image, are imported — NO ay_platform_core import).
+    #
+    #              On each completed (or failed) call it POSTs a compact JSON
+    #              envelope to the AyWizz cost receiver (`COST_RECEIVER_URL`),
+    #              which computes the cost + persists one `llm_calls` row in
+    #              ArangoDB (R-800-070). Best-effort : any forwarding error is
+    #              swallowed so cost tracking NEVER breaks an LLM call, and a
+    #              missing/unreachable receiver simply drops the record.
+    #
+    #              The proxy config references this instance via
+    #              `litellm_settings.callbacks: ["cost_forwarder.cost_forwarder_instance"]`.
+    #
+    # @relation implements:R-800-070
+    # =============================================================================
+
+    from __future__ import annotations
+
+    import hashlib
+    import json
+    import logging
+    import os
+    from datetime import datetime
+    from typing import Any
+
+    import httpx
+    from litellm.integrations.custom_logger import CustomLogger
+
+    _log = logging.getLogger("c8_gateway.cost_forwarder")
+
+    _RECEIVER_URL = os.environ.get("COST_RECEIVER_URL", "").rstrip("/")
+    _TIMEOUT_S = float(os.environ.get("COST_RECEIVER_TIMEOUT_S", "2.0"))
+
+    # Request fields included in the cache-sensitivity fingerprint (mirrors
+    # ay_platform_core.c8_llm.callbacks.cost_tracker._fingerprint — kept in
+    # sync deliberately ; this file cannot import the platform package).
+    _FINGERPRINT_KEYS = (
+        "model",
+        "messages",
+        "tools",
+        "temperature",
+        "max_tokens",
+        "response_format",
+    )
+
+
+    def _fingerprint(request: dict[str, Any]) -> str:
+        projection = {k: request.get(k) for k in _FINGERPRINT_KEYS if k in request}
+        serialised = json.dumps(projection, sort_keys=True, default=str).encode("utf-8")
+        return "sha256:" + hashlib.sha256(serialised).hexdigest()
+
+
+    def _headers_from_kwargs(kwargs: dict[str, Any]) -> dict[str, str]:
+        """Pull the forward-auth / attribution headers LiteLLM stashes under
+        `proxy_server_request.headers` (or `litellm_params.metadata.headers`
+        across versions)."""
+        psr = kwargs.get("proxy_server_request")
+        if isinstance(psr, dict) and isinstance(psr.get("headers"), dict):
+            return {str(k): str(v) for k, v in psr["headers"].items()}
+        meta = (kwargs.get("litellm_params") or {}).get("metadata") or {}
+        headers = meta.get("headers") if isinstance(meta, dict) else None
+        if isinstance(headers, dict):
+            return {str(k): str(v) for k, v in headers.items()}
+        return {}
+
+
+    def _usage_of(response_obj: Any) -> dict[str, int]:
+        usage = getattr(response_obj, "usage", None)
+        if usage is None and isinstance(response_obj, dict):
+            usage = response_obj.get("usage")
+        if usage is None:
+            return {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
+
+        def _get(name: str) -> int:
+            val = getattr(usage, name, None)
+            if val is None and isinstance(usage, dict):
+                val = usage.get(name)
+            try:
+                return int(val or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "prompt_tokens": _get("prompt_tokens"),
+            "completion_tokens": _get("completion_tokens"),
+            "cached_tokens": _get("cached_tokens"),
+        }
+
+
+    def _model_of(kwargs: dict[str, Any], response_obj: Any) -> str:
+        model = getattr(response_obj, "model", None)
+        if not model and isinstance(response_obj, dict):
+            model = response_obj.get("model")
+        return str(model or kwargs.get("model") or "unknown")
+
+
+    async def _post(envelope: dict[str, Any]) -> None:
+        if not _RECEIVER_URL:
+            return  # receiver not configured — drop silently
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+                await client.post(f"{_RECEIVER_URL}/internal/llm-calls", json=envelope)
+        except Exception as exc:  # noqa: BLE001 — best-effort ; never break a call
+            _log.warning("cost forward failed: %s", exc)
+
+
+    class CostForwarder(CustomLogger):
+        """Forwards one envelope per call to the AyWizz cost receiver."""
+
+        async def async_log_success_event(
+            self,
+            kwargs: dict[str, Any],
+            response_obj: Any,
+            start_time: datetime,
+            end_time: datetime,
+        ) -> None:
+            await _post(
+                {
+                    "status": "success",
+                    "model": _model_of(kwargs, response_obj),
+                    "usage": _usage_of(response_obj),
+                    "headers": _headers_from_kwargs(kwargs),
+                    "fingerprint": _fingerprint(kwargs),
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                }
+            )
+
+        async def async_log_failure_event(
+            self,
+            kwargs: dict[str, Any],
+            response_obj: Any,
+            start_time: datetime,
+            end_time: datetime,
+        ) -> None:
+            exc = kwargs.get("exception")
+            await _post(
+                {
+                    "status": "failure",
+                    "model": _model_of(kwargs, response_obj),
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0},
+                    "headers": _headers_from_kwargs(kwargs),
+                    "fingerprint": _fingerprint(kwargs),
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat(),
+                    "error_code": type(exc).__name__ if exc else "Unknown",
+                    "error_message": (str(exc)[:500] if exc else None),
+                }
+            )
+
+
+    # Referenced from litellm-config*.yaml `litellm_settings.callbacks`.
+    cost_forwarder_instance = CostForwarder()

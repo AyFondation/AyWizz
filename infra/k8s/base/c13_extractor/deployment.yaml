@@ -1,0 +1,95 @@
+# =============================================================================
+# File: deployment.yaml
+# Version: 2
+# Path: infra/k8s/base/c13_extractor/deployment.yaml
+# Description: C13 (AyExtractor) Deployment — the HTTP wrapper for the
+#              extract + chunk pipeline (D-020 R-100-125 v2).
+#
+#              Image: ghcr.io/ayfondation/aywizz-c13-extractor:latest (built
+#              from infra/c13_extractor/docker/Dockerfile).
+#              Single-replica + stateful in-memory _runs registry — scale
+#              by adding Deployments behind a load balancer, NOT by
+#              raising `replicas` (every replica owns its own registry).
+#              MinIO endpoint + creds come from `aywizz-secrets`.
+#              OpenAI base URL routes to C8 LiteLLM in-cluster.
+#
+# @relation implements:R-100-125
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c13-extractor
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c13-extractor
+    app.kubernetes.io/component: c13
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: c13-extractor
+      app.kubernetes.io/component: c13
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: c13-extractor
+        app.kubernetes.io/component: c13
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: c13-extractor
+          image: ghcr.io/ayfondation/aywizz-c13-extractor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            # --- LLM routing (D-020 v2 §4 — C8 LiteLLM in-cluster) ---
+            - name: OPENAI_BASE_URL
+              value: http://litellm:4000/v1
+            # --- MinIO writer ---
+            - name: OUTPUT_WRITER
+              value: minio
+            - name: OUTPUT_MINIO_BUCKET
+              value: c13-extractor-artifacts
+            - name: OUTPUT_MINIO_ENDPOINT
+              value: http://minio:9000
+            - name: MINIO_REGION
+              value: us-east-1
+            # --- Embeddings model (resolved by C8 agent_routes) ---
+            - name: EMBEDDING_MODEL
+              value: voyage-3
+          envFrom:
+            # Provides:
+            #   OPENAI_API_KEY (= $C8_GATEWAY_API_KEY)
+            #   MINIO_ACCESS_KEY / MINIO_SECRET_KEY (R-100-118 runtime user)
+            - secretRef:
+                name: aywizz-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              # R-100-125 v2 §9 baseline. Image vision (Phase 1e) and
+              # densification (Phase 2d) are the heaviest passes — tune
+              # per-env in an overlay once production telemetry lands.
+              cpu: "4"
+              memory: "8Gi"

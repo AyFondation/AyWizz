@@ -1,0 +1,92 @@
+# =============================================================================
+# File: Dockerfile.ui
+# Version: 3
+# Path: infra/docker/Dockerfile.ui
+# Description: Production image for the Next.js UI (`ay_platform_ui/`).
+#              Multi-stage build leveraging Next.js 16's `output:
+#              "standalone"` mode — the runtime stage carries only the
+#              minimal server bundle + static assets, no source tree
+#              and no devDependencies.
+#
+#              Build context is the monorepo ROOT (per CLAUDE.md §4.5),
+#              same convention as `Dockerfile.api`. The two images are
+#              built side by side from the same context by the
+#              `ci-build-images.yml` workflow.
+#
+#              Runtime config (`/app/public/runtime-config.json`) is
+#              shipped with a placeholder ; K8s mounts a ConfigMap
+#              over that path so the API URL can be changed PER
+#              ENVIRONMENT WITHOUT REBUILDING this image.
+# =============================================================================
+
+ARG NODE_VERSION=25-alpine
+# Build-time version stamp. Next.js bakes any `NEXT_PUBLIC_*` env var
+# present at `next build` time into the client bundle, so we expose
+# `NEXT_PUBLIC_BUILD_VERSION` and read it from `process.env` in the
+# footer component. Defaults to `dev` for ad-hoc local builds ;
+# `e2e_stack.sh dev` injects a timestamp via --build-arg so every
+# rebuild produces a fresh stamp.
+ARG BUILD_VERSION=dev
+
+# ----------------------------------------------------------------------------
+# Builder stage : install ALL deps (incl. dev) + run `next build`.
+# ----------------------------------------------------------------------------
+FROM node:${NODE_VERSION} AS builder
+
+LABEL stage="builder"
+
+WORKDIR /app
+
+# Re-declare for this stage + propagate to Next.js as a NEXT_PUBLIC_
+# env var so it ends up baked into the client bundle (server reads
+# server-only env at runtime ; NEXT_PUBLIC_ is baked at compile).
+ARG BUILD_VERSION=dev
+ENV NEXT_PUBLIC_BUILD_VERSION="${BUILD_VERSION}"
+
+# 1. Install dependencies first so the layer is cached when only source
+#    changes. `npm ci` requires a lockfile ; we copy both package.json
+#    and package-lock.json (when present — first build may not have it).
+COPY ay_platform_ui/package.json ay_platform_ui/package-lock.json* ./
+# `--include=dev` keeps tailwindcss / typescript / biome available for
+# `next build`. `--no-audit --no-fund` cuts CI noise.
+RUN npm ci --include=dev --no-audit --no-fund
+
+# 2. Copy source + build.
+COPY ay_platform_ui/ ./
+RUN npm run build
+
+
+# ----------------------------------------------------------------------------
+# Runtime stage : minimal Node image carrying only standalone bundle +
+# static assets. ~100 MB vs ~500 MB for a full node_modules build.
+# ----------------------------------------------------------------------------
+FROM node:${NODE_VERSION} AS runtime
+
+# Static OCI image labels for the GHCR / Docker Hub package page.
+LABEL org.opencontainers.image.title="AyWizz UI" \
+      org.opencontainers.image.description="Next.js 16 frontend for the AyWizz platform. Boots from a runtime-config.json (mountable as a K8s ConfigMap) so the API URL, brand and feature flags change WITHOUT rebuilding the image — single image, N environments." \
+      org.opencontainers.image.vendor="AyWizz" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/AyFondation/AyWizz" \
+      org.opencontainers.image.documentation="https://github.com/AyFondation/AyWizz/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md"
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    # Bind on all interfaces so the K8s Service can route traffic in.
+    HOSTNAME=0.0.0.0
+
+WORKDIR /app
+
+# Standalone output is self-contained except for the public/ + static
+# directories which Next.js doesn't copy in for legacy reasons.
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# `node` user (uid=1000) ships in node:alpine ; use it instead of root.
+USER node
+
+EXPOSE 3000
+
+# `server.js` is the entry point produced by `output: "standalone"`.
+CMD ["node", "server.js"]

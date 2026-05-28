@@ -1,0 +1,911 @@
+# =============================================================================
+# File: docker-compose.yml
+# Version: 8
+# Path: ay_platform_core/tests/docker-compose.yml
+# Description: End-to-end local stack for system tests. Brings up:
+#              v8 (V2 #2): adds the opt-in `c4_openhands` service (profile
+#              `openhands`) — C4 built from Dockerfile.c15-runner with
+#              C4_GENERATE_ENGINE=openhands, so the OpenHands generate engine
+#              is runnable via compose before any k8s.
+#                - ArangoDB (C11) and MinIO (C10)
+#                - Ollama (real embeddings) + mock LLM (stand-in for C8)
+#                - The Python API tier — ONE shared image
+#                  (`ay-api:local`, built from
+#                  infra/docker/Dockerfile.api per R-100-114 v2 +
+#                  R-100-117) — running C2..C9 and the mock LLM as
+#                  N peer containers differing only by their
+#                  `COMPONENT_MODULE` runtime env var.
+#                - n8n (C12) for ingestion workflows.
+#                - C1 Traefik — the ONLY publicly exposed HTTP port
+#                  (`${PORT_C1_PUBLIC}`, default 56000 per R-100-122).
+#
+# Build context discipline:
+#   This file lives under ay_platform_core/tests/ but requires the MONOREPO
+#   ROOT as build context (see `context: ../..` in the x-api-build anchor)
+#   because Dockerfile.api copies `ay_platform_core/` from there. The
+#   Traefik config bind-mounts are also relative to this file's directory:
+#   `../../infra/...`.
+#
+# Topology (R-100-117 §10.4):
+#   - Ingress tier:    c1 Traefik (only public port).
+#   - API sub-tier:    c2..c9 + mock_llm — all from `ay-api:local`.
+#   - Backend tier:    arangodb, minio, ollama, c12 (n8n).
+#   The compose layout is intentionally flat for dev simplicity, but the
+#   logical graph above maps 1:1 onto the production K8s topology.
+#
+# Usage (from anywhere — `-f` takes an absolute or relative path):
+#   docker compose -f ay_platform_core/tests/docker-compose.yml up -d
+# Or via the helper:
+#   ./ay_platform_core/scripts/e2e_stack.sh full
+#
+# Profiles:
+#   default       core platform + mock LLM (for CI, free, no API keys)
+#   real-llm      swap mock_llm for a real LiteLLM proxy (needs API keys)
+#
+# Versions:
+#   v7 (2026-04-25): host-published ports moved to the R-100-122 scheme
+#       (PORT_BASE=56000). C1 public 80→56000, C1 dashboard 8080→56080,
+#       mock_llm 8001→59800, _observability 8002→59900. Avoids collisions
+#       with the universally-used 80/8080 and the loose 800x dev ports.
+#       Internal cluster ports unchanged (Python services on 8000,
+#       arangodb on 8529, minio on 9000, etc.) — Docker namespace
+#       isolation makes per-component listen-port standardisation
+#       unnecessary.
+#   v6 (2026-04-25): explicit CPU/RAM limits + reservations on every
+#       long-running service (R-100-106 v2 + R-100-119). Aggregate
+#       budget ≤ 7 vCPU / 9 GB peak across all services, ≤ 4 vCPU /
+#       8 GB for the C1-C9 internal tier alone — keeps the local
+#       stack runnable on a typical Docker Desktop allocation. Init
+#       containers are exempt (ephemeral).
+#       Env-file plumbing extended with the bootstrap-admin credentials
+#       (R-100-118 v2): `arangodb` and `minio` services receive their
+#       root credentials from the single env file via Compose `${VAR}`
+#       substitution (e2e_stack.sh v3 passes --env-file). Healthcheck
+#       on `arangodb` now reads `$$ARANGO_ROOT_PASSWORD` from the
+#       container env instead of hard-coding it.
+#   v5 (2026-04-25): env-var single-source refactor (R-100-110 v2,
+#       R-100-111 v2). All Python services now read shared facts
+#       (Arango URL/DB/creds, MinIO endpoint/creds, Ollama URL,
+#       PLATFORM_ENVIRONMENT) from UNPREFIXED env vars; `.env.test`
+#       declares each shared fact exactly once. Per-component values
+#       (caps, timeouts, bucket names) keep the `C{N}_` prefix.
+#       `arangodb_init` simplified: now creates ONE shared database
+#       `platform` plus a dedicated app user `ay_app` (no more root
+#       creds at runtime — R-100-012 v3). Added `minio_init`: creates
+#       the dedicated `ay_app` MinIO user with a readwrite policy
+#       across the four buckets.
+#   v4 (2026-04-25): added `arangodb_init` one-shot to create the per-
+#       component databases (c2..c7) before the Python services start.
+#       Removed `N8N_HOST=c12` from c12.
+#   v3 (2026-04-25): renamed shared image from per-component (`ay-c2-auth`
+#       …) to single `ay-api:local`; component selected at runtime via
+#       `COMPONENT_MODULE`. Health-check fixes: arangodb uses arangosh
+#       (curl absent from the official image); ollama uses `ollama list`
+#       (curl absent); c12 (n8n) start_period bumped to 90 s to cover
+#       initial SQLite migration. Adds `x-api-service` anchor so every
+#       Python service is one merge-key + one runtime env var.
+#   v2: added n8n (C12), ollama embeddings, real-llm profile.
+#
+# @relation implements:R-100-039 R-100-100 R-100-015 R-100-114 R-100-115 R-100-117 R-100-118 R-100-119 R-100-120 R-100-121 R-100-122
+# =============================================================================
+
+name: ay-platform
+
+# ---------------------------------------------------------------------------
+# Anchors — shared snippets reused across services.
+# ---------------------------------------------------------------------------
+
+# Build template for the shared API image. `context: ../..` is the monorepo
+# ROOT relative to this compose file. Every Python service references this
+# anchor in its `build:` block; compose deduplicates the build (one image,
+# one cache) when multiple services declare the same build context + image.
+x-api-build: &api-build
+  context: ../..
+  dockerfile: infra/docker/Dockerfile.api
+  args:
+    # Forwards the BUILD_VERSION env into the Dockerfile ARG so every
+    # rebuild stamps the image with a unique value visible in the UX
+    # footer. Falls back to "dev" when the shell didn't export the var.
+    BUILD_VERSION: ${BUILD_VERSION:-dev}
+
+# Python-runtime env shared by all Python services. Application-level
+# settings (anything Pydantic-settings reads) live in `.env.test` and are
+# injected via each service's `env_file:` — keeping `x-common-env` free of
+# app config means compose can't accidentally override a Pydantic default.
+x-common-env: &common-env
+  PYTHONUNBUFFERED: "1"
+
+# Bind-mount of the host's `ay_platform_core/src` over the image's editable
+# install path. Read-only: tests must not corrupt the host tree. Combined
+# with the `--reload` command override below, this gives live-edit dev UX
+# without a rebuild. K8s production deployments do NOT use this mount —
+# the image is self-contained.
+x-python-src-mount: &python-src-mount
+  type: bind
+  source: ../../ay_platform_core/src
+  target: /app/ay_platform_core/src
+  read_only: true
+
+# Shared template for every Python API container (c2..c9, mock_llm). One
+# image, N consumers; differentiation is via `COMPONENT_MODULE` per service.
+# The `command:` override enables `--reload` on top of the image's prod-
+# grade CMD; `$$COMPONENT_MODULE` (escaped `$`) is expanded inside the
+# container shell at runtime, NOT by compose at parse time.
+#
+# `deploy.resources` budget per Python service: 0.4 CPU / 512 MB. Eight
+# such services (c2..c9 + mock_llm) consume ≤ 3.6 CPU / 4 GB peak — well
+# inside the R-100-106 ≤ 4 CPU / 8 GB envelope for the internal tier.
+# Reservations are conservative so containers can co-exist on a single
+# laptop without resource contention at idle.
+x-api-service: &api-service
+  build: *api-build
+  image: ay-api:local
+  volumes:
+    - *python-src-mount
+  command:
+    - "sh"
+    - "-c"
+    - "exec uvicorn ay_platform_core.$${COMPONENT_MODULE}.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/ay_platform_core/src"
+  healthcheck:
+    test:
+      - "CMD-SHELL"
+      - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)\" || exit 1"
+    interval: 5s
+    timeout: 3s
+    retries: 20
+    start_period: 5s
+  deploy:
+    resources:
+      limits:
+        cpus: "0.4"
+        memory: 512M
+      reservations:
+        cpus: "0.1"
+        memory: 128M
+  networks:
+    - platform
+
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Backend tier — storage, embeddings, mock LLM
+  # ---------------------------------------------------------------------------
+
+  arangodb:
+    image: arangodb/arangodb:3.12
+    container_name: ay-arangodb
+    # Root password sourced from .env.test via Compose ${VAR} substitution
+    # (e2e_stack.sh up passes --env-file). Single source of truth for every
+    # admin and app credential — R-100-110 v2, R-100-118 v2.
+    environment:
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    volumes:
+      - arangodb_data:/var/lib/arangodb3
+    networks:
+      - platform
+    # Budget per R-100-106 v2 / R-100-119: ArangoDB is the heaviest single
+    # service (RocksDB + ArangoSearch). Limits set generously to avoid
+    # OOM under realistic test load; production K8s manifests will pin
+    # reservations from observed usage.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    # `curl` is not in the arangodb image; `arangosh` is. The check below
+    # validates that the API actually answers, not just that the port is
+    # bound. `$$ARANGO_ROOT_PASSWORD` resolves at runtime inside the
+    # container — Compose's `$$` escape leaves a literal `$` which the
+    # CMD-SHELL then expands.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "arangosh --server.endpoint tcp://localhost:8529 --server.username root --server.password \"$$ARANGO_ROOT_PASSWORD\" --javascript.execute-string 'db._version()' >/dev/null 2>&1 || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # One-shot init: create the shared ArangoDB database `platform` and a
+  # dedicated app user with full access on it. Components no longer
+  # connect as `root`; the runtime credential is `ay_app` (R-100-012 v3,
+  # R-100-118). Idempotent: re-runs skip already-present DB / user.
+  # Reads the shared `ARANGO_DB`, `ARANGO_USERNAME`, `ARANGO_PASSWORD`
+  # from .env.test so the secret stays in one place.
+  arangodb_init:
+    image: arangodb/arangodb:3.12
+    container_name: ay-arangodb-init
+    depends_on:
+      arangodb:
+        condition: service_healthy
+    # Reads ARANGO_ROOT_USERNAME / ARANGO_ROOT_PASSWORD (admin) +
+    # ARANGO_DB / ARANGO_USERNAME / ARANGO_PASSWORD (app) from .env.test
+    # via env_file. Single env file is the source of truth for both
+    # credential classes (R-100-118 v2).
+    env_file:
+      - .env.test
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        echo "Ensuring database $$ARANGO_DB"
+        arangosh \
+          --server.endpoint tcp://arangodb:8529 \
+          --server.username "$$ARANGO_ROOT_USERNAME" \
+          --server.password "$$ARANGO_ROOT_PASSWORD" \
+          --javascript.execute-string "if (!db._databases().includes('$$ARANGO_DB')) { db._createDatabase('$$ARANGO_DB'); print('created $$ARANGO_DB'); } else { print('exists $$ARANGO_DB'); }"
+        echo "Ensuring app user $$ARANGO_USERNAME with rw on $$ARANGO_DB"
+        arangosh \
+          --server.endpoint tcp://arangodb:8529 \
+          --server.username "$$ARANGO_ROOT_USERNAME" \
+          --server.password "$$ARANGO_ROOT_PASSWORD" \
+          --javascript.execute-string "var users = require('@arangodb/users'); if (!users.exists('$$ARANGO_USERNAME')) { users.save('$$ARANGO_USERNAME', '$$ARANGO_PASSWORD'); print('created user $$ARANGO_USERNAME'); } else { users.update('$$ARANGO_USERNAME', '$$ARANGO_PASSWORD'); print('updated password for $$ARANGO_USERNAME'); } users.grantDatabase('$$ARANGO_USERNAME', '$$ARANGO_DB', 'rw'); users.grantCollection('$$ARANGO_USERNAME', '$$ARANGO_DB', '*', 'rw'); print('granted rw on $$ARANGO_DB.* to $$ARANGO_USERNAME');"
+        echo "Arango bootstrap done."
+    networks:
+      - platform
+    restart: "no"
+
+  # One-shot init: create the dedicated MinIO app user `ay_app` and a
+  # readwrite policy scoped to the platform's four buckets. The `mc` CLI
+  # is shipped in the official MinIO image. Idempotent: `mc admin user add`
+  # is replaced by an `info`-then-`add` guard, same for the policy.
+  minio_init:
+    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    container_name: ay-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    # Reads MINIO_ROOT_USER / MINIO_ROOT_PASSWORD (admin) +
+    # MINIO_ACCESS_KEY / MINIO_SECRET_KEY (app) from .env.test.
+    env_file:
+      - .env.test
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        echo "Ensuring buckets"
+        for b in orchestrator requirements validation memory; do
+          mc mb --ignore-existing "local/$$b"
+        done
+        echo "Ensuring policy ay-app-readwrite"
+        cat > /tmp/policy.json <<'POLICY'
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            { "Effect": "Allow",
+              "Action": ["s3:*"],
+              "Resource": [
+                "arn:aws:s3:::orchestrator", "arn:aws:s3:::orchestrator/*",
+                "arn:aws:s3:::requirements", "arn:aws:s3:::requirements/*",
+                "arn:aws:s3:::validation",   "arn:aws:s3:::validation/*",
+                "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*"
+              ]
+            }
+          ]
+        }
+        POLICY
+        mc admin policy create local ay-app-readwrite /tmp/policy.json || true
+        echo "Ensuring app user $$MINIO_ACCESS_KEY"
+        mc admin user add local "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" || \
+          mc admin user svcacct edit local "$$MINIO_ACCESS_KEY" --secret-key "$$MINIO_SECRET_KEY" || true
+        mc admin policy attach local ay-app-readwrite --user "$$MINIO_ACCESS_KEY" || true
+        echo "MinIO bootstrap done."
+    networks:
+      - platform
+    restart: "no"
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: ay-minio
+    command: server /data --console-address ":9001"
+    # Root credentials sourced from .env.test via Compose ${VAR}
+    # substitution (R-100-110 v2, R-100-118 v2).
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - platform
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Gitea — bundled Git backend used by the platform-versioning surface
+  # (R-200-140). One service-account user + one private repo per project
+  # are provisioned by C2 on `POST /api/v1/projects`. Never exposed
+  # directly to operators (R-200-145) — every interaction transits
+  # through C2 endpoints proxying the Gitea API.
+  # ---------------------------------------------------------------------------
+
+  gitea:
+    image: gitea/gitea:1.22.6
+    container_name: ay-gitea
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      # Install mode `none` skips Gitea's own first-run install wizard ;
+      # we provision via API from `gitea_init`. Database stays SQLite
+      # for v1 — moved to Arango/Postgres only if scale demands it.
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__ROOT_URL: http://gitea:3000/
+      GITEA__server__DISABLE_SSH: "true"
+      # Public sign-up stays ENABLED so the init container can create
+      # the first admin via `POST /user/sign_up` (Gitea doesn't provide
+      # an alternative bootstrap path without docker-exec'ing into
+      # the container). Gitea is never exposed outside the platform
+      # network so this isn't an externally-reachable vector.
+      # Production overlays SHALL flip both flags to `true` once the
+      # admin token is provisioned via vault (Q-100-020).
+      GITEA__service__DISABLE_REGISTRATION: "false"
+      GITEA__security__INSTALL_LOCK: "true"
+      # Required when INSTALL_LOCK=true so Gitea uses a known admin.
+      GITEA__security__SECRET_KEY: gitea-dev-secret-change-me-in-prod
+    volumes:
+      - gitea_data:/data
+    networks:
+      - platform
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  gitea_init:
+    image: alpine:3.20
+    container_name: ay-gitea-init
+    depends_on:
+      gitea:
+        condition: service_healthy
+    env_file:
+      - .env.test
+    # Bootstrap the root admin user. After this, C2 reaches Gitea via
+    # HTTP Basic auth using GITEA_ROOT_USERNAME + GITEA_ROOT_PASSWORD
+    # (R-200-141). Production overlays SHALL switch to per-deployment
+    # tokens stored in a vault — Q-100-020 tracks that.
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        apk add --no-cache curl >/dev/null
+        ROOT_USER="$$GITEA_ROOT_USERNAME"
+        ROOT_PASS="$$GITEA_ROOT_PASSWORD"
+        echo "Ensuring root user $$ROOT_USER exists"
+        if curl -sf -u "$$ROOT_USER:$$ROOT_PASS" http://gitea:3000/api/v1/version > /dev/null; then
+          echo "Root user already present"
+        else
+          # First sign-up is allowed even with DISABLE_REGISTRATION=true
+          # because Gitea has a "create first admin" carve-out when no
+          # user exists yet. After this, the user is implicitly admin.
+          curl -fsS -X POST http://gitea:3000/user/sign_up \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "user_name=$$ROOT_USER" \
+            --data-urlencode "email=$$ROOT_USER@local" \
+            --data-urlencode "password=$$ROOT_PASS" \
+            --data-urlencode "retype=$$ROOT_PASS" \
+            > /dev/null || true
+          # Re-check : the first signed-up user is implicitly admin.
+          curl -sf -u "$$ROOT_USER:$$ROOT_PASS" http://gitea:3000/api/v1/version > /dev/null
+          echo "Root user created"
+        fi
+        echo "Gitea bootstrap done."
+    networks:
+      - platform
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Ollama — real embedding provider used by C7. Chat completions stay on
+  # the mock LLM below; only embeddings go through Ollama so C7's vectors
+  # are semantically meaningful end-to-end without spending on hosted APIs.
+  # Models are cached on the ollama_data volume across compose up/down.
+  # ---------------------------------------------------------------------------
+
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ay-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - platform
+    # `curl` is not in the ollama image; the `ollama` CLI itself requires
+    # the server to answer, so `ollama list` is a functional readiness
+    # check.
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+    # Ollama runs CPU inference on the embedding model (`all-minilm`,
+    # ~100 MB resident) with batches that comfortably fit under 2 GB.
+    # The 2.0 CPU limit covers a 4-batch parallel embedding burst.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 1024M
+
+  # One-shot: pull the embedding model once Ollama is healthy. Idempotent;
+  # subsequent `compose up` cycles skip the download thanks to ollama_data.
+  ollama_model_seed:
+    image: ollama/ollama:0.5.4
+    container_name: ay-ollama-seed
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        echo "Pulling embedding model all-minilm"
+        ollama pull all-minilm
+        echo "Seed done."
+    networks:
+      - platform
+    restart: "no"
+
+  # Mock LLM — stand-in for C8 in tests without real keys. Lives in
+  # `ay_platform_core/_mock_llm/`; same image as the rest of the API
+  # tier, distinguished only by COMPONENT_MODULE=_mock_llm.
+  #
+  # PROFILES — only runs under the `test` profile (pytest e2e via
+  # compose). The dev stack (`e2e_stack.sh dev`) SHALL NOT start
+  # this service ; the dev overlay routes every C8 call to real
+  # Ollama via .env.dev. Keeping mock_llm in the dev stack would
+  # mask routing bugs (the symptom we hit in 2026-05-13 when c4
+  # silently fell back to mock_llm and BLOCKED at brainstorm).
+  mock_llm:
+    <<: *api-service
+    container_name: ay-mock-llm
+    profiles: ["test"]
+    # Mock LLM reads no Pydantic settings — env_file omitted intentionally.
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: _mock_llm
+    # Host port `${PORT_MOCK_LLM}` (default 59800 per R-100-122) maps
+    # to the mock-LLM admin endpoints so system tests running on the
+    # host can script per-test LLM responses via POST /admin/enqueue
+    # and reset state via POST /admin/reset. TEST infrastructure —
+    # not part of the platform public surface.
+    ports:
+      - "${PORT_MOCK_LLM}:8000"
+
+  # NATS server with JetStream — backbone for the C4 orchestrator's
+  # hybrid-exposure event channel (R-200-070 / R-200-071) and the C3
+  # SSE relay (planned). Opt-in via profile `nats` so existing pytest
+  # e2e (which uses NullPublisher) stays lightweight. Operators enable
+  # NATS in dev/system by adding `--profile nats` to compose AND
+  # setting `C4_NATS_URL=nats://nats:4222` in .env.dev.
+  nats:
+    image: nats:2.10-alpine
+    container_name: ay-nats
+    profiles: ["nats"]
+    networks:
+      - platform
+    expose:
+      - "4222"
+    command:
+      - "-js"  # enable JetStream
+      - "-m"   # monitoring endpoint
+      - "8222"
+      - "--name"
+      - "ay-nats"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "wget -q -O - http://127.0.0.1:8222/healthz | grep -q ok"
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  # Test-tier log aggregator (R-100-120). Subscribes to live Docker log
+  # streams from every `ay-*` container, buffers per service in a ring
+  # buffer, and exposes /logs /errors /digest /clear endpoints on host
+  # port `${PORT_OBSERVABILITY}` (default 59900 per R-100-122) for the
+  # test harness. NOT routed via Traefik (test infra,
+  # not public surface). Mounts the Docker socket READ-ONLY: the module
+  # only calls `containers.list()` and `container.logs()`. Production
+  # K8s manifests SHALL NOT deploy this service (R-100-121).
+  _obs:
+    <<: *api-service
+    container_name: ay-obs
+    # The image's default user is `app` (UID/GID set by the Dockerfile),
+    # which has no access to the host's Docker socket. Override to root
+    # for THIS service only — accepted because (i) test-tier per
+    # R-100-121 (never deployed in staging/production), (ii) the socket
+    # is mounted :ro so even with root the daemon refuses write
+    # operations, (iii) the module's code is restricted to
+    # `containers.list()` and `container.logs(stream=True)` (no exec,
+    # no kill, no run).
+    user: "0:0"
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: _observability
+    # Override the anchor's volumes to add the Docker socket bind. The
+    # python-src-mount alias is repeated here so the bind-mount stays in
+    # place after the merge.
+    volumes:
+      - *python-src-mount
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${PORT_OBSERVABILITY}:8000"
+
+  # ---------------------------------------------------------------------------
+  # API sub-tier — every Python backbone component. ONE image, N containers.
+  # Each service declares only what is unique to it: container_name,
+  # COMPONENT_MODULE, env_file, depends_on. Everything else (build, image,
+  # volumes, command, healthcheck, networks) comes from the *api-service
+  # anchor.
+  # ---------------------------------------------------------------------------
+
+  c2:
+    <<: *api-service
+    container_name: ay-c2-auth
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c2_auth
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      # C2 provisions per-project Gitea repos on `POST /api/v1/projects`
+      # (R-200-141) ; wait for the root admin to be bootstrapped before
+      # accepting traffic so the very first project creation succeeds.
+      gitea_init:
+        condition: service_completed_successfully
+
+  c3:
+    <<: *api-service
+    container_name: ay-c3-conversation
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c3_conversation
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+
+  c4:
+    <<: *api-service
+    container_name: ay-c4-orchestrator
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c4_orchestrator
+    # NOTE: c4 does NOT depend on `mock_llm` here — mock_llm is in the
+    # `test` profile and not started in the dev stack. The C8 client
+    # gracefully retries on first call, so the LLM-target service
+    # (ollama in dev, mock_llm in test) being startup-coordinated is
+    # not required for correctness. Add ollama / mock_llm to depends_on
+    # in the relevant profile-specific override file when stricter
+    # ordering is wanted.
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+
+  # V2 #2 — OpenHands `generate` engine, runnable via compose (opt-in).
+  # Builds the C15-runner image (ay-api + the `openhands` extra + tmux/git)
+  # and runs C4 with C4_GENERATE_ENGINE=openhands. Started ONLY with the
+  # `openhands` profile, e.g.
+  #   docker compose --profile openhands up c4_openhands
+  # so the heavy OpenHands deps never weigh on the default dev stack. k8s
+  # deployment follows once this compose path works (operator's sequencing).
+  # Needs C8_GATEWAY_API_KEY + a reachable C8 proxy (ANTHROPIC_API_KEY lives
+  # in the proxy) ; the real Q13 POC run is operator-driven.
+  c4_openhands:
+    <<: *api-service
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.c15-runner
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+    image: ay-c15-runner:local
+    container_name: ay-c4-orchestrator-openhands
+    profiles: ["openhands"]
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c4_orchestrator
+      C4_GENERATE_ENGINE: openhands
+    # OpenHands (libtmux/browser-use + an agent loop) is heavier than a plain
+    # API container — raise the budget above the shared 0.4 CPU / 512 MB.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+
+  c5:
+    <<: *api-service
+    container_name: ay-c5-requirements
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c5_requirements
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+
+  c6:
+    <<: *api-service
+    container_name: ay-c6-validation
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c6_validation
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+
+  c7:
+    <<: *api-service
+    container_name: ay-c7-memory
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c7_memory
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+      ollama_model_seed:
+        condition: service_completed_successfully
+
+  c9:
+    <<: *api-service
+    container_name: ay-c9-mcp
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c9_mcp
+    depends_on:
+      c5:
+        condition: service_started
+      c6:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # C12 — Workflow Engine (n8n) for external source ingestion.
+  #   Traefik routes /uploads/* → this service. n8n is configured to expose
+  #   its webhook endpoints under that prefix via N8N_ENDPOINT_WEBHOOK so
+  #   the public contract is /uploads/<workflow-path>.
+  #   The n8n UI (port 5678 root /) is NOT published to the host — use
+  #   `docker compose exec c12 n8n …` to manage workflows in dev.
+  #   See R-100-080..088 for the ingestion contract (C12 ↔ C7).
+  # ---------------------------------------------------------------------------
+
+  c12:
+    image: n8nio/n8n:1.74.0
+    container_name: ay-c12-workflow
+    environment:
+      <<: *common-env
+      # Public URL n8n stamps onto its registered webhooks. Must match
+      # the host port Traefik publishes (`${PORT_C1_PUBLIC}`).
+      WEBHOOK_URL: "http://localhost:${PORT_C1_PUBLIC}/"
+      N8N_ENDPOINT_WEBHOOK: "uploads"
+      N8N_ENDPOINT_WEBHOOK_TEST: "uploads-test"
+      N8N_SECURE_COOKIE: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      # `N8N_HOST` is intentionally NOT set: setting it forces n8n to bind
+      # on that interface only, breaking the in-container healthcheck on
+      # `localhost:5678`. The public URL is driven by `WEBHOOK_URL` above.
+      N8N_PORT: "5678"
+      DB_TYPE: "sqlite"
+      DB_SQLITE_DATABASE: "/home/node/.n8n/database.sqlite"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+    volumes:
+      - c12_data:/home/node/.n8n
+      - ../../infra/c12_workflow/workflows:/workflows:ro
+    networks:
+      - platform
+    # n8n's first boot runs the SQLite migrations, which take 60–90 s on a
+    # fresh volume. The HTTP server only binds port 5678 once migrations
+    # complete. start_period covers that, retries × interval gives a
+    # generous post-start window.
+    # n8n binds on 0.0.0.0 by default but `localhost` inside the alpine
+    # image can resolve IPv6-first, so we hit 127.0.0.1 explicitly to
+    # avoid an IPv4/IPv6 mismatch.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1024M
+        reservations:
+          cpus: "0.1"
+          memory: 256M
+
+  # One-shot helper: imports every workflow JSON under /workflows into the
+  # running n8n, then exits. Idempotent — re-importing an existing workflow
+  # updates it in place. Runs AFTER c12 reports healthy so the import RPC
+  # is accepted.
+  c12_workflow_seed:
+    image: n8nio/n8n:1.74.0
+    container_name: ay-c12-workflow-seed
+    depends_on:
+      c12:
+        condition: service_healthy
+    environment:
+      N8N_PORT: "5678"
+      DB_TYPE: "sqlite"
+      DB_SQLITE_DATABASE: "/home/node/.n8n/database.sqlite"
+    volumes:
+      - c12_data:/home/node/.n8n
+      - ../../infra/c12_workflow/workflows:/workflows:ro
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        echo "Seeding n8n workflows from /workflows"
+        # `--separate --input=<dir>` tells n8n to treat each *.json file in
+        # the directory as one workflow object (the previous `--input=<file>`
+        # form expects an ARRAY in n8n 1.x and rejects single-object files
+        # with `workflows.map is not a function`).
+        n8n import:workflow --separate --input=/workflows
+        echo "Activating imported workflows"
+        n8n update:workflow --all --active=true || true
+        echo "Seeding done."
+    networks:
+      - platform
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Ingress tier — C1 Traefik. The ONLY publicly exposed port (R-100-115).
+  # ---------------------------------------------------------------------------
+
+  c1:
+    image: traefik:v3.3
+    container_name: ay-c1-gateway
+    restart: unless-stopped
+    ports:
+      - "${PORT_C1_PUBLIC}:80"        # public platform entry point (R-100-122)
+      - "${PORT_C1_DASHBOARD}:8080"   # Traefik dashboard (local dev only)
+    volumes:
+      - ../../infra/c1_gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ../../infra/c1_gateway/dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      c2:
+        condition: service_started
+      c3:
+        condition: service_started
+      c4:
+        condition: service_started
+      c5:
+        condition: service_started
+      c6:
+        condition: service_started
+      c7:
+        condition: service_started
+      c9:
+        condition: service_started
+      c12:
+        condition: service_started
+    networks:
+      - platform
+    # Edge proxy is on every request path — R-100-100 caps its added p95
+    # latency at 20 ms. The 0.3 CPU / 256 MB envelope is generous for a
+    # local Traefik with no TLS termination.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+
+networks:
+  platform:
+    driver: bridge
+
+volumes:
+  arangodb_data:
+  minio_data:
+  c12_data:
+  ollama_data:
+  gitea_data:

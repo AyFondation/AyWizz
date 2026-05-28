@@ -1,0 +1,66 @@
+# =============================================================================
+# File: services.yml
+# Version: 3
+# Path: infra/c1_gateway/dynamic/services.yml
+# Description: Traefik backend service definitions (local dev URLs).
+#              Service names match Docker Compose service names.
+#              v3: added `ui` (Next.js standalone, port 3000). Only
+#              instantiated by the dev override (`docker-compose.dev.
+#              override.yml`) ; for plain `up`/CI runs the upstream is
+#              unreachable but no route hits it (catch-all in
+#              routers.yml is the only consumer).
+#              v2: added c7 (memory) and c9 (mcp) — both are now reachable via
+#              Traefik. c8 stays internal (LLM proxy access from C4 only).
+# =============================================================================
+
+http:
+  services:
+
+    c2:
+      loadBalancer:
+        servers:
+          - url: "http://c2:8000"
+
+    c3:
+      loadBalancer:
+        servers:
+          - url: "http://c3:8000"
+
+    c4:
+      loadBalancer:
+        servers:
+          - url: "http://c4:8000"
+
+    c5:
+      loadBalancer:
+        servers:
+          - url: "http://c5:8000"
+
+    c6:
+      loadBalancer:
+        servers:
+          - url: "http://c6:8000"
+
+    c7:
+      loadBalancer:
+        servers:
+          - url: "http://c7:8000"
+
+    c9:
+      loadBalancer:
+        servers:
+          - url: "http://c9:8000"
+
+    c12:
+      loadBalancer:
+        servers:
+          - url: "http://c12:5678"
+
+    # Next.js UI — instantiated by docker-compose.dev.override.yml
+    # (manual-test stack). Unreachable in plain `up` / CI runs ; the
+    # catch-all router that consumes this service has priority 1 so
+    # only requests not matched by any backend route reach here.
+    ui:
+      loadBalancer:
+        servers:
+          - url: "http://ui:3000"

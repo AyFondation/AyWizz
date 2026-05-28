@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+=============================================================================
+File: 051-RUNTIME-execution-flow.svg
+Version: 1
+Path: requirements/051-RUNTIME-execution-flow.svg
+Description: Concrete RUNTIME execution of the AyWizz platform — what actually
+             runs when a user acts, which component is activated, which
+             function it performs, and in what order. Complements (does NOT
+             replace) the conceptual blueprint in
+             050-WORKFLOW-prompt-execution.svg.
+
+             Two numbered step flows, ordered top→bottom, colour = the
+             component that acts in that step :
+              - A "RAG chat turn" : send a message → C2 auth → C3 →
+                C7 hybrid retrieval → C8/LiteLLM → Claude → SSE stream →
+                persistence → async cost.
+              - B "DocGen tool-loop" : the LLM emits tool calls
+                (create/update/…_document) executed against C4, which writes
+                turn-tagged versioned commits to Gitea (+ latest blob to
+                MinIO), looping until done.
+
+             Reflects the dev stack verified 2026-05-24 via
+             `e2e_stack.sh dev` (17 containers healthy, C8 → LiteLLM →
+             Claude live). Authoritative sources : 200-SPEC (C3/C4),
+             400-SPEC (C7 retrieval, D-016), 800-SPEC (C8 gateway/cost).
+=============================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1110" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="ar-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#be123c"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1300" height="1110" fill="#ffffff"/>
+
+  <!-- Title band -->
+  <rect x="0" y="0" width="1300" height="70" fill="#0f172a"/>
+  <text x="40" y="34" fill="#f1f5f9" font-size="22" font-weight="700">AyWizz — Exécution runtime : ce qui tourne réellement, et dans quel ordre</text>
+  <text x="40" y="56" fill="#94a3b8" font-size="13">Stack dev vérifiée (17 conteneurs healthy, C8→LiteLLM→Claude live). Couleur = le composant qui agit à cette étape. Lis chaque colonne de haut en bas.</text>
+
+  <!-- ===================== Cross-cutting strip ===================== -->
+  <g font-size="12">
+    <rect x="40" y="84" width="395" height="46" rx="8" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <rect x="40" y="84" width="6" height="46" rx="3" fill="#7c3aed"/>
+    <text x="58" y="103" fill="#0f172a" font-weight="600">🔐 Auth (transverse)</text>
+    <text x="58" y="121" fill="#475569">forward-auth C1→C2 à CHAQUE requête (dev : mode local)</text>
+
+    <rect x="452" y="84" width="396" height="46" rx="8" fill="#fff1f2" stroke="#fecdd3"/>
+    <rect x="452" y="84" width="6" height="46" rx="3" fill="#be123c"/>
+    <text x="470" y="103" fill="#0f172a" font-weight="600">🧭 Routing LLM (transverse)</text>
+    <text x="470" y="121" fill="#475569">agent→tier Claude : c3-rag / c3-docgen → Haiku (côté client C8)</text>
+
+    <rect x="865" y="84" width="395" height="46" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <rect x="865" y="84" width="6" height="46" rx="3" fill="#64748b"/>
+    <text x="883" y="103" fill="#0f172a" font-weight="600">💰 Coût (transverse)</text>
+    <text x="883" y="121" fill="#475569">chaque appel LLM → cost-receiver → Arango llm_calls (tokens, $)</text>
+  </g>
+
+  <!-- ===================== Column headers ===================== -->
+  <rect x="40" y="150" width="575" height="34" rx="6" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="58" y="172" fill="#1e3a8a" font-size="15" font-weight="700">A · Tour de chat RAG — quand tu envoies un message</text>
+
+  <rect x="655" y="150" width="575" height="34" rx="6" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="673" y="172" fill="#065f46" font-size="15" font-weight="700">B · Boucle DocGen — quand l'IA crée / modifie un document</text>
+
+  <!-- ===================== Connectors (drawn first, under cards) ===================== -->
+  <g stroke="#94a3b8" stroke-width="1.6">
+    <!-- Column A : 195..1023, pitch 84, card h 72 -->
+    <line x1="327" y1="267" x2="327" y2="278" marker-end="url(#ar)"/>
+    <line x1="327" y1="351" x2="327" y2="362" marker-end="url(#ar)"/>
+    <line x1="327" y1="435" x2="327" y2="446" marker-end="url(#ar)"/>
+    <line x1="327" y1="519" x2="327" y2="530" marker-end="url(#ar)"/>
+    <line x1="327" y1="603" x2="327" y2="614" marker-end="url(#ar)"/>
+    <line x1="327" y1="687" x2="327" y2="698" marker-end="url(#ar)"/>
+    <line x1="327" y1="771" x2="327" y2="782" marker-end="url(#ar)"/>
+    <line x1="327" y1="855" x2="327" y2="866" marker-end="url(#ar)"/>
+    <line x1="327" y1="939" x2="327" y2="950" marker-end="url(#ar)"/>
+    <!-- Column B : 195..771 -->
+    <line x1="942" y1="267" x2="942" y2="278" marker-end="url(#ar)"/>
+    <line x1="942" y1="351" x2="942" y2="362" marker-end="url(#ar)"/>
+    <line x1="942" y1="435" x2="942" y2="446" marker-end="url(#ar)"/>
+    <line x1="942" y1="519" x2="942" y2="530" marker-end="url(#ar)"/>
+    <line x1="942" y1="603" x2="942" y2="614" marker-end="url(#ar)"/>
+    <line x1="942" y1="687" x2="942" y2="698" marker-end="url(#ar)"/>
+  </g>
+
+  <!-- Loop arrow B6 → B2 (tool loop) -->
+  <path d="M 1230 651 C 1278 620, 1278 346, 1230 315" fill="none" stroke="#be123c" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar-rose)"/>
+  <text transform="rotate(-90 1272 483)" x="1272" y="483" fill="#be123c" font-size="11" font-weight="600" text-anchor="middle">⟳ tant qu'un outil est appelé</text>
+
+  <!-- ===================== CARDS ===================== -->
+  <!-- card template : white rect + left colour bar + number circle + title + subtitle -->
+  <g font-size="12">
+
+    <!-- Column A -->
+    <!-- A1 UI -->
+    <rect x="40" y="195" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="195" width="8" height="72" rx="4" fill="#475569"/>
+    <circle cx="76" cy="231" r="15" fill="#475569"/><text x="76" y="236" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">1</text>
+    <text x="104" y="226" fill="#0f172a" font-size="14.5" font-weight="600">UI — tu envoies un message</text>
+    <text x="104" y="248" fill="#475569">Next.js → POST /api/v1/conversations/…/messages, ouvre le flux SSE</text>
+
+    <!-- A2 C2 -->
+    <rect x="40" y="279" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="279" width="8" height="72" rx="4" fill="#7c3aed"/>
+    <circle cx="76" cy="315" r="15" fill="#7c3aed"/><text x="76" y="320" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">2</text>
+    <text x="104" y="310" fill="#0f172a" font-size="14.5" font-weight="600">C2 — authentification</text>
+    <text x="104" y="332" fill="#475569">C1 Traefik → forward-auth C2 ; injecte X-User-Id, rôles, tenant, project</text>
+
+    <!-- A3 C3 -->
+    <rect x="40" y="363" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="363" width="8" height="72" rx="4" fill="#2563eb"/>
+    <circle cx="76" cy="399" r="15" fill="#2563eb"/><text x="76" y="404" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">3</text>
+    <text x="104" y="394" fill="#0f172a" font-size="14.5" font-weight="600">C3 Conversation — réception du tour</text>
+    <text x="104" y="416" fill="#475569">Persiste le message utilisateur (Arango) ; prépare la réponse</text>
+
+    <!-- A4 C7 -->
+    <rect x="40" y="447" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="447" width="8" height="72" rx="4" fill="#0d9488"/>
+    <circle cx="76" cy="483" r="15" fill="#0d9488"/><text x="76" y="488" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">4</text>
+    <text x="104" y="478" fill="#0f172a" font-size="14.5" font-weight="600">C7 Memory — récupération de contexte</text>
+    <text x="104" y="500" fill="#475569">Hybride : BM25 + dense (embed Ollama) + fusion RRF → top-k chunks</text>
+
+    <!-- A5 C3 -->
+    <rect x="40" y="531" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="531" width="8" height="72" rx="4" fill="#2563eb"/>
+    <circle cx="76" cy="567" r="15" fill="#2563eb"/><text x="76" y="572" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">5</text>
+    <text x="104" y="562" fill="#0f172a" font-size="14.5" font-weight="600">C3 — construction du prompt</text>
+    <text x="104" y="584" fill="#475569">system (prompt projet) + contexte récupéré + historique de conversation</text>
+
+    <!-- A6 C8 -->
+    <rect x="40" y="615" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="615" width="8" height="72" rx="4" fill="#be123c"/>
+    <circle cx="76" cy="651" r="15" fill="#be123c"/><text x="76" y="656" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">6</text>
+    <text x="104" y="646" fill="#0f172a" font-size="14.5" font-weight="600">C8 — appel LLM via le proxy</text>
+    <text x="104" y="668" fill="#475569">chat_completion(agent=c3-rag) → LiteLLM → route Claude Haiku</text>
+
+    <!-- A7 Claude -->
+    <rect x="40" y="699" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="699" width="8" height="72" rx="4" fill="#be123c"/>
+    <circle cx="76" cy="735" r="15" fill="#be123c"/><text x="76" y="740" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">7</text>
+    <text x="104" y="730" fill="#0f172a" font-size="14.5" font-weight="600">Claude — génération</text>
+    <text x="104" y="752" fill="#475569">Réponse produite en streaming, token par token</text>
+
+    <!-- A8 C3 -->
+    <rect x="40" y="783" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="783" width="8" height="72" rx="4" fill="#2563eb"/>
+    <circle cx="76" cy="819" r="15" fill="#2563eb"/><text x="76" y="824" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">8</text>
+    <text x="104" y="814" fill="#0f172a" font-size="14.5" font-weight="600">C3 → UI — streaming SSE</text>
+    <text x="104" y="836" fill="#475569">event: inline → rendu live des tokens dans le chat (+ chaîne d'outils)</text>
+
+    <!-- A9 C3 -->
+    <rect x="40" y="867" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="867" width="8" height="72" rx="4" fill="#2563eb"/>
+    <circle cx="76" cy="903" r="15" fill="#2563eb"/><text x="76" y="908" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">9</text>
+    <text x="104" y="898" fill="#0f172a" font-size="14.5" font-weight="600">C3 — persistance</text>
+    <text x="104" y="920" fill="#475569">Réponse + ledger d'événements (piste d'audit) stockés en Arango</text>
+
+    <!-- A10 cost -->
+    <rect x="40" y="951" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="40" y="951" width="8" height="72" rx="4" fill="#64748b"/>
+    <circle cx="76" cy="987" r="15" fill="#64748b"/><text x="76" y="992" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">10</text>
+    <text x="104" y="982" fill="#0f172a" font-size="14.5" font-weight="600">Coût — asynchrone (hors chemin critique)</text>
+    <text x="104" y="1004" fill="#475569">LiteLLM cost-forwarder → C8 cost-receiver → Arango llm_calls</text>
+
+    <!-- Column B -->
+    <!-- B1 UI -->
+    <rect x="655" y="195" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="195" width="8" height="72" rx="4" fill="#475569"/>
+    <circle cx="691" cy="231" r="15" fill="#475569"/><text x="691" y="236" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">1</text>
+    <text x="719" y="226" fill="#0f172a" font-size="14.5" font-weight="600">UI — message en profil DocGen</text>
+    <text x="719" y="248" fill="#475569">ex. « crée un module X et son test pytest »</text>
+
+    <!-- B2 C8 -->
+    <rect x="655" y="279" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="279" width="8" height="72" rx="4" fill="#be123c"/>
+    <circle cx="691" cy="315" r="15" fill="#be123c"/><text x="691" y="320" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">2</text>
+    <text x="719" y="310" fill="#0f172a" font-size="14.5" font-weight="600">C8/Claude — l'IA décide un outil</text>
+    <text x="719" y="332" fill="#475569">completion(agent=c3-docgen) → TOOL CALL create/update/…_document</text>
+
+    <!-- B3 C4 -->
+    <rect x="655" y="363" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="363" width="8" height="72" rx="4" fill="#059669"/>
+    <circle cx="691" cy="399" r="15" fill="#059669"/><text x="691" y="404" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">3</text>
+    <text x="719" y="394" fill="#0f172a" font-size="14.5" font-weight="600">C3 exécute l'outil → C4 Orchestrator</text>
+    <text x="719" y="416" fill="#475569">Appel CRUD document de l'orchestrateur (run « live-docs »)</text>
+
+    <!-- B4 stores -->
+    <rect x="655" y="447" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="447" width="8" height="72" rx="4" fill="#64748b"/>
+    <circle cx="691" cy="483" r="15" fill="#64748b"/><text x="691" y="488" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">4</text>
+    <text x="719" y="478" fill="#0f172a" font-size="14.5" font-weight="600">C4 — écriture versionnée</text>
+    <text x="719" y="500" fill="#475569">Gitea : commit tag [turn:id] = version (vN) ; blob latest → MinIO</text>
+
+    <!-- B5 C4 -->
+    <rect x="655" y="531" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="531" width="8" height="72" rx="4" fill="#059669"/>
+    <circle cx="691" cy="567" r="15" fill="#059669"/><text x="691" y="572" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">5</text>
+    <text x="719" y="562" fill="#0f172a" font-size="14.5" font-weight="600">C4 → C3 — résultat de l'outil</text>
+    <text x="719" y="584" fill="#475569">Renvoie chemin + version au tool-loop de C3</text>
+
+    <!-- B6 C8 loop -->
+    <rect x="655" y="615" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="615" width="8" height="72" rx="4" fill="#be123c"/>
+    <circle cx="691" cy="651" r="15" fill="#be123c"/><text x="691" y="656" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">6</text>
+    <text x="719" y="646" fill="#0f172a" font-size="14.5" font-weight="600">C8/Claude — retour à l'IA  ⟳</text>
+    <text x="719" y="668" fill="#475569">Résultat renvoyé au modèle → étape suivante, jusqu'à « terminé »</text>
+
+    <!-- B7 C3 -->
+    <rect x="655" y="699" width="575" height="72" rx="10" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="655" y="699" width="8" height="72" rx="4" fill="#2563eb"/>
+    <circle cx="691" cy="735" r="15" fill="#2563eb"/><text x="691" y="740" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">7</text>
+    <text x="719" y="730" fill="#0f172a" font-size="14.5" font-weight="600">C3 → UI — réponse finale</text>
+    <text x="719" y="752" fill="#475569">Stream + inline log (détail outils dépliable) + lien « ouvrir (vN) »</text>
+
+  </g>
+
+  <!-- B note : DocGen reuses A's steps 1-2 + 6-9 -->
+  <rect x="655" y="795" width="575" height="50" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="673" y="816" fill="#475569" font-size="12" font-weight="600">Note — la boucle B s'appuie sur le même socle que A :</text>
+  <text x="673" y="834" fill="#64748b" font-size="12">auth (A2), routing/coût C8 (A6/A10), persistance (A9). Seul l'outillage C4 diffère.</text>
+
+  <!-- ===================== Legend ===================== -->
+  <rect x="40" y="1040" width="1220" height="54" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="58" y="1060" fill="#0f172a" font-size="12" font-weight="700">Composants</text>
+  <g font-size="11.5" fill="#334155">
+    <rect x="58" y="1072" width="12" height="12" rx="2" fill="#475569"/><text x="76" y="1082">UI Next.js</text>
+    <rect x="168" y="1072" width="12" height="12" rx="2" fill="#d97706"/><text x="186" y="1082">C1 Traefik</text>
+    <rect x="278" y="1072" width="12" height="12" rx="2" fill="#7c3aed"/><text x="296" y="1082">C2 Auth</text>
+    <rect x="378" y="1072" width="12" height="12" rx="2" fill="#2563eb"/><text x="396" y="1082">C3 Conversation</text>
+    <rect x="528" y="1072" width="12" height="12" rx="2" fill="#0d9488"/><text x="546" y="1082">C7 Memory</text>
+    <rect x="648" y="1072" width="12" height="12" rx="2" fill="#be123c"/><text x="666" y="1082">C8 / LiteLLM / Claude</text>
+    <rect x="838" y="1072" width="12" height="12" rx="2" fill="#059669"/><text x="856" y="1082">C4 Orchestrator</text>
+    <rect x="988" y="1072" width="12" height="12" rx="2" fill="#64748b"/><text x="1006" y="1082">Stores : Arango · MinIO · Gitea</text>
+  </g>
+
+</svg>

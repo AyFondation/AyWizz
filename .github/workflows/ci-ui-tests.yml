@@ -1,0 +1,107 @@
+# Version: 1
+# Path: .github/workflows/ci-ui-tests.yml
+#
+# CI - frontend test pipeline mirroring the backend's `ci-tests.yml`.
+# Two parallel jobs :
+#   - vitest    : unit + integration with coverage gate (80% line).
+#   - playwright: E2E specs against a Next.js dev server.
+#
+# Triggered on every push/PR that touches `ay_platform_ui/**` OR the
+# workflow file itself. Backend Python tests are NOT affected — they
+# stay in `ci-tests.yml`.
+
+name: ci-ui-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ay_platform_ui/**"
+      - ".github/workflows/ci-ui-tests.yml"
+  pull_request:
+    paths:
+      - "ay_platform_ui/**"
+      - ".github/workflows/ci-ui-tests.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ay_platform_ui
+
+jobs:
+
+  vitest:
+    name: lint + typecheck + vitest (unit + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 25
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: "npm"
+          cache-dependency-path: ay_platform_ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (Biome)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run unit + integration tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-coverage-${{ github.run_id }}
+          path: ay_platform_ui/coverage/
+          retention-days: 14
+
+  playwright:
+    name: playwright e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Run after vitest so a typecheck failure doesn't waste e2e
+    # CI minutes. Set to `[]` if you want them parallel.
+    needs: [vitest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 25
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25"
+          cache: "npm"
+          cache-dependency-path: ay_platform_ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('ay_platform_ui/package-lock.json') }}
+
+      - name: Install Playwright browsers (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: ay_platform_ui/playwright-report/
+          retention-days: 14

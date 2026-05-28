@@ -1,0 +1,104 @@
+# =============================================================================
+# File: Dockerfile.c15-runner
+# Version: 2
+# Path: infra/docker/Dockerfile.c15-runner
+# Description: C15 sub-agent runner image for the OpenHands `generate`-phase
+#              harness (V2 #2 / Q13 POC / R-200-029, R-200-030 v2).
+#
+#   This is the SHARED `ay-api` image PLUS the heavy `openhands` optional
+#   extra (openhands-sdk + openhands-tools → libtmux, tree-sitter,
+#   browser-use, litellm) and the system tools OpenHands needs at runtime
+#   (`tmux` for the terminal tool, `git` for the in-pod commit hook of
+#   R-200-036). It is built SEPARATELY from `Dockerfile.api` precisely so
+#   the lean shared image that powers C2/C3/C4/C5/C6/C7/C9 stays free of
+#   that dependency tree (the `openhands.*` import is confined to
+#   `pipeline/generate_engine.py` and gated behind
+#   `C4_GENERATE_ENGINE=openhands`).
+#
+#   POC deployment model : run the C4 Orchestrator FROM this image
+#   (`COMPONENT_MODULE=c4_orchestrator`) with `C4_GENERATE_ENGINE=openhands`.
+#   The in-process engine then has `openhands.*` available ; the shared
+#   `ay-api` image does not, and is unaffected.
+#
+#   Build context is the monorepo ROOT (same as Dockerfile.api), so COPY
+#   paths reference `ay_platform_core/` directly.
+#
+#   DEFERRED (Phase 2, R-200-030 v2 / R-200-037) — NOT in this POC image :
+#   the `mc` MinIO CLI (bundle sync) and the in-pod working-data MCP
+#   indices. tree-sitter language parsers arrive transitively via
+#   `openhands-tools`. No Node.js runtime is required (R-200-030 v2).
+# =============================================================================
+
+ARG PYTHON_VERSION=3.13-slim
+ARG BUILD_VERSION=dev
+
+
+# ----------------------------------------------------------------------------
+# Builder stage: install build deps, create venv, install ay_platform_core
+# WITH the `openhands` extra from pyproject.toml.
+# ----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION} AS builder
+
+LABEL stage="builder"
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ay_platform_core/pyproject.toml /app/ay_platform_core/pyproject.toml
+COPY ay_platform_core/src /app/ay_platform_core/src
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install -e "/app/ay_platform_core[openhands]"
+
+
+# ----------------------------------------------------------------------------
+# Runtime stage: Python image + the prepared venv + the system tools the
+# OpenHands tools need at runtime (`tmux`, `git`).
+# ----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION} AS runtime
+
+LABEL org.opencontainers.image.title="AyWizz C15 Runner (OpenHands)" \
+      org.opencontainers.image.description="ay-api image + the OpenHands generate-phase harness (openhands-sdk + openhands-tools) and its runtime tools (tmux, git). Used to run the C4 Orchestrator with C4_GENERATE_ENGINE=openhands for the Q13 POC. The shared ay-api image stays free of this dependency tree." \
+      org.opencontainers.image.vendor="AyWizz" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/AyFondation/AyWizz" \
+      org.opencontainers.image.documentation="https://github.com/AyFondation/AyWizz/blob/main/requirements/references/aywiz-architecture-synthesis-v4.md"
+
+ARG BUILD_VERSION=dev
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    BUILD_VERSION="${BUILD_VERSION}"
+
+# Runtime system tools for the OpenHands tools: `tmux` backs libtmux
+# (TerminalTool) ; `git` backs the in-pod commit hook (R-200-036).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tmux \
+      git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app /app
+
+RUN groupadd --system app && useradd --system --gid app --no-create-home app \
+    && chown -R app:app /app
+
+USER app
+WORKDIR /app
+
+EXPOSE 8000
+
+# Same runtime-selected entrypoint as Dockerfile.api. For the POC, run with
+# COMPONENT_MODULE=c4_orchestrator and C4_GENERATE_ENGINE=openhands.
+CMD exec uvicorn "ay_platform_core.${COMPONENT_MODULE}.main:app" \
+      --host 0.0.0.0 --port 8000

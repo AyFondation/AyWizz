@@ -1,0 +1,19 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/c1_gateway/kustomization.yaml
+# Description: Kustomize entry for C1 Traefik gateway. Includes RBAC,
+#              Deployment, Services (public + dashboard), Middlewares,
+#              and IngressRoutes. Traefik CRDs (IngressRoute / Middleware)
+#              MUST be installed in the cluster prior to applying — see
+#              the cluster bootstrap notes in `infra/k8s/README` (TBD).
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - middlewares.yaml
+  - ingressroutes.yaml

@@ -1,0 +1,49 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c1_gateway/service.yaml
+# Description: Public entry point Service for C1 Traefik. Defaults to
+#              ClusterIP — overlays patch to LoadBalancer for production
+#              clusters that have a cloud provider, or to NodePort for
+#              kind / on-prem dev. The :8080 dashboard is on a separate
+#              ClusterIP-only Service so it never leaks publicly.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c1-gateway
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c1-gateway
+    app.kubernetes.io/component: c1
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c1-gateway
+    app.kubernetes.io/component: c1
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: c1-gateway-dashboard
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c1-gateway
+    app.kubernetes.io/component: c1
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c1-gateway
+    app.kubernetes.io/component: c1
+  ports:
+    - name: traefik
+      port: 8080
+      targetPort: traefik
+      protocol: TCP

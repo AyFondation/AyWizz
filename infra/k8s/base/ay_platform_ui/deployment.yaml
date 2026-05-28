@@ -1,0 +1,85 @@
+# =============================================================================
+# File: deployment.yaml
+# Version: 2
+# Path: infra/k8s/base/ay_platform_ui/deployment.yaml
+# Description: Next.js UI Deployment. Image built from
+#              `infra/docker/Dockerfile.ui`. The runtime-config.json
+#              is mounted from a ConfigMap (configmap-runtime.yaml) so
+#              operators can change the API base URL WITHOUT rebuilding
+#              the image — flip the ConfigMap value, restart the pod,
+#              done.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ay-platform-ui
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ay-platform-ui
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ay-platform-ui
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ay-platform-ui
+        app.kubernetes.io/component: ui
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: ui
+          image: ghcr.io/ayfondation/aywizz-ui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3000"
+          volumeMounts:
+            # subPath mount overlays the file shipped in the image so
+            # the static placeholder is replaced by the operator-
+            # supplied content. Note : ConfigMap updates do NOT auto-
+            # propagate through subPath mounts ; pod restart required.
+            - name: runtime-config
+              mountPath: /app/public/runtime-config.json
+              subPath: runtime-config.json
+              readOnly: true
+          # Next.js 16 ships no built-in /health probe ; root `/`
+          # returns 200 once the server is ready. The page just
+          # bootstraps the React shell — cheap to render repeatedly.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+      volumes:
+        - name: runtime-config
+          configMap:
+            name: aywizz-ui-runtime-config

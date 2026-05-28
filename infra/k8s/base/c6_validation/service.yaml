@@ -1,0 +1,25 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c6_validation/service.yaml
+# Description: ClusterIP Service for C6 Validation.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c6-validation
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c6-validation
+    app.kubernetes.io/component: c6
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c6-validation
+    app.kubernetes.io/component: c6
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

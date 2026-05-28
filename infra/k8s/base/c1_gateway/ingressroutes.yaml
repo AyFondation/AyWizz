@@ -1,0 +1,226 @@
+# =============================================================================
+# File: ingressroutes.yaml
+# Version: 2
+# Path: infra/k8s/base/c1_gateway/ingressroutes.yaml
+# Description: Traefik IngressRoute CRDs — K8s mirror of
+#              `infra/c1_gateway/dynamic/routers.yml` (v7). Same path
+#              prefixes/regexps, same priorities, same middlewares, same
+#              backend services as the compose dev stack (resolved through
+#              K8s DNS rather than Docker DNS).
+#
+#              v2 (2026-05-27): full re-sync with routers.yml v7. The v1
+#              mirror routed ALL `/api/v1/projects/*` to C5 — WRONG. The
+#              `/api/v1/projects` space is split by subpath/priority :
+#                - .../artifacts|git|documents  → C4  (priority 100)
+#                - /api/v1/admin/projects        → C4  (priority 100)
+#                - .../requirements/*            → C5  (priority 100)
+#                - generic /api/v1/projects      → C2  (priority 50)
+#              Also adds the missing C2 /admin and C2 preferences routes.
+#
+#              Public routes:
+#                /auth/login (POST)              → c2 [rate-limit-auth]
+#                /auth/token (POST)              → c2 [rate-limit-auth]
+#                /auth/*                         → c2
+#                /ux/*                           → c2
+#                /api/v1/conversations/*         → c3 [forward-auth-c2, secure-headers]
+#                /api/v1/orchestrator/*          → c4 [forward-auth-c2, secure-headers]
+#                /api/v1/projects/*/artifacts    → c4 [forward-auth-c2, secure-headers]
+#                /api/v1/projects/*/git          → c4 [forward-auth-c2, secure-headers]
+#                /api/v1/projects/*/documents    → c4 [forward-auth-c2, secure-headers]
+#                /api/v1/admin/projects/*        → c4 [forward-auth-c2, secure-headers]
+#                /admin/*                        → c2 [forward-auth-c2, secure-headers]
+#                /api/v1/projects/*/requirements → c5 [forward-auth-c2, secure-headers]
+#                /api/v1/projects/*              → c2 [forward-auth-c2, secure-headers]
+#                /api/v1/users/me/preferences    → c2 [forward-auth-c2, secure-headers]
+#                /api/v1/validation/*            → c6 [forward-auth-c2, secure-headers]
+#                /api/v1/memory/*                → c7 [forward-auth-c2, secure-headers]
+#                /api/v1/mcp(/*)?                → c9 [forward-auth-c2, secure-headers]
+#                /uploads/*                      → c12 [forward-auth-c2, secure-headers]
+#                /                               → ui (catch-all, priority 1)
+# =============================================================================
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: aywizz-public
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c1-gateway
+    app.kubernetes.io/component: c1
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  entryPoints:
+    - web
+  routes:
+    # ---- C2 Auth (public, rate-limited login/token) ----
+    - match: Path(`/auth/login`) && Method(`POST`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c2-auth
+          port: 8000
+      middlewares:
+        - name: rate-limit-auth
+    - match: Path(`/auth/token`) && Method(`POST`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c2-auth
+          port: 8000
+      middlewares:
+        - name: rate-limit-auth
+    - match: PathPrefix(`/auth`)
+      kind: Rule
+      priority: 10
+      services:
+        - name: c2-auth
+          port: 8000
+    - match: PathPrefix(`/ux`)
+      kind: Rule
+      priority: 10
+      services:
+        - name: c2-auth
+          port: 8000
+    # ---- C3 Conversation ----
+    - match: PathPrefix(`/api/v1/conversations`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c3-conversation
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C4 Orchestrator ----
+    - match: PathPrefix(`/api/v1/orchestrator`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c4-orchestrator
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # C4 project subpaths (priority 100 — win over the generic c2-projects)
+    - match: PathRegexp(`^/api/v1/projects/[^/]+/artifacts(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c4-orchestrator
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathRegexp(`^/api/v1/projects/[^/]+/git(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c4-orchestrator
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathRegexp(`^/api/v1/projects/[^/]+/documents(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c4-orchestrator
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathPrefix(`/api/v1/admin/projects`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c4-orchestrator
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C2 Admin (tenants lifecycle) ----
+    - match: PathPrefix(`/admin`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c2-auth
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C5 Requirements (only the /requirements subpath, priority 100) ----
+    - match: PathRegexp(`^/api/v1/projects/[^/]+/requirements(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c5-requirements
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C2 Projects (lifecycle + membership) — generic, priority 50 ----
+    - match: PathPrefix(`/api/v1/projects`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c2-auth
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C2 Preferences ----
+    - match: PathPrefix(`/api/v1/users/me/preferences`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c2-auth
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C6 Validation ----
+    - match: PathPrefix(`/api/v1/validation`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c6-validation
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C7 Memory ----
+    - match: PathPrefix(`/api/v1/memory`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c7-memory
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C9 MCP ----
+    - match: PathPrefix(`/api/v1/mcp`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c9-mcp
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C12 uploads (n8n) ----
+    - match: PathPrefix(`/uploads`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c12-workflow
+          port: 5678
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- UI catch-all (lowest priority) ----
+    - match: PathPrefix(`/`)
+      kind: Rule
+      priority: 1
+      services:
+        - name: ay-platform-ui
+          port: 3000

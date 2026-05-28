@@ -1,0 +1,41 @@
+# =============================================================================
+# File: dco.yml
+# Path: .github/workflows/dco.yml
+# Description: Developer Certificate of Origin (DCO) check.
+#
+#   Every commit in a pull request must include a `Signed-off-by:`
+#   trailer whose name and email match the commit author. This is the
+#   contributor agreement used by AyWizz — see CONTRIBUTING.md.
+#
+#   Implementation: `tim-actions/dco@v1.1.0`. A widely-used, single-purpose
+#   action with no transitive dependencies; pinned to a tagged release for
+#   supply-chain safety.
+# =============================================================================
+
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco-check:
+    name: Sign-off on every commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR
+        uses: actions/checkout@v4
+        with:
+          # Fetch the full PR history so the DCO action can inspect every
+          # commit between the base and the head, not just the merge commit.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify DCO sign-off
+        uses: tim-actions/dco@v1.1.0
+        with:
+          commits: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}

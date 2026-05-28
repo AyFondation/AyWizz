@@ -1,0 +1,99 @@
+# =============================================================================
+# File: statefulset.yaml
+# Version: 1
+# Path: infra/k8s/base/c11_arangodb/statefulset.yaml
+# Description: ArangoDB single-node StatefulSet (C11). Stateful workload
+#              with a persistent volume claim for /var/lib/arangodb3.
+#              Single-node by design in v1 (per 050-ARCHITECTURE-OVERVIEW —
+#              ArangoDB cluster mode out of scope until horizontal scaling
+#              is needed). Root password sourced from the platform Secret
+#              `aywizz-secrets` populated via Kustomize secretGenerator
+#              from the overlay's `.env`.
+#
+#              Resource limits mirror the docker-compose v6 budget
+#              (R-100-106 v2, R-100-119): heaviest single workload —
+#              limit 1.5 vCPU / 1536 MB, reserve 0.5 / 512 MB.
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: arangodb
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: arangodb
+    app.kubernetes.io/component: c11
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  serviceName: arangodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arangodb
+      app.kubernetes.io/component: c11
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arangodb
+        app.kubernetes.io/component: c11
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: arangodb
+          image: arangodb/arangodb:3.12
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: arangodb
+              containerPort: 8529
+              protocol: TCP
+          env:
+            - name: ARANGO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aywizz-secrets
+                  key: ARANGO_ROOT_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/arangodb3
+          # `arangosh` is the in-image CLI; `curl` is absent. The probe
+          # validates the API actually answers, not just the port being
+          # bound (mirrors docker-compose healthcheck v6).
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  arangosh
+                  --server.endpoint tcp://localhost:8529
+                  --server.username root
+                  --server.password "$ARANGO_ROOT_PASSWORD"
+                  --javascript.execute-string 'db._version()'
+                  >/dev/null 2>&1
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            tcpSocket:
+              port: 8529
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "1500m"
+              memory: "1536Mi"
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName is intentionally unset — picks the cluster
+        # default. Production overlays SHOULD pin a class explicitly.
+        resources:
+          requests:
+            storage: 50Gi

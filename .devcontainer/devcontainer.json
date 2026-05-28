@@ -1,0 +1,110 @@
+// =============================================================================
+// VS Code Dev Container Configuration
+// Version: 8
+// Path: .devcontainer/devcontainer.json
+// Description: Dev container for Python/K8s development with Claude Code.
+// v8: extend postCreateCommand chown to /opt/playwright-browsers so the
+//     developer user can write Playwright trace/screenshot output next
+//     to the browsers (Dockerfile v1.9.0 bakes Chromium there at build
+//     time). Same bake-as-root + chown-on-create pattern as /opt/ui-deps.
+// v7: wire up the bake+symlink pattern for ay_platform_ui dependencies
+//     (Dockerfile v1.8.0). postCreateCommand chowns /opt/ui-deps to the
+//     developer user (one-shot, after updateRemoteUserUID has rewritten
+//     the UID). postStartCommand symlinks the workspace's
+//     ay_platform_ui/node_modules → /opt/ui-deps/ay_platform_ui/node_modules
+//     IF the host has no real node_modules/ already — host-side npm
+//     always takes precedence (we don't fight a developer who runs
+//     `npm install` on the host). The symlink check is idempotent so
+//     restarts are cheap.
+// v6: re-enable testcontainers Ryuk for durable cleanup across pytest
+//     SIGKILL (was disabled in v5 as a workaround for docker-outside-of-
+//     docker uncertainty). Pre-pull `testcontainers/ryuk:0.8.1` (the
+//     version pinned by testcontainers-python 4.x) at devcontainer
+//     creation so first-test latency excludes the Ryuk image pull.
+//     Pre-pull is non-fatal — if offline, testcontainers falls back to
+//     pull-on-demand. `docker_test_cleanup.sh` remains as a belt-and-
+//     braces manual cleanup for the rare case where Ryuk itself fails.
+// v5: align the bind-mount target with the host source path
+//     (`${localWorkspaceFolder}`). With docker-outside-of-docker, compose
+//     bind-mount sources resolved inside the devcontainer must also exist
+//     on the host docker daemon — keeping the path identical on both sides
+//     makes relative-path mounts in `tests/docker-compose.yml` work direct.
+//     The Dockerfile (v1.7.0) receives the same path via the
+//     `LOCAL_WORKSPACE_FOLDER` build arg so the editable install's `.pth`
+//     stays valid after the mount.
+// =============================================================================
+{
+  "name": "Ubuntu Dev Environment",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "TARGETOS": "linux",
+      "TARGETARCH": "amd64",
+      "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "mounts": [
+    // Workspace bind — target == source so docker-outside-of-docker bind
+    // mounts in tests/docker-compose.yml resolve to a real host path.
+    "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
+    // Host kube config (read-only; copied to a writable location in postStartCommand)
+    "source=${localEnv:HOME}/.kube,target=/tmp/host-kube,type=bind,consistency=cached,readonly",
+    // Claude Code auth persistence (shared with host Claude Code)
+    "source=${localEnv:HOME}/.claude,target=/home/developer/.claude,type=bind,consistency=cached"
+  ],
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "runArgs": ["--init", "--privileged=false", "--platform=linux/amd64"],
+
+  "containerEnv": {
+    "TZ": "Europe/Paris",
+    "KUBECONFIG": "/home/developer/.kube-local/config",
+    // Testcontainers via docker-outside-of-docker. Ryuk re-enabled in v6;
+    // pre-pulled below at postCreateCommand. If Ryuk turns out to misbehave
+    // in this DooD setup, fall back by setting RYUK_DISABLED=true here.
+    "DOCKER_HOST": "unix:///var/run/docker.sock"
+  },
+
+  // Align docker group GID with the host socket + ensure developer is a
+  // member, then pre-pull the Ryuk image (v0.8.1, pinned by
+  // testcontainers-python 4.x) so the first integration test does not pay
+  // the pull cost. Non-fatal: offline runs fall back to pull-on-demand.
+  "postCreateCommand": "bash -c 'DOCKER_SOCK_GID=$(stat -c \"%g\" /var/run/docker.sock 2>/dev/null || echo 999); sudo groupmod -g $DOCKER_SOCK_GID docker 2>/dev/null || sudo groupadd -g $DOCKER_SOCK_GID docker; sudo usermod -aG docker developer; echo \"Docker group configured with GID $DOCKER_SOCK_GID\"; sudo docker pull testcontainers/ryuk:0.8.1 || echo \"Ryuk pre-pull skipped (offline/network) — testcontainers will pull on demand\"; for d in /opt/ui-deps /opt/playwright-browsers; do if [ -d \"$d\" ]; then sudo chown -R developer:developer \"$d\" && echo \"$d owned by developer\" || echo \"$d chown failed (non-fatal)\"; fi; done'",
+
+  // Copy read-only host kube config to a writable location + rewrite API URL for Docker Desktop K8s
+  "postStartCommand": "set -e; mkdir -p ~/.kube-local; if [ -f /tmp/host-kube/config ]; then cp -rf /tmp/host-kube/* ~/.kube-local/; fi; if [ -f ~/.kube-local/config ]; then sed -i 's#https://127\\.0\\.0\\.1:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; sed -i 's#https://host\\.docker\\.internal:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; fi; UI_HOST_DIR=\"${localWorkspaceFolder}/ay_platform_ui\"; UI_BAKED=\"/opt/ui-deps/ay_platform_ui/node_modules\"; if [ -d \"$UI_HOST_DIR\" ] && [ ! -e \"$UI_HOST_DIR/node_modules\" ] && [ -d \"$UI_BAKED\" ]; then ln -s \"$UI_BAKED\" \"$UI_HOST_DIR/node_modules\" && echo \"ay_platform_ui/node_modules → $UI_BAKED (baked deps)\" || true; fi",
+
+  "remoteUser": "developer",
+  "updateRemoteUserUID": "on",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "python.defaultInterpreterPath": "/usr/bin/python3.13",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports.ruff": "explicit"
+          }
+        },
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
+      }
+    }
+  }
+}

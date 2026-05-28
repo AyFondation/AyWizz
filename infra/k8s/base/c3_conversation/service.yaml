@@ -1,0 +1,25 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c3_conversation/service.yaml
+# Description: ClusterIP Service for C3 Conversation.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c3-conversation
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c3-conversation
+    app.kubernetes.io/component: c3
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c3-conversation
+    app.kubernetes.io/component: c3
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

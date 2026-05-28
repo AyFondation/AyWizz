@@ -1,0 +1,25 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c5_requirements/service.yaml
+# Description: ClusterIP Service for C5 Requirements.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c5-requirements
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c5-requirements
+    app.kubernetes.io/component: c5
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c5-requirements
+    app.kubernetes.io/component: c5
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

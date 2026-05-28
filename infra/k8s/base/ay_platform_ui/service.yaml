@@ -1,0 +1,27 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/ay_platform_ui/service.yaml
+# Description: ClusterIP Service for the Next.js UI. C1 Traefik
+#              IngressRoute targets this service for `/` (catch-all,
+#              lowest priority).
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ay-platform-ui
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ay-platform-ui
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ay-platform-ui
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP

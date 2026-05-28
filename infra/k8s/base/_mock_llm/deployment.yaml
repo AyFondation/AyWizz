@@ -1,0 +1,82 @@
+# =============================================================================
+# File: deployment.yaml
+# Version: 2
+# Path: infra/k8s/base/_mock_llm/deployment.yaml
+# Description: `_mock_llm` — test-tier substitute for the C8 LiteLLM
+#              proxy. Lives under `ay_platform_core/_mock_llm/`; same
+#              shared image as the API tier, COMPONENT_MODULE=_mock_llm.
+#
+#              The underscore prefix marks this as test-only — production
+#              overlays SHALL NOT include this directory (mirror of
+#              R-100-121 for `_observability`). The system-test overlay
+#              IS allowed to deploy it; chat-with-RAG round-trips need
+#              a deterministic LLM that doesn't depend on third-party
+#              API keys.
+#
+# @relation implements:R-100-116
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-llm
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: mock-llm
+    app.kubernetes.io/component: mock-llm
+    app.kubernetes.io/part-of: aywizz-platform
+    aywizz.io/tier: test-only
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mock-llm
+      app.kubernetes.io/component: mock-llm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-llm
+        app.kubernetes.io/component: mock-llm
+        app.kubernetes.io/part-of: aywizz-platform
+        aywizz.io/tier: test-only
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/ayfondation/aywizz-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: COMPONENT_MODULE
+              value: _mock_llm
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          envFrom:
+            - configMapRef:
+                name: aywizz-config
+            - secretRef:
+                name: aywizz-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

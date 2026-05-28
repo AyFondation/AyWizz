@@ -1,0 +1,43 @@
+# =============================================================================
+# File: traefik.yml
+# Version: 1
+# Path: infra/c1_gateway/traefik.yml
+# Description: Traefik v3 static configuration for local development.
+#              TLS termination is handled at the K8s IngressRoute level in
+#              production (see k8s/). Local dev runs HTTP-only on port 80.
+# @relation R-100-039 R-100-100
+# =============================================================================
+
+entryPoints:
+  web:
+    address: ":80"
+  # Reserved for K8s / production TLS termination — not activated locally.
+  # websecure:
+  #   address: ":443"
+  traefik:
+    address: ":8080"
+
+providers:
+  # File provider watches dynamic/ for live reload without restart.
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+  # Docker provider for optional label-based routing in docker-compose.
+  docker:
+    exposedByDefault: false
+
+# Dashboard enabled for local dev; disable in production via K8s config.
+api:
+  dashboard: true
+  insecure: true
+
+log:
+  level: INFO
+
+accessLog:
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        User-Agent: keep
+        X-User-Id: keep

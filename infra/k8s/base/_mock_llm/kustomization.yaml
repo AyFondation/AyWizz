@@ -1,0 +1,14 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/_mock_llm/kustomization.yaml
+# Description: Kustomize entry for the test-only mock LLM. NEVER
+#              referenced by `overlays/prod/` or `overlays/dev/` — only
+#              `overlays/system-test/` opts in.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml

@@ -1,0 +1,29 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/_mock_llm/service.yaml
+# Description: ClusterIP Service for the mock LLM (test-tier only).
+#              Reachable as `mock-llm.aywizz.svc.cluster.local:8000`
+#              from C3 / C4 — they point `C8_GATEWAY_URL` here in
+#              system-test deployments.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-llm
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: mock-llm
+    app.kubernetes.io/component: mock-llm
+    app.kubernetes.io/part-of: aywizz-platform
+    aywizz.io/tier: test-only
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mock-llm
+    app.kubernetes.io/component: mock-llm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

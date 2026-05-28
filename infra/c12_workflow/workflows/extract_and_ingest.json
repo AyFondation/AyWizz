@@ -1,0 +1,294 @@
+{
+  "_comment": "Version: 1 | Path: infra/c12_workflow/workflows/extract_and_ingest.json | Description: D-020 R-100-081 v2 ingestion workflow — webhook upload → MinIO put (raw bytes) → C13 POST /analyze → poll /status until terminal → read MinIO artifacts (chunks.jsonl + run_manifest.json + embeddings) → POST C7 /ingest-chunks → respond. Supersedes ingest_text_source.json and chunk_and_track.json (both marked active:false in this session, deleted in session 7). Import via `docker compose exec c12 n8n import:workflow --input=/workflows/extract_and_ingest.json` after bringing the stack up. @relation implements:R-100-080 R-100-081 R-100-125 R-400-220 R-400-223",
+  "name": "Extract & Ingest (C12 -> C13 -> C7)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "extract-and-ingest",
+        "responseMode": "responseNode",
+        "options": { "rawBody": false }
+      },
+      "id": "webhook-extract-ingest",
+      "name": "Webhook — POST /uploads/extract-and-ingest",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 360],
+      "webhookId": "extract-and-ingest-v1"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://minio:9000/{{$env.SOURCES_BUCKET || 'sources'}}/{{$json.tenant_id}}/{{$json.project_id}}/{{$json.source_id}}/raw.{{$json.format}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "={{$json.mime_type || 'application/octet-stream'}}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "stringBody": "={{$json.content_b64}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "fullResponse": true, "responseFormat": "text" } }
+        }
+      },
+      "id": "minio-put-raw",
+      "name": "MinIO PUT raw upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 360],
+      "credentials": {
+        "httpHeaderAuth": { "id": "minio-admin-credentials", "name": "MinIO admin" }
+      },
+      "notes": "Direct S3-style PUT to MinIO. n8n's AWS S3 node requires a credential pair too; this httpRequest path keeps the workflow self-contained. Body MUST be the binary content (or base64-decoded) — caller supplies as `content_b64`."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://c13-extractor:8000/analyze",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tenant_id\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}\",\n  \"project_id\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}\",\n  \"source_id\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}\",\n  \"raw_object_key\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}/raw.{{$('Webhook — POST /uploads/extract-and-ingest').item.json.format}}\",\n  \"filename\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.filename}}\",\n  \"mime_type\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.mime_type || 'application/octet-stream'}}\",\n  \"format\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.format}}\",\n  \"quality_tier\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.quality_tier || 'minimal'}}\",\n  \"urgency\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.urgency || 'interactive'}}\",\n  \"document_type\": \"{{$('Webhook — POST /uploads/extract-and-ingest').item.json.document_type || 'report'}}\",\n  \"language\": null\n}",
+        "options": {
+          "response": { "response": { "fullResponse": false } },
+          "timeout": 30000
+        }
+      },
+      "id": "c13-analyze",
+      "name": "C13 POST /analyze",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 360]
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "wait-poll",
+      "name": "Wait 5s (poll interval)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [980, 360]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://c13-extractor:8000/status/{{$('C13 POST /analyze').item.json.run_id}}?tenant_id={{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}&project_id={{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}&source_id={{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}",
+        "sendHeaders": false,
+        "options": { "timeout": 10000 }
+      },
+      "id": "c13-status-poll",
+      "name": "C13 GET /status/{run_id}",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, 360],
+      "notes": "MinIO-backed fallback (D-020 session 6): tenant/project/source query params let C13 read status.json from MinIO when the in-memory _runs cache misses (pod restart, long-running job)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "status-terminal",
+              "leftValue": "={{$json.status}}",
+              "rightValue": "running",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-terminal",
+      "name": "IF status terminal",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1480, 360]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "status-completed",
+              "leftValue": "={{$json.status}}",
+              "rightValue": "completed",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-completed",
+      "name": "IF status completed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1740, 240]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://minio:9000/{{$env.C13_BUCKET || 'c13-extractor-artifacts'}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}/runs/{{$('C13 POST /analyze').item.json.run_id}}/02_chunks/chunks.jsonl",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } },
+          "timeout": 15000
+        }
+      },
+      "id": "minio-read-chunks",
+      "name": "MinIO GET chunks.jsonl",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 160],
+      "credentials": {
+        "httpHeaderAuth": { "id": "minio-admin-credentials", "name": "MinIO admin" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://minio:9000/{{$env.C13_BUCKET || 'c13-extractor-artifacts'}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}/runs/{{$('C13 POST /analyze').item.json.run_id}}/00_metadata/run_manifest.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } },
+          "timeout": 15000
+        }
+      },
+      "id": "minio-read-manifest",
+      "name": "MinIO GET run_manifest.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 320],
+      "credentials": {
+        "httpHeaderAuth": { "id": "minio-admin-credentials", "name": "MinIO admin" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse chunks.jsonl and the manifest into the ChunkIngestRequest\n// shape expected by C7's POST /ingest-chunks (R-400-223 v2).\nconst chunksRaw = $('MinIO GET chunks.jsonl').item.json.data\n  || $('MinIO GET chunks.jsonl').item.binary?.data\n  || $('MinIO GET chunks.jsonl').item.json;\nconst manifest = $('MinIO GET run_manifest.json').item.json;\nconst webhook = $('Webhook — POST /uploads/extract-and-ingest').item.json;\nconst runId = $('C13 POST /analyze').item.json.run_id;\n\n// chunks.jsonl is one JSON object per line.\nconst lines = (typeof chunksRaw === 'string' ? chunksRaw : '').split('\\n').filter(l => l.trim().length > 0);\nconst chunks = lines.map(l => JSON.parse(l));\n\nreturn {\n  json: {\n    extraction_run_id: runId,\n    manifest_object_key: `${webhook.tenant_id}/${webhook.project_id}/${webhook.source_id}/runs/${runId}/00_metadata/run_manifest.json`,\n    embedding_model: manifest.embedding_model || 'voyage-3',\n    embedding_model_version: manifest.embedding_model_version || '',\n    embedding_dimension: manifest.embedding_dimension || (chunks[0]?.embedding?.length || 0),\n    chunks,\n    uploaded_by: webhook.uploaded_by || webhook.user_id || 'system',\n    mime_type: webhook.mime_type || 'application/octet-stream'\n  }\n};"
+      },
+      "id": "build-c7-payload",
+      "name": "Build C7 /ingest-chunks payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2260, 240],
+      "notes": "Combines chunks.jsonl (text) + run_manifest.json (embedding model metadata) into the ChunkIngestRequest body for R-400-223 v2."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://c7:8000/api/v1/memory/projects/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.project_id}}/sources/{{$('Webhook — POST /uploads/extract-and-ingest').item.json.source_id}}/ingest-chunks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-User-Id", "value": "={{$('Webhook — POST /uploads/extract-and-ingest').item.json.uploaded_by || $('Webhook — POST /uploads/extract-and-ingest').item.json.user_id || 'system'}}" },
+            { "name": "X-Tenant-Id", "value": "={{$('Webhook — POST /uploads/extract-and-ingest').item.json.tenant_id}}" },
+            { "name": "X-User-Roles", "value": "project_editor,project_owner,admin" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{JSON.stringify($json)}}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "c7-ingest-chunks",
+      "name": "C7 POST /ingest-chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2520, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"accepted\": true,\n  \"run_id\": \"{{$('C13 POST /analyze').item.json.run_id}}\",\n  \"source_id\": \"{{$json.source_id}}\",\n  \"chunk_count\": {{$json.chunk_count}},\n  \"processing_version\": \"{{$json.processing_version}}\",\n  \"status\": \"completed\"\n}",
+        "options": {}
+      },
+      "id": "respond-completed",
+      "name": "Respond (completed)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2780, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"accepted\": false,\n  \"run_id\": \"{{$('C13 POST /analyze').item.json.run_id}}\",\n  \"status\": \"{{$json.status}}\",\n  \"errors\": {{JSON.stringify($json.errors || [])}}\n}",
+        "options": {}
+      },
+      "id": "respond-failed",
+      "name": "Respond (failed)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 480]
+    }
+  ],
+  "connections": {
+    "Webhook — POST /uploads/extract-and-ingest": {
+      "main": [[{ "node": "MinIO PUT raw upload", "type": "main", "index": 0 }]]
+    },
+    "MinIO PUT raw upload": {
+      "main": [[{ "node": "C13 POST /analyze", "type": "main", "index": 0 }]]
+    },
+    "C13 POST /analyze": {
+      "main": [[{ "node": "Wait 5s (poll interval)", "type": "main", "index": 0 }]]
+    },
+    "Wait 5s (poll interval)": {
+      "main": [[{ "node": "C13 GET /status/{run_id}", "type": "main", "index": 0 }]]
+    },
+    "C13 GET /status/{run_id}": {
+      "main": [[{ "node": "IF status terminal", "type": "main", "index": 0 }]]
+    },
+    "IF status terminal": {
+      "main": [
+        [{ "node": "IF status completed", "type": "main", "index": 0 }],
+        [{ "node": "Wait 5s (poll interval)", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF status completed": {
+      "main": [
+        [
+          { "node": "MinIO GET chunks.jsonl", "type": "main", "index": 0 },
+          { "node": "MinIO GET run_manifest.json", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Respond (failed)", "type": "main", "index": 0 }]
+      ]
+    },
+    "MinIO GET chunks.jsonl": {
+      "main": [[{ "node": "Build C7 /ingest-chunks payload", "type": "main", "index": 0 }]]
+    },
+    "MinIO GET run_manifest.json": {
+      "main": [[{ "node": "Build C7 /ingest-chunks payload", "type": "main", "index": 0 }]]
+    },
+    "Build C7 /ingest-chunks payload": {
+      "main": [[{ "node": "C7 POST /ingest-chunks", "type": "main", "index": 0 }]]
+    },
+    "C7 POST /ingest-chunks": {
+      "main": [[{ "node": "Respond (completed)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "active": true,
+  "staticData": null,
+  "pinData": {}
+}

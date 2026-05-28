@@ -1,0 +1,32 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c10_minio/service.yaml
+# Description: Headless Service for the MinIO StatefulSet. Console port
+#              9001 exposed on the same Service (cluster-internal only,
+#              never published via Ingress).
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: c10
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: c10
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+      protocol: TCP
+    - name: console
+      port: 9001
+      targetPort: console
+      protocol: TCP

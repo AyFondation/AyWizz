@@ -1,0 +1,23 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 2
+# Path: infra/k8s/base/c12_workflow/kustomization.yaml
+# Description: Kustomize entry for C12 n8n workflow engine. v2 adds the
+#              generated c12-workflow-files ConfigMap so the n8n workflows
+#              are delivered to the cluster (mounted at /workflows, imported
+#              by the c12-workflow-seed Job).
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  # c12-workflow-files ConfigMap (n8n workflows). GENERATED from the single
+  # source infra/c12_workflow/workflows/ via
+  # infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py — regenerate it
+  # when a workflow changes. Shipped as an in-tree manifest (not a
+  # configMapGenerator) so `kubectl kustomize`'s default RootOnly
+  # load-restrictor accepts it (the source files live outside the k8s tree).
+  - c12-workflow-configmap.yaml

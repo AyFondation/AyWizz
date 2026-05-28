@@ -1,0 +1,20 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/c13_extractor/kustomization.yaml
+# Description: Kustomize component bundling C13 Deployment + Service.
+#              Referenced from `infra/k8s/base/kustomization.yaml` once
+#              C13 is wired into the platform overlays (dev / prod).
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app.kubernetes.io/component: c13
+  app.kubernetes.io/part-of: aywizz-platform

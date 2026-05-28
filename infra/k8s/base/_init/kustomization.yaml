@@ -1,0 +1,18 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/_init/kustomization.yaml
+# Description: Kustomize entry for one-shot bootstrap Jobs. Listed AFTER
+#              the data tier in the parent kustomization so the Jobs
+#              run after their dependencies' Services are reachable
+#              (Jobs themselves have an internal `wait until ready`
+#              loop, so order is for clarity not correctness).
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - arangodb-init.yaml
+  - minio-init.yaml
+  - ollama-seed.yaml
+  - c12-workflow-seed.yaml

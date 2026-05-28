@@ -1,0 +1,22 @@
+# =============================================================================
+# File: pvc.yaml
+# Version: 1
+# Path: infra/k8s/base/ollama/pvc.yaml
+# Description: PersistentVolumeClaim for Ollama model cache. ~50 MB per
+#              model in v1; 5 Gi gives plenty of headroom for additional
+#              models (sentence-transformers variants, future LLMs).
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-data
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/component: ollama
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,54 @@
+# =============================================================================
+# File: ollama-seed.yaml
+# Version: 1
+# Path: infra/k8s/base/_init/ollama-seed.yaml
+# Description: One-shot Job pulling the embedding model into Ollama's
+#              persistent cache. Skipped on subsequent runs by Ollama
+#              itself (model already present).
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-seed
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ollama-seed
+    app.kubernetes.io/component: ollama
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama-seed
+        app.kubernetes.io/component: ollama
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: ollama-pull
+          image: ollama/ollama:0.5.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OLLAMA_HOST
+              value: "http://ollama:11434"
+            - name: C7_EMBEDDING_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: aywizz-config
+                  key: C7_EMBEDDING_MODEL_ID
+                  optional: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              MODEL="${C7_EMBEDDING_MODEL_ID:-all-minilm}"
+              echo "Waiting for ollama"
+              until ollama list >/dev/null 2>&1; do
+                sleep 2
+              done
+              echo "Pulling embedding model $MODEL"
+              ollama pull "$MODEL"
+              echo "Seed done."

@@ -1,0 +1,25 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/ollama/service.yaml
+# Description: ClusterIP Service for Ollama — consumed only by C7 Memory
+#              for embeddings.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: ollama
+    app.kubernetes.io/component: ollama
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ollama
+  ports:
+    - name: ollama
+      port: 11434
+      targetPort: ollama
+      protocol: TCP

@@ -1,0 +1,137 @@
+# =============================================================================
+# File: litellm-config.yaml
+# Version: 2
+# Path: infra/c8_gateway/config/litellm-config.yaml
+# Description: Canonical (prod-shaped) LiteLLM configuration. The shape
+#              mirrors Appendix 8.1 of 800-SPEC-LLM-ABSTRACTION and validates
+#              against ay_platform_core.c8_llm.config.LiteLLMConfig.
+#              API keys are references to environment variables; production
+#              deployments SHALL populate these via Kubernetes Secrets + ESO
+#              (R-800-021). Per-agent routing for the orchestrator roles is
+#              client-side (R-800-030 v1) ; `agent_routes` below is the prod
+#              map. Dev uses `litellm-config.dev.yaml` (adds a local Ollama
+#              model) + `C8_AGENT_ROUTES_INLINE` for the cost policy.
+#
+#              v2 (2026-05-21) : `general_settings` (proxy master key) +
+#              `litellm_settings.callbacks` wire the cost forwarder
+#              (R-800-070) — a mounted CustomLogger that POSTs each call to
+#              the AyWizz cost receiver. Keys read from env (os.environ/...).
+#              v3 (2026-05-23) : adds the `c6-judge` route for the opt-in T3
+#              LLM-as-judge (R-700-032). NOTE — strict D-011 (judge on a
+#              DIFFERENT model family than the generator) is NOT satisfied
+#              yet : all routes are Anthropic Claude tiers (same family). The
+#              `c6-judge` entry below is a different-TIER placeholder ; before
+#              enabling `C6_JUDGE_ENABLED`, point it at a non-Anthropic family.
+# =============================================================================
+
+model_list:
+  - model_name: claude-opus-flagship
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      display_name: "Claude Opus 4.7"
+      features:
+        - chat_completion
+        - streaming
+        - long_context
+        - prompt_caching
+        - extended_thinking
+        - tool_calling
+        - structured_outputs
+        - vision
+      context_window: 200000
+      cost_per_million_input: 15.00
+      cost_per_million_output: 75.00
+      rate_limit_rpm: 4000
+      rate_limit_tpm: 400000
+
+  - model_name: claude-sonnet-midtier
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      display_name: "Claude Sonnet 4.6"
+      features:
+        - chat_completion
+        - streaming
+        - long_context
+        - prompt_caching
+        - tool_calling
+        - structured_outputs
+      context_window: 200000
+      cost_per_million_input: 3.00
+      cost_per_million_output: 15.00
+
+  - model_name: claude-haiku-fast
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      display_name: "Claude Haiku 4.5"
+      features:
+        - chat_completion
+        - streaming
+        - tool_calling
+      context_window: 200000
+      cost_per_million_input: 0.80
+      cost_per_million_output: 4.00
+
+# Per-agent routing by best quality/cost ratio (R-800-030 v1, client-side).
+# Orchestrator roles : deep reasoning → Opus (architect), balanced → Sonnet,
+# cheap leaf work → Haiku. The C3/C7 service agents (chat RAG, the DocGen
+# tool loop, KG extraction) are routed to Haiku — it carries reliable
+# tool-calling at the lowest cost, sufficient for these tasks. Ollama is NOT
+# a proxy route : it stays the separate local-dev-only path (revert the two
+# C8_GATEWAY_URL/C8_DEFAULT_MODEL lines in .env.dev to use it offline).
+agent_routes:
+  architect: claude-opus-flagship
+  planner: claude-sonnet-midtier
+  implementer: claude-sonnet-midtier
+  spec-reviewer: claude-sonnet-midtier
+  quality-reviewer: claude-sonnet-midtier
+  sub-agent: claude-haiku-fast
+  c3-rag: claude-haiku-fast
+  c3-docgen: claude-haiku-fast
+  c7-kg-extractor: claude-haiku-fast
+  c7-contextualizer: claude-haiku-fast
+  # T3 LLM-as-judge (R-700-032). D-011 wants a DIFFERENT family than the
+  # generator ; with Anthropic-only routing this is the strongest available
+  # tier (different-tier, NOT cross-family). Re-point at a non-Anthropic
+  # family once a second provider is wired, before enabling the judge.
+  c6-judge: claude-opus-flagship
+  default: claude-sonnet-midtier
+
+budgets:
+  default_hard_cap_usd_per_month: 100.0
+  default_soft_cap_ratio: 0.8
+  window: calendar_month_utc
+
+archival:
+  enabled: false
+  minio_bucket: llm-archive
+  encryption: none
+
+rate_limits:
+  per_tenant_rpm: 1000
+  per_user_rpm: 100
+
+# Proxy-native sections (consumed by the off-the-shelf LiteLLM proxy ;
+# opaque to the AyWizz validator). Values are env references resolved by
+# LiteLLM at startup.
+general_settings:
+  # The single shared gateway credential clients must present
+  # (R-800-012) — the SAME `C8_GATEWAY_API_KEY` the C8 client sends as
+  # its Bearer. Injected via K8s Secret / ESO in prod, `.env.secret` in
+  # dev. The real provider key (ANTHROPIC_API_KEY) is separate and lives
+  # ONLY here in the proxy.
+  master_key: os.environ/C8_GATEWAY_API_KEY
+
+litellm_settings:
+  # Cost forwarder (R-800-070) : a mounted CustomLogger that POSTs one
+  # envelope per completed call to the AyWizz cost receiver
+  # (`COST_RECEIVER_URL`). The proxy image is unmodified (§4.5) — the
+  # callback file is mounted + put on PYTHONPATH ; only `litellm` +
+  # `httpx` (already in the image) are imported.
+  callbacks: ["cost_forwarder.cost_forwarder_instance"]
+  drop_params: true

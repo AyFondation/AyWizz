@@ -1,0 +1,71 @@
+# =============================================================================
+# File: deployment.yaml
+# Version: 2
+# Path: infra/k8s/base/c9_mcp/deployment.yaml
+# Description: C9 MCP Server Deployment. Shared `aywizz-api` image,
+#              runtime selected via `COMPONENT_MODULE=c9_mcp`. Exposes
+#              JSON-RPC 2.0 over HTTP for external LLM agents.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c9-mcp
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c9-mcp
+    app.kubernetes.io/component: c9
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: c9-mcp
+      app.kubernetes.io/component: c9
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: c9-mcp
+        app.kubernetes.io/component: c9
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/ayfondation/aywizz-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: COMPONENT_MODULE
+              value: c9_mcp
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          envFrom:
+            - configMapRef:
+                name: aywizz-config
+            - secretRef:
+                name: aywizz-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

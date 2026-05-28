@@ -1,0 +1,20 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/c8_gateway/kustomization.yaml
+# Description: Kustomize entry for the C8 tier : the off-the-shelf LiteLLM
+#              proxy + the AyWizz cost receiver, plus the two generated
+#              ConfigMaps (proxy config + mounted cost forwarder). The
+#              ConfigMaps are GENERATED from the single sources under
+#              infra/c8_gateway/ — regenerate with
+#              `python3 infra/c8_gateway/scripts/gen_k8s_c8_configmaps.py`.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - c8-configmaps.yaml
+  - litellm-deployment.yaml
+  - litellm-service.yaml
+  - receiver-deployment.yaml
+  - receiver-service.yaml

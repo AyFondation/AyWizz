@@ -1,0 +1,36 @@
+# =============================================================================
+# File: docker-compose.c8.yml
+# Version: 1
+# Path: infra/c8_gateway/docker-compose.c8.yml
+# Description: Local-dev docker-compose for the LiteLLM proxy (C8).
+#              Mounts the sample configuration read-only; reads API keys
+#              from the host environment (or a .env file next to this one).
+#              Production deployment SHALL use Kubernetes manifests under
+#              `infra/c8_gateway/k8s/` — placeholders are in place.
+# =============================================================================
+
+services:
+  c8:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: ay-c8-llm
+    restart: unless-stopped
+    command:
+      - "--config"
+      - "/etc/litellm/litellm-config.yaml"
+      - "--port"
+      - "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config/litellm-config.yaml:/etc/litellm/litellm-config.yaml:ro
+    environment:
+      # Supply these via a .env file or shell export; see
+      # `infra/c8_gateway/config/litellm-config.yaml` for referenced names.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      # The callback writes llm_calls to ArangoDB; point at the local
+      # shared Arango service when deployed alongside other components.
+      C8_ARANGO_HOST: ${C8_ARANGO_HOST:-arangodb}
+      C8_ARANGO_PORT: ${C8_ARANGO_PORT:-8529}

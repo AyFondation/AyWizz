@@ -1,0 +1,79 @@
+# =============================================================================
+# File: networkpolicy.yaml
+# Version: 1
+# Path: infra/k8s/base/c4_workers/networkpolicy.yaml
+# Description: Default-deny baseline for sub-agent pods (R-200-031).
+#              Sub-agents SHALL egress to ONLY :
+#                - DNS (kube-dns / coredns in `kube-system`) for name
+#                  resolution.
+#                - The C8 LLM gateway pod (label
+#                  `app.kubernetes.io/name=c8-llm` in `aywizz`).
+#                - The C10 MinIO pod (label
+#                  `app.kubernetes.io/name=c10-minio` in `aywizz`).
+#
+#              No general internet egress. The orchestrator's LLM
+#              provider sits BEHIND C8, never directly addressable
+#              from a sub-agent (single-egress invariant per D-011).
+#
+#              Caveat : Docker Desktop K8s ships without a CNI that
+#              enforces NetworkPolicies (kubenet baseline) — the
+#              policy is a NO-OP in dev. In prod with Calico/Cilium
+#              the rules are enforced. The policy is shipped here so
+#              the contract is in the manifest regardless.
+#
+# @relation implements:R-200-031
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c4-sub-agent-egress
+  namespace: c4-workers
+  labels:
+    app.kubernetes.io/name: c4-sub-agent-egress
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  # Apply to every sub-agent pod ; their `metadata.labels` set by the
+  # K8sDispatcher includes `app.kubernetes.io/name=c4-sub-agent`.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: c4-sub-agent
+  policyTypes:
+    - Egress
+  egress:
+    # 1) DNS — kube-system :53/UDP+TCP.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2) C8 LLM gateway pod in `aywizz` :8000. The label
+    # `app.kubernetes.io/name=litellm` matches the LiteLLM proxy
+    # Deployment once it lands (P1.1 — currently dev compose only).
+    # The policy is forward-compatible : zero matches = deny by default,
+    # which is the safe behaviour until the proxy Deployment ships.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aywizz
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000
+    # 3) MinIO pod in `aywizz` :9000. Label matches the existing
+    # statefulset (`infra/k8s/base/c10_minio/statefulset.yaml`).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aywizz
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minio
+      ports:
+        - protocol: TCP
+          port: 9000

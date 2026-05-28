@@ -1,0 +1,13 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/ay_platform_ui/kustomization.yaml
+# Description: Kustomize entry for the Next.js UI component.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap-runtime.yaml

@@ -1,0 +1,23 @@
+# =============================================================================
+# File: pvc.yaml
+# Version: 1
+# Path: infra/k8s/base/c12_workflow/pvc.yaml
+# Description: PVC for n8n SQLite DB + uploads (`/home/node/.n8n`).
+#              5 Gi covers the workflow definitions + a few months of
+#              ingestion logs — operations push it higher in production
+#              overlays once retention demands grow.
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: c12-data
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c12-workflow
+    app.kubernetes.io/component: c12
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,60 @@
+# =============================================================================
+# File: .gitignore
+# Version: 2
+# Path: .gitignore
+# Description: Monorepo-wide gitignore. Uses ** patterns to cover current
+#              and future sub-projects (ay_platform_core, ay_platform_ui).
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.Python
+sample-code-main
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing caches (anywhere in the monorepo)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Test reports (generated, never committed). Pattern covers any sub-project.
+**/reports/*
+!**/reports/.gitkeep
+
+# Node.js (anticipating ay_platform_ui)
+node_modules/
+.next/
+.turbo/
+dist/
+*.tsbuildinfo
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.local
+.env.secret
+*.pem
+*.key
+**/research/**
+**/ay_extractor/**

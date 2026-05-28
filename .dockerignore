@@ -1,0 +1,115 @@
+# =============================================================================
+# Version: 1
+# Path: .dockerignore
+# Description: Excludes from Docker build contexts (devcontainer +
+#              future infra/docker/Dockerfile.{api,ui}). Cuts hundreds
+#              of MB by skipping VCS metadata, IDE caches, Python /
+#              Node test artefacts, generated reports, and IDE config.
+#
+#              The .devcontainer/Dockerfile only COPYs three things :
+#                - ay_platform_core/pyproject.toml
+#                - ay_platform_core/src/
+#                - ay_platform_ui/package*.json
+#              Everything else is wasted bandwidth at build time.
+#
+#              Patterns use git-style globs ; last match wins.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# VCS / IDE / OS metadata
+# -----------------------------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.github
+
+.vscode
+.idea
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Claude Code internals (session state, learned rules, scheduled tasks)
+# -----------------------------------------------------------------------------
+.claude
+
+# -----------------------------------------------------------------------------
+# Specs / docs / infra manifests : NOT consumed by any current Dockerfile.
+# Re-evaluate when infra/docker/Dockerfile.{api,ui} land — those tier
+# images may need additional paths.
+# -----------------------------------------------------------------------------
+requirements
+infra
+README.md
+CLAUDE.md
+*.md
+
+# Devcontainer config (Dockerfile itself is read by the builder via
+# `-f`, NOT from the build context — safe to exclude wholesale).
+.devcontainer
+
+# -----------------------------------------------------------------------------
+# Env files — secrets must NEVER be baked into an image. `.env.example`
+# is the only versioned, non-sensitive form ; we still don't need it
+# in build context (no Dockerfile COPY references it).
+# -----------------------------------------------------------------------------
+.env
+.env.*
+
+# -----------------------------------------------------------------------------
+# Python : caches, build artefacts, coverage outputs
+# -----------------------------------------------------------------------------
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.egg-info
+**/*.egg
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.tox
+**/.nox
+**/.coverage
+**/coverage.xml
+**/htmlcov
+**/dist
+**/build
+**/.eggs
+
+# ay_platform_core test reports (each pytest run writes a timestamped
+# directory ; can balloon to hundreds of MB).
+ay_platform_core/reports
+
+# -----------------------------------------------------------------------------
+# Node / Next.js / Vitest / Playwright artefacts
+# -----------------------------------------------------------------------------
+**/node_modules
+**/.next
+**/.turbo
+**/coverage
+**/playwright-report
+**/test-results
+**/.vitest-cache
+**/.cache
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# Logs & misc
+# -----------------------------------------------------------------------------
+**/*.log
+**/*.tmp
+**/*.swp
+**/*.bak
+
+# -----------------------------------------------------------------------------
+# Self : .dockerignore not needed inside the image.
+# -----------------------------------------------------------------------------
+.dockerignore

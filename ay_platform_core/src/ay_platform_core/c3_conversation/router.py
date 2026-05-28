@@ -1,0 +1,167 @@
+# =============================================================================
+# File: router.py
+# Version: 2
+# Path: ay_platform_core/src/ay_platform_core/c3_conversation/router.py
+# Description: FastAPI APIRouter for C3 — 8 endpoints.
+#              JWT identity is read from X-User-Id header propagated by C1
+#              forward-auth (Traefik → C2 /auth/verify → X-User-Id).
+#              In local dev / testing, X-User-Id can be injected directly.
+#
+#              v2: `send_message` forwards `user_prompt` /
+#              `project_prompt` from the body to the service, so the
+#              RAG prompt assembly can prepend both ahead of the
+#              retrieved context block.
+# @relation R-100-039 R-100-042
+# =============================================================================
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi.responses import StreamingResponse
+
+from ay_platform_core.c3_conversation.models import (
+    ConversationCreate,
+    ConversationListResponse,
+    ConversationResponse,
+    ConversationUpdate,
+    MessageListResponse,
+    MessageRequest,
+)
+from ay_platform_core.c3_conversation.service import ConversationService
+
+router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
+
+
+def _get_service(request: Request) -> ConversationService:
+    """Retrieve service instance injected via app.state."""
+    svc: ConversationService = request.app.state.conversation_service
+    return svc
+
+
+def _current_user(x_user_id: str = Header(..., alias="X-User-Id")) -> str:
+    """Extract user identity from C1 forward-auth propagated header."""
+    return x_user_id
+
+
+# ---------------------------------------------------------------------------
+# Conversation CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.get("", response_model=ConversationListResponse)
+async def list_conversations(
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> ConversationListResponse:
+    conversations = await svc.list_conversations(user_id)
+    return ConversationListResponse(conversations=conversations)
+
+
+@router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
+async def create_conversation(
+    payload: ConversationCreate,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> ConversationResponse:
+    conv = await svc.create_conversation(user_id, payload)
+    return ConversationResponse(conversation=conv)
+
+
+@router.get("/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(
+    conversation_id: UUID,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> ConversationResponse:
+    conv = await svc.get_conversation(conversation_id, user_id)
+    return ConversationResponse(conversation=conv)
+
+
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation(
+    conversation_id: UUID,
+    payload: ConversationUpdate,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> ConversationResponse:
+    conv = await svc.update_conversation(conversation_id, user_id, payload)
+    return ConversationResponse(conversation=conv)
+
+
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: UUID,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> None:
+    await svc.delete_conversation(conversation_id, user_id)
+
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{conversation_id}/messages", response_model=MessageListResponse)
+async def list_messages(
+    conversation_id: UUID,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> MessageListResponse:
+    messages = await svc.list_messages(conversation_id, user_id)
+    return MessageListResponse(messages=messages)
+
+
+@router.post("/{conversation_id}/messages", status_code=status.HTTP_200_OK)
+async def send_message(
+    conversation_id: UUID,
+    payload: MessageRequest,
+    user_id: str = Depends(_current_user),
+    x_tenant_id: str | None = Header(default=None),
+    x_user_roles: str = Header(default="project_editor", alias="X-User-Roles"),
+    svc: ConversationService = Depends(_get_service),
+) -> StreamingResponse:
+    """Send a user message and stream the assistant reply as SSE.
+
+    When the C3 service has been wired with C7 + C8 AND the conversation
+    has a `project_id` AND the request carries `X-Tenant-Id`, the reply
+    is generated by an LLM augmented with the project's retrieved
+    sources (Phase D RAG flow). Otherwise the legacy stub stream is
+    returned.
+
+    `X-User-Roles` is propagated to the inter-component HTTP call to
+    C7 (RemoteMemoryService). The remote C7 enforces its own RBAC on
+    `/api/v1/memory/retrieve`, so the role list must be authentic —
+    it came from C2 /auth/verify via Traefik forward-auth.
+    """
+    stream = await svc.send_message_stream(
+        conversation_id,
+        user_id,
+        payload.content,
+        tenant_id=x_tenant_id,
+        user_roles=x_user_roles,
+        user_prompt=payload.user_prompt,
+        project_prompt=payload.project_prompt,
+        references=payload.references,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# Expert mode (NATS pipeline events stub)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{conversation_id}/events")
+async def expert_mode_events(
+    conversation_id: UUID,
+    user_id: str = Depends(_current_user),
+    svc: ConversationService = Depends(_get_service),
+) -> StreamingResponse:
+    """SSE stream of pipeline telemetry events (R-100-074 stub)."""
+    await svc.get_conversation(conversation_id, user_id)  # access check
+    stream: AsyncIterator[str] = svc.expert_mode_stream()
+    return StreamingResponse(stream, media_type="text/event-stream")

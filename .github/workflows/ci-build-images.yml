@@ -1,0 +1,156 @@
+# Version: 3
+# Path: .github/workflows/ci-build-images.yml
+#
+# CI - build the platform images and push them to GHCR. Two images :
+#   - aywizz-api : Python tier (infra/docker/Dockerfile.api). Single
+#     image, N containers selected at runtime via COMPONENT_MODULE
+#     (R-100-114 v2).
+#   - aywizz-ui  : Next.js 16 frontend (infra/docker/Dockerfile.ui).
+#     Single image, runtime config via /runtime-config.json mounted
+#     from a K8s ConfigMap.
+#
+# Triggered ONLY when ci-tests succeeds on main, so we never publish
+# :latest from a broken commit.
+#
+# v3 (2026-04-29) : adds the `build-ui` job for the Next.js frontend
+# now that the scaffold landed (`ay_platform_ui/` v3 + Dockerfile.ui).
+# Same metadata-action / build-push-action pattern as build-api.
+#
+# v2 (2026-04-28): added explicit OCI labels (description / vendor /
+# licenses) so GHCR / Docker Hub package pages are self-describing.
+
+name: ci-build-images
+
+on:
+  workflow_run:
+    workflows: [ci-tests]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ci-build-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-api:
+    name: build & push api (GHCR)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (sha that triggered ci-tests)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Lowercase repository owner
+        # GHCR namespaces are case-sensitive and must be lowercase.
+        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER_LC }}/aywizz-api
+          tags: |
+            type=raw,value=latest
+            type=raw,value=main
+            type=sha,format=short,prefix=sha-
+          # Explicitly populate the OCI label fields that drive the
+          # GHCR package page. metadata-action would auto-fill them
+          # from the GitHub repo description (empty in this repo) —
+          # we override so the page is informative regardless.
+          labels: |
+            org.opencontainers.image.title=AyWizz API
+            org.opencontainers.image.description=Shared FastAPI image for the AyWizz platform Python tier. Hosts every backbone component (C2 Auth, C3 Conversation, C4 Orchestrator, C5 Requirements, C6 Validation, C7 Memory, C9 MCP). The active component is selected at runtime via the COMPONENT_MODULE env variable — one image, N containers.
+            org.opencontainers.image.vendor=AyWizz
+            org.opencontainers.image.licenses=Proprietary
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md
+
+      - name: Build and push api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile.api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          provenance: false
+
+  build-ui:
+    name: build & push ui (GHCR)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (sha that triggered ci-tests)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Lowercase repository owner
+        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute UI image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER_LC }}/aywizz-ui
+          tags: |
+            type=raw,value=latest
+            type=raw,value=main
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=AyWizz UI
+            org.opencontainers.image.description=Next.js 16 frontend for the AyWizz platform. Boots from /runtime-config.json (mountable as a K8s ConfigMap) and GET /ux/config (served by C2) so the API URL, brand and feature flags can change WITHOUT rebuilding the image — single image, N environments.
+            org.opencontainers.image.vendor=AyWizz
+            org.opencontainers.image.licenses=Proprietary
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md
+
+      - name: Build and push ui image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile.ui
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=ui
+          cache-to: type=gha,mode=max,scope=ui
+          provenance: false

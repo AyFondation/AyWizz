@@ -1,0 +1,126 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 2
+# Path: infra/k8s/overlays/prod/kustomization.yaml
+# Description: Production overlay. Same `infra/k8s/base/` as dev, but :
+#                - SHA-pinned image tags (NOT :latest) for reproducibility ;
+#                - `disableNameSuffixHash: false` so a change to .env /
+#                  .env.secret triggers a rolling restart automatically
+#                  (the opposite tradeoff to dev — prod prefers safety
+#                  over predictability) ;
+#                - replica bump on the stateless API tier (2+ replicas) ;
+#                - Pod Security `restricted` already applied at namespace
+#                  level via base manifests.
+#
+# Operator-authored sources at deploy time (NEVER committed) :
+#   infra/k8s/overlays/prod/.env         — non-secret config values.
+#   infra/k8s/overlays/prod/.env.secret  — credentials (Tier-2 per
+#                                          CLAUDE.md §4.6). Operator
+#                                          populates from Vault/KMS
+#                                          during deploy.
+#
+# DEFERRED (not in this overlay — operator decisions required) :
+#   • TLS termination + cert-manager (Q-100-* / R-100-118 prod).
+#   • External Secrets Operator / Sealed Secrets (Q-100-020).
+#   • HorizontalPodAutoscaler (Q-100-050).
+#   • PodDisruptionBudget for the API tier.
+#   • Persistent volume sizing for ArangoDB / MinIO / Gitea (PVC class).
+#   • Ingress / IngressClass beyond the Traefik bundle in c1_gateway.
+#   • Per-tenant resource quotas + LimitRange.
+# Each deferred item is meant to be added as a separate overlay PR with
+# the operator's policy decisions encoded.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: aywizz-config
+    behavior: create
+    envs:
+      - .env
+secretGenerator:
+  - name: aywizz-secrets
+    behavior: create
+    envs:
+      - .env.secret
+    type: Opaque
+
+# Hash-suffix the generated names so a change to .env / .env.secret
+# triggers a rolling restart automatically — prod prefers safety
+# (changes propagate) over predictability (manual rollout).
+generatorOptions:
+  disableNameSuffixHash: false
+
+# Pin to a specific sha-* tag for reproducibility. The operator
+# replaces the `newTag` value during the deploy ; a `:latest` in
+# prod is forbidden by R-100-114 v2.
+images:
+  - name: ghcr.io/ayfondation/aywizz-api
+    newTag: sha-REPLACE_ME_AT_DEPLOY
+  - name: ghcr.io/ayfondation/aywizz-ui
+    newTag: sha-REPLACE_ME_AT_DEPLOY
+
+# Replica patches : stateless API tier scales to 2+ replicas for HA.
+# Data tier (ArangoDB / MinIO StatefulSets) stays at the base count —
+# horizontal scaling there is a separate operational decision (sharding,
+# replication factor) tracked as a deferred item above.
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c2-auth
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c3-conversation
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c4-orchestrator
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c5-requirements
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c7-memory
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c9-mcp
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2

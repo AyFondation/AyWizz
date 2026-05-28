@@ -1,0 +1,90 @@
+# =============================================================================
+# File: receiver-deployment.yaml
+# Version: 2
+# Path: infra/k8s/base/c8_gateway/receiver-deployment.yaml
+# Description: C8 cost receiver Deployment (R-800-070). Shared `aywizz-api`
+#              image, runtime selected via `COMPONENT_MODULE=c8_llm`. The
+#              LiteLLM proxy's mounted forwarder POSTs each call here ; this
+#              service computes the cost (catalog = the proxy config's
+#              model_list, mounted) and persists one `llm_calls` row in
+#              ArangoDB. Internal-only — a NetworkPolicy SHOULD restrict
+#              ingress to the litellm pod in prod.
+#
+# @relation implements:R-100-114
+# @relation implements:R-800-070
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c8-cost-receiver
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c8-cost-receiver
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: c8-cost-receiver
+      app.kubernetes.io/component: c8
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: c8-cost-receiver
+        app.kubernetes.io/component: c8
+        app.kubernetes.io/part-of: aywizz-platform
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/ayfondation/aywizz-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: COMPONENT_MODULE
+              value: c8_llm
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # The mounted proxy config's model_list is the cost catalog.
+            - name: C8_LITELLM_CONFIG_PATH
+              value: /app/config.yaml
+          envFrom:
+            - configMapRef:
+                name: aywizz-config
+            - secretRef:
+                name: aywizz-secrets
+          volumeMounts:
+            - name: litellm-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+      volumes:
+        - name: litellm-config
+          configMap:
+            name: c8-litellm-config

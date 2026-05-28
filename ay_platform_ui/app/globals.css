@@ -1,0 +1,24 @@
+/* =============================================================================
+ * File: globals.css
+ * Version: 1
+ * Path: ay_platform_ui/app/globals.css
+ * Description: Platform-wide styles. Tailwind v4 CSS-first configuration —
+ *              the @theme block declares design tokens; Tailwind generates
+ *              utility classes from them at build time.
+ * ============================================================================= */
+
+@import "tailwindcss";
+
+@theme {
+  --color-surface: oklch(0.99 0 0);
+  --color-surface-muted: oklch(0.96 0 0);
+  --color-fg: oklch(0.17 0 0);
+  --color-accent: oklch(0.63 0.19 255);
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}

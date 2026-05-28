@@ -1,0 +1,111 @@
+# Version: 2
+# Path: .github/workflows/ci-k8s-validate.yml
+#
+# CI - validate the K8s manifests under `infra/k8s/`. Four levels:
+#   L1 — kubectl kustomize build + kubeval schema validation (offline,
+#        fast, runs on every PR touching infra/k8s/).
+#   L2 — kind cluster bring-up + apply + wait for Deployments /
+#        StatefulSets / Jobs.
+#   L3 — endpoint smoke via Traefik port-forward (curl /auth/config 200,
+#        curl /api/v1/memory/health 401 to verify forward-auth fires).
+#   L4 — pytest -m system_k8s (`run_k8s_system_tests.sh`): full kind
+#        bring-up + image build + apply + 4 Python smoke tests
+#        (open route 200, protected 401, login + token round-trip,
+#        token validation across components). v2.
+
+name: ci-k8s-validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/k8s/**"
+      - "infra/docker/**"
+      - "infra/scripts/k8s_*.sh"
+      - "ay_platform_core/scripts/run_k8s_system_tests.sh"
+      - "ay_platform_core/tests/system/k8s/**"
+      - ".github/workflows/ci-k8s-validate.yml"
+  pull_request:
+    paths:
+      - "infra/k8s/**"
+      - "infra/docker/**"
+      - "infra/scripts/k8s_*.sh"
+      - "ay_platform_core/scripts/run_k8s_system_tests.sh"
+      - "ay_platform_core/tests/system/k8s/**"
+      - ".github/workflows/ci-k8s-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+
+  l1-static-lint:
+    name: L1 — kustomize build + kubeval
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeval
+        run: |
+          set -e
+          curl -sSL -o kubeval.tar.gz \
+            "https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz"
+          tar xf kubeval.tar.gz
+          sudo mv kubeval /usr/local/bin/
+          kubeval --version
+
+      - name: L1 validation
+        run: bash infra/scripts/k8s_validate.sh
+
+  l2-l3-kind-smoke:
+    name: L2+L3 — kind cluster smoke
+    runs-on: ubuntu-latest
+    needs: l1-static-lint
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.24.0
+
+      - name: L2+L3 smoke
+        run: bash infra/scripts/k8s_kind_smoke.sh
+
+  l4-system-tests:
+    name: L4 — pytest -m system_k8s (live K8s smoke)
+    runs-on: ubuntu-latest
+    needs: l1-static-lint
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.24.0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pytest stack (no full project install)
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          # Minimal deps to run the smoke tests; the suite uses only
+          # httpx + pytest + pytest-asyncio. Full project install is
+          # not needed (the tests hit the cluster, not in-process).
+          python -m pip install \
+            "pytest==8.4.*" \
+            "pytest-asyncio==0.26.*" \
+            "pytest-cov==7.1.*" \
+            "httpx>=0.27"
+
+      - name: Run L4 system tests
+        run: bash ay_platform_core/scripts/run_k8s_system_tests.sh

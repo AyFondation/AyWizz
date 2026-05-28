@@ -1,0 +1,348 @@
+# =============================================================================
+# File: docker-compose.dev.override.yml
+# Version: 11
+# Path: ay_platform_core/tests/docker-compose.dev.override.yml
+# Description: Compose override layered on `docker-compose.yml` by
+#              v11 (2026-05-24): fix the `litellm` cost-forwarder mount —
+#              LiteLLM resolves a `callbacks` entry as a FILE next to the
+#              config (`/app/cost_forwarder.py`), NOT via PYTHONPATH, so the
+#              module is now bind-mounted at that exact path (the proxy
+#              crashed on boot with "Could not find module file" otherwise).
+#              v10 (V2 #2): the opt-in `c4_openhands` service (profile
+#              `openhands`) gets the same .env.dev + .env.secret chain as c4
+#              so the OpenHands engine routes C8 to the real gateway in dev.
+#              `e2e_stack.sh dev` to flip C2 into demo-mode AND wire
+#              the Next.js UI into the stack so the operator gets a
+#              true same-origin experience at `http://localhost:56000`
+#              (Traefik routes `/auth/*`, `/api/v1/*`, `/ux/*` to the
+#              Python services and the catch-all `/` to the UI).
+#
+#              v9 (2026-05-22) : the `litellm` service now mounts the
+#              cost forwarder (PYTHONPATH) + a new opt-in
+#              `c8-cost-receiver` (COMPONENT_MODULE=c8_llm, profile
+#              `litellm`) persists `llm_calls` in ArangoDB (R-800-070).
+#              C8 client/proxy auth consolidated onto C8_GATEWAY_API_KEY.
+#
+#              v8 (2026-05-20) : new opt-in `litellm` service (profile
+#              `litellm`). Off-the-shelf LiteLLM proxy mounted with the
+#              shared `infra/c8_gateway/config/litellm-config.yaml`.
+#              Operator flips `C8_GATEWAY_URL=http://litellm:4000/v1`
+#              in `.env.dev` (or `.env.secret`) to route C3/C4 LLM calls
+#              through it ; per-agent routing happens client-side via
+#              `C8_AGENT_ROUTES_YAML_PATH` (R-800-030 v1).
+#
+#              docker compose's `env_file:` directive is REPLACED (not
+#              merged) by overrides — so we re-state both files
+#              explicitly. `.env.dev` lives at the monorepo root ;
+#              from this compose file's location (`tests/`) the
+#              relative path is `../../.env.dev`.
+#
+#              Only c2 carries C2_DEMO_SEED_* / C2_UX_DEV_MODE_* flags ;
+#              other services don't read those vars, so we leave them
+#              untouched.
+#
+#              v7 (2026-05-19) : route C8 to hosted Gemini (free)
+#              after 4 local models failed the agentic tool loop.
+#              c3 + c4 load an optional Tier-2 `../../.env.secret`
+#              LAST so `C3_C8_BEARER_TOKEN` (the Gemini API key,
+#              operator-authored) overrides the empty placeholder ;
+#              `required: false` keeps Ollama-offline + pytest e2e
+#              working when the file is absent. ollama_model_seed
+#              still pulls hermes3:8b so Ollama remains a valid
+#              offline fallback (revert the two .env.dev lines).
+#              v6 (2026-05-19) : pull hermes3:8b. llama3.1:8b emitted
+#              the tool call inline with the Llama `parameters` key +
+#              a corrupted `]"`-wrapped content (not structured
+#              tool_calls). hermes3 (Nous Hermes 3, Llama-3.1 base)
+#              is the dedicated agentic / function-calling pick.
+#              v5 (2026-05-19) : pull llama3.1:8b instead of
+#              qwen2.5-coder:7b. The coder model would not chain to
+#              update_document after read_document (modify requests
+#              never persisted) ; llama3.1:8b is Ollama's reference
+#              for multi-step function calling.
+#              v4 (2026-05-19) : raise the `ollama` resource envelope
+#              for the dev stack (12 GB / 4 CPU vs the base 2 GB / 2
+#              CPU ; 4 = all CPUs the VM exposes). The 2 GB container
+#              cap — not the Docker VM —
+#              OOM-killed the qwen2.5-coder:7b llama runner on load
+#              (root cause of the recurring `signal: killed`).
+#              v3 (2026-05-13) : add c4 to the override so the
+#              generate-phase pipeline (R-200-150..152) hits real
+#              Ollama in dev instead of the canned mock_llm response
+#              that returns no envelope and triggers three-fix BLOCKED.
+#              v2 (2026-05-11) : adds the `ui` service built from
+#              `infra/docker/Dockerfile.ui` (next.js standalone) and
+#              adds it to c1's depends_on so Traefik routes resolve.
+# =============================================================================
+
+services:
+  c2:
+    env_file:
+      - .env.test
+      - ../../.env.dev
+
+  # c3 picks up `C3_C7_BASE_URL` from .env.dev so the RAG flow
+  # (C3 → C7 retrieval → C8 LLM) is wired in the manual-test stack.
+  # Pytest e2e leaves .env.test's empty value in place to keep the
+  # auth-matrix deterministic.
+  #
+  # `.env.secret` (Tier-2, git-ignored, operator-authored — NEVER
+  # committed) is loaded LAST so its `C3_C8_BEARER_TOKEN` (the hosted
+  # provider API key, e.g. the Gemini key) overrides the empty
+  # placeholder from .env.test. `required: false` → absent file is
+  # ignored, so the Ollama-offline fallback and pytest e2e still run
+  # without it. Only the secret lives there ; the non-secret
+  # C8_GATEWAY_URL / C8_DEFAULT_MODEL stay in Tier-1 .env.dev.
+  c3:
+    env_file:
+      - .env.test
+      - ../../.env.dev
+      - path: ../../.env.secret
+        required: false
+
+  # c4 needs `.env.dev` so the orchestrator's in-process dispatcher
+  # routes its LLM calls to real Ollama rather than the (now
+  # profile-gated) mock_llm. Without this override the C8 client
+  # default `mock_llm:8000` from `.env.test` would resolve to an
+  # absent host in dev (mock_llm sits under profile `test`). The
+  # coherence test `test_compose_dev_profile.test_dev_override_
+  # routes_c8_calling_services_to_env_dev` pins this invariant.
+  c4:
+    env_file:
+      - .env.test
+      - ../../.env.dev
+      # Same Tier-2 secret chain as c3 : the orchestrator's in-process
+      # dispatcher also calls C8, so it needs the hosted-provider key
+      # when C8 is routed off-Ollama. Optional → Ollama fallback OK.
+      - path: ../../.env.secret
+        required: false
+
+  # c4_openhands (profile `openhands`) runs C4 with the OpenHands generate
+  # engine, which also calls C8 — so it needs the SAME .env.dev + .env.secret
+  # chain as c4, else its `C8_GATEWAY_URL` resolves to the profile-gated
+  # mock_llm. Pinned by the `_C8_CALLING_SERVICES` coherence invariant.
+  c4_openhands:
+    env_file:
+      - .env.test
+      - ../../.env.dev
+      - path: ../../.env.secret
+        required: false
+
+  # Raise the Ollama resource envelope for the dev stack ONLY. The
+  # base docker-compose.yml caps ollama at 2 GB / 2 CPU — sized for
+  # the embedding model (all-minilm, ~100 MB) and kept lean so the
+  # pytest e2e tier stays light. The DocGen dev flow runs a real
+  # chat model (qwen2.5-coder:7b, ~5-6 GB resident); under the 2 GB
+  # cap the container cgroup OOM-killed the llama runner on load
+  # (`signal: killed`, ExitCode OOMKilled) regardless of the Docker
+  # Desktop VM size — that 2 GB ceiling, not the VM, was the blocker
+  # (diagnosed 2026-05-19). Compose deep-merges deploy.resources by
+  # key, so this overrides only memory/cpus for the dev stack.
+  ollama:
+    deploy:
+      resources:
+        limits:
+          # VM exposes 4 CPUs ; take them all for 7B CPU inference
+          # (the latency bottleneck). Memory well above the ~5-6 GB
+          # resident footprint + KV/compute headroom.
+          cpus: "4.0"
+          memory: 12288M
+        reservations:
+          cpus: "2.0"
+          memory: 6144M
+
+  # Pull a chat model into Ollama in addition to the embedding model
+  # already seeded by docker-compose.yml. The dev stack routes C8
+  # (`C8_GATEWAY_URL` in `.env.dev`) to Ollama's OpenAI-compat
+  # endpoint, so a real chat model must be available before any
+  # /messages call hits C8. `llama3.2:1b` is the smallest reasonable
+  # generation model (~1.3 GB) ; swap freely (e.g. `qwen2.5:0.5b`
+  # for an even smaller footprint, `llama3.1:8b` for quality at the
+  # cost of disk + RAM).
+  ollama_model_seed:
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        set -e
+        echo "[dev] Pulling embedding model all-minilm"
+        ollama pull all-minilm
+        echo "[dev] Pulling chat model hermes3:8b (~4.7 GB download on first run)"
+        ollama pull hermes3:8b
+        echo "[dev] Seed done."
+
+  # Next.js UI — built from the monorepo root via Dockerfile.ui
+  # (multi-stage standalone Next bundle). Exposed only inside the
+  # compose network ; Traefik (c1) routes the catch-all `/` to it.
+  ui:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.ui
+      args:
+        # Forwards the BUILD_VERSION env into the Dockerfile so it gets
+        # baked into the Next.js client bundle as
+        # NEXT_PUBLIC_BUILD_VERSION ; visible in the UX footer to
+        # confirm a rebuild took effect.
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
+    image: ay-ui:local
+    container_name: ay-ui
+    networks:
+      - platform
+    expose:
+      - "3000"
+    # The UI doesn't need any env vars at runtime — apiBaseUrl comes
+    # from /runtime-config.json (mounted/baked default = empty string,
+    # i.e. same-origin via Traefik).
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+  # c1 (Traefik) gets `ui` as an additional dependency so it doesn't
+  # start spitting 502s before the UI is ready. compose merges
+  # depends_on lists (does NOT replace them) for overrides.
+  c1:
+    depends_on:
+      ui:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # LiteLLM proxy (opt-in, profile = `litellm`) — R-800-001..004.
+  # ---------------------------------------------------------------------------
+  # Off-the-shelf LiteLLM proxy. Runs alongside the existing stack but
+  # is NOT started by default (no profile = ignored) — `e2e_stack.sh
+  # dev` keeps today's direct-provider flow. Operator opts in with
+  # `--profile litellm` to flip C8_GATEWAY_URL onto the proxy and get
+  # per-agent routing (R-800-030 v1 client-side resolver) backed by a
+  # real provider cost/budget surface.
+  #
+  # The config YAML is the SAME file (`infra/c8_gateway/config/
+  # litellm-config.yaml`) the Python schema validates — single source
+  # of truth (R-800-024). `ANTHROPIC_API_KEY` is pulled from
+  # `../../.env.secret` so the Tier-2 discipline (§4.6) holds : the
+  # key never lands in a Tier-1 env file.
+  litellm:
+    profiles:
+      - litellm
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: ay-litellm
+    networks:
+      - platform
+    expose:
+      - "4000"
+    volumes:
+      # Canonical Claude config (the SAME file the schema validates and
+      # the K8s ConfigMap mounts). Per-agent routing by quality/cost is
+      # client-side via C8_AGENT_ROUTES_INLINE in .env.dev. Ollama is
+      # NOT a proxy route — it stays the separate local-dev-only path.
+      - ../../infra/c8_gateway/config/litellm-config.yaml:/app/config.yaml:ro
+      # Cost forwarder (R-800-070). LiteLLM resolves the `callbacks` entry
+      # `cost_forwarder.cost_forwarder_instance` as a FILE NEXT TO the config
+      # (`/app/cost_forwarder.py`) — NOT via PYTHONPATH — so the module file is
+      # bind-mounted there directly (off-the-shelf image stays unmodified, §4.5).
+      - ../../infra/c8_gateway/callbacks/cost_forwarder.py:/app/cost_forwarder.py:ro
+    environment:
+      # Non-secret wiring (Tier-1). Point the mounted forwarder at the
+      # AyWizz cost receiver.
+      COST_RECEIVER_URL: http://c8-cost-receiver:8000
+    env_file:
+      # Tier-2 secrets : ANTHROPIC_API_KEY (real provider key, proxy-only)
+      # + C8_GATEWAY_API_KEY (the shared gateway credential = the proxy
+      # master key). Absent file → proxy starts but every route 401s
+      # (no master key) ; populate .env.secret to use it.
+      - path: ../../.env.secret
+        required: false
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "4000"
+      - "--host"
+      - "0.0.0.0"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:4000/health/liveliness\").read()'"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # C8 cost receiver (opt-in, profile = `litellm`) — R-800-070.
+  # ---------------------------------------------------------------------------
+  # The LiteLLM proxy's mounted forwarder POSTs each call here ; this
+  # service computes the cost (model_list catalog from the same mounted
+  # config) and persists one `llm_calls` row in ArangoDB. Internal-only
+  # (reached at `c8-cost-receiver:8000` = the proxy's COST_RECEIVER_URL).
+  # Shared image, COMPONENT_MODULE=c8_llm. Src is bind-mounted + --reload
+  # so code edits land without a rebuild (dev ergonomics, like c2..c9).
+  c8-cost-receiver:
+    profiles:
+      - litellm
+    image: ay-api:local
+    container_name: ay-c8-cost-receiver
+    networks:
+      - platform
+    expose:
+      - "8000"
+    depends_on:
+      arangodb:
+        condition: service_healthy
+    environment:
+      COMPONENT_MODULE: c8_llm
+      # The proxy config's model_list is the cost catalog (R-800-070).
+      C8_LITELLM_CONFIG_PATH: /app/config.yaml
+    volumes:
+      - type: bind
+        source: ../../ay_platform_core/src
+        target: /app/ay_platform_core/src
+        read_only: true
+      - ../../infra/c8_gateway/config/litellm-config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env.test
+      - ../../.env.dev
+      - path: ../../.env.secret
+        required: false
+    command:
+      - "sh"
+      - "-c"
+      - "exec uvicorn ay_platform_core.c8_llm.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/ay_platform_core/src"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)\" || exit 1"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
