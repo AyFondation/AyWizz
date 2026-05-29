@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_validate.sh
-# Version: 2
+# Version: 3
 # Path: infra/scripts/k8s_validate.sh
 # Description: L1 — static lint of K8s manifests. Two stages:
 #                (1) `kubectl kustomize` builds the overlay — catches
@@ -10,6 +10,17 @@
 #                (2) `kubeval` validates each document against published
 #                    Kubernetes schemas. Skipped silently when kubeval
 #                    is not on PATH (CI installs it).
+#
+#              v3 (2026-05-29): synthesize missing Tier-2 env sources
+#              (.env / .env.secret) before building. The dev overlay's
+#              configMapGenerator/secretGenerator read operator-owned
+#              files that are gitignored (§4.6) and thus absent on a
+#              fresh checkout / CI runner — without this, `kubectl
+#              kustomize overlays/dev` fails with an evalsymlink error.
+#              L1 lints STRUCTURE, not values, so empty placeholders
+#              (or the committed *.example when present) are sufficient.
+#              Synthesized files are removed on exit ; pre-existing
+#              operator files are never touched.
 #
 #              v2 (2026-04-28): dropped `kubectl apply --dry-run=client`
 #              because it requires cluster connectivity even with
@@ -35,7 +46,48 @@ if [ ! -d "${OVERLAY_PATH}" ]; then
 fi
 
 BUILD_OUT="$(mktemp)"
-trap 'rm -f "${BUILD_OUT}"' EXIT
+SYNTH_ENV=()
+cleanup() {
+    rm -f "${BUILD_OUT}"
+    # Remove only the placeholders we created — never an operator file.
+    local f
+    for f in "${SYNTH_ENV[@]:-}"; do
+        if [ -n "${f}" ]; then
+            rm -f "${f}"
+        fi
+    done
+    # Never let the trap clobber the script's real exit status: an empty
+    # SYNTH_ENV makes the loop's last test return 1, which would otherwise
+    # leak as the script exit code under `set -e`.
+    return 0
+}
+trap cleanup EXIT
+
+# The dev overlay reads Tier-2 env sources (.env / .env.secret) that are
+# gitignored (§4.6) and absent on a fresh checkout / CI runner. L1 lints
+# STRUCTURE only, so synthesize a placeholder when a referenced source is
+# missing: copy the committed `<name>.example` if present, else an empty
+# file. The ConfigMap keeps its `literals` and the Secret stays a valid
+# Opaque object. Pre-existing operator files are left untouched.
+ensure_env_source() {
+    local fname="$1"
+    # Only act when the overlay's kustomization actually references it as
+    # an env source — avoids creating spurious files for overlays that do
+    # not use that generator.
+    grep -Eq "^[[:space:]]*-[[:space:]]+${fname//./\\.}[[:space:]]*$" \
+        "${OVERLAY_PATH}/kustomization.yaml" 2>/dev/null || return 0
+    local target="${OVERLAY_PATH}/${fname}"
+    [ -f "${target}" ] && return 0
+    if [ -f "${target}.example" ]; then
+        cp "${target}.example" "${target}"
+    else
+        : > "${target}"
+    fi
+    SYNTH_ENV+=("${target}")
+    echo "==> Synthesized missing env source (L1 lint only): ${fname}"
+}
+ensure_env_source ".env"
+ensure_env_source ".env.secret"
 
 echo "==> Building overlay: ${OVERLAY_PATH}"
 if ! kubectl kustomize "${OVERLAY_PATH}" > "${BUILD_OUT}"; then

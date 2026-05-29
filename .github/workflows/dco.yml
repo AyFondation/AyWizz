@@ -1,7 +1,12 @@
 # =============================================================================
 # File: dco.yml
+# Version: 2
 # Path: .github/workflows/dco.yml
 # Description: Developer Certificate of Origin (DCO) check.
+#
+#   v2 (2026-05-29): bump actions/checkout to v5 (Node 24) to clear the
+#   Node 20 runtime deprecation warning. tim-actions/dco (third-party)
+#   keeps its own runtime.
 #
 #   Every commit in a pull request must include a `Signed-off-by:`
 #   trailer whose name and email match the commit author. This is the
@@ -28,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out PR
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Fetch the full PR history so the DCO action can inspect every
           # commit between the base and the head, not just the merge commit.

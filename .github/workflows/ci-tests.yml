@@ -1,4 +1,4 @@
-# Version: 2
+# Version: 3
 # Path: .github/workflows/ci-tests.yml
 #
 # CI - run unit / contract / integration tests + coherence checks on every
@@ -8,6 +8,11 @@
 #
 # Coverage gate (--cov-fail-under=80) is enforced by ay_platform_core's
 # pyproject.toml; this workflow does NOT re-encode the threshold.
+#
+# v3 (2026-05-29) : bump GitHub-maintained actions to their Node 24
+# majors (checkout v5, setup-python v6, upload-artifact v5) — clears
+# the Node 20 runtime deprecation warning. Third-party actions
+# (schneegans badge) keep their own runtime.
 #
 # v2 (2026-05-20) : adds `pull_request` trigger so contributors see
 # the CI verdict BEFORE merging — closes the "PR can break main"
@@ -38,10 +43,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip
@@ -96,7 +101,7 @@ jobs:
 
       - name: Upload test reports artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-reports-${{ github.sha }}
           path: ay_platform_core/reports/latest/
@@ -130,10 +135,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: pip

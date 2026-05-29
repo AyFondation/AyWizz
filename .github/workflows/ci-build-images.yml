@@ -1,4 +1,4 @@
-# Version: 3
+# Version: 4
 # Path: .github/workflows/ci-build-images.yml
 #
 # CI - build the platform images and push them to GHCR. Two images :
@@ -11,6 +11,10 @@
 #
 # Triggered ONLY when ci-tests succeeds on main, so we never publish
 # :latest from a broken commit.
+#
+# v4 (2026-05-29) : bump actions/checkout to v5 (Node 24) to clear the
+# Node 20 runtime deprecation warning. The docker/* actions are
+# third-party and keep their own runtime (out of scope).
 #
 # v3 (2026-04-29) : adds the `build-ui` job for the Next.js frontend
 # now that the scaffold landed (`ay_platform_ui/` v3 + Dockerfile.ui).
@@ -43,7 +47,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout (sha that triggered ci-tests)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
@@ -105,7 +109,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout (sha that triggered ci-tests)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
