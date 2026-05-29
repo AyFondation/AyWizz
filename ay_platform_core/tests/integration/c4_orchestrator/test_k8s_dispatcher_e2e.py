@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_k8s_dispatcher_e2e.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c4_orchestrator/test_k8s_dispatcher_e2e.py
 # Description: End-to-end test for the K8sDispatcher (R-200-030..033).
 #              Exercises the full lifecycle :
@@ -84,18 +84,24 @@ async def k8s_namespace_ready() -> str:
         await kube_config.load_kube_config(config_file=_kubeconfig_env)
     except ConfigException as exc:
         pytest.skip(f"no usable cluster — invalid kubeconfig at {_kubeconfig_env}: {exc}")
-    core = client.CoreV1Api()
-    try:
-        await core.read_namespace(name="c4-workers")
-    except client.exceptions.ApiException as exc:
-        if getattr(exc, "status", 0) == 404:
-            await core.create_namespace(
-                body=client.V1Namespace(
-                    metadata=client.V1ObjectMeta(name="c4-workers"),
-                ),
-            )
-        else:
-            pytest.skip(f"cluster reachability failed: {exc}")
+    # Own the ApiClient explicitly so its aiohttp session is closed on exit.
+    # Leaving it to GC raises a ResourceWarning in `__del__`, which
+    # `filterwarnings=["error"]` promotes to a (spurious) test error — and
+    # because GC timing is non-deterministic the warning can even land on an
+    # unrelated later test's setup.
+    async with client.ApiClient() as api:
+        core = client.CoreV1Api(api)
+        try:
+            await core.read_namespace(name="c4-workers")
+        except client.exceptions.ApiException as exc:
+            if getattr(exc, "status", 0) == 404:
+                await core.create_namespace(
+                    body=client.V1Namespace(
+                        metadata=client.V1ObjectMeta(name="c4-workers"),
+                    ),
+                )
+            else:
+                pytest.skip(f"cluster reachability failed: {exc}")
     return "c4-workers"
 
 
@@ -112,39 +118,42 @@ async def test_smoke_create_pod_and_watch(
     Validates the kube client + Pod permissions on the test cluster.
     No MinIO, no LLM."""
     await kube_config.load_kube_config(config_file=_kubeconfig_env)
-    core = client.CoreV1Api()
-    pod_name = "ay-e2e-smoke"
-    body = client.V1Pod(
-        metadata=client.V1ObjectMeta(name=pod_name, namespace=k8s_namespace_ready),
-        spec=client.V1PodSpec(
-            restart_policy="Never",
-            containers=[
-                client.V1Container(
-                    name="busybox",
-                    image="busybox:1.36",
-                    command=["sh", "-c", "echo ok ; exit 0"],
-                ),
-            ],
-        ),
-    )
-    await core.create_namespaced_pod(namespace=k8s_namespace_ready, body=body)
-    try:
-        # Poll up to ~30s for the pod to reach Succeeded.
-        for _ in range(60):
-            pod = await core.read_namespaced_pod(
-                name=pod_name, namespace=k8s_namespace_ready,
-            )
-            phase = pod.status.phase if pod.status else "Pending"
-            if phase in ("Succeeded", "Failed"):
-                break
-            await asyncio.sleep(0.5)
-        assert phase == "Succeeded", f"unexpected phase {phase!r}"
-    finally:
-        with contextlib.suppress(client.exceptions.ApiException):
-            await core.delete_namespaced_pod(
-                name=pod_name, namespace=k8s_namespace_ready,
-                grace_period_seconds=5,
-            )
+    # `async with` closes the underlying aiohttp session — see the
+    # k8s_namespace_ready fixture for why an unclosed client errors here.
+    async with client.ApiClient() as api:
+        core = client.CoreV1Api(api)
+        pod_name = "ay-e2e-smoke"
+        body = client.V1Pod(
+            metadata=client.V1ObjectMeta(name=pod_name, namespace=k8s_namespace_ready),
+            spec=client.V1PodSpec(
+                restart_policy="Never",
+                containers=[
+                    client.V1Container(
+                        name="busybox",
+                        image="busybox:1.36",
+                        command=["sh", "-c", "echo ok ; exit 0"],
+                    ),
+                ],
+            ),
+        )
+        await core.create_namespaced_pod(namespace=k8s_namespace_ready, body=body)
+        try:
+            # Poll up to ~30s for the pod to reach Succeeded.
+            for _ in range(60):
+                pod = await core.read_namespaced_pod(
+                    name=pod_name, namespace=k8s_namespace_ready,
+                )
+                phase = pod.status.phase if pod.status else "Pending"
+                if phase in ("Succeeded", "Failed"):
+                    break
+                await asyncio.sleep(0.5)
+            assert phase == "Succeeded", f"unexpected phase {phase!r}"
+        finally:
+            with contextlib.suppress(client.exceptions.ApiException):
+                await core.delete_namespaced_pod(
+                    name=pod_name, namespace=k8s_namespace_ready,
+                    grace_period_seconds=5,
+                )
 
 
 # ---------------------------------------------------------------------------

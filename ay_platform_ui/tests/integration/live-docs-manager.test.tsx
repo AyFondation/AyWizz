@@ -155,3 +155,105 @@ describe("LiveDocsManager — blank-file creation", () => {
     });
   });
 });
+
+const TREE = "/api/v1/projects/proj-a/artifacts/runs/live-docs/tree";
+const DOCS = "/api/v1/projects/proj-a/documents";
+const FILE_NODE = {
+  path: "intro.md",
+  kind: "file",
+  size_bytes: 6,
+  mime_type: "text/markdown",
+  version: 1,
+};
+
+function renderManager() {
+  renderWithProviders(
+    <BootstrapGate>
+      <LiveDocsManager projectId="proj-a" variant="full" />
+    </BootstrapGate>,
+  );
+}
+
+describe("LiveDocsManager — content editor", () => {
+  it("selects a file, loads its content, then edits + saves via updateDocument", async () => {
+    const put = vi.fn(() => HttpResponse.json({ path: "intro.md", size_bytes: 9, version: 2 }));
+    server.use(
+      http.get(TREE, () => HttpResponse.json({ run_id: "live-docs", nodes: [FILE_NODE] })),
+      http.get(`${DOCS}/intro.md`, () =>
+        HttpResponse.text("# Hello\n", { headers: { "Content-Type": "text/markdown" } }),
+      ),
+      http.put(`${DOCS}/intro.md`, put),
+    );
+    renderManager();
+
+    fireEvent.click(await screen.findByTestId("file-tree-file-intro.md"));
+    await waitFor(() => expect(screen.getByText("# Hello")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("live-docs-edit"));
+    const editor = await screen.findByTestId("live-docs-editor");
+    fireEvent.change(editor, { target: { value: "edited body" } });
+    fireEvent.click(screen.getByTestId("live-docs-save"));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+  });
+});
+
+describe("LiveDocsManager — folder + context-menu ops", () => {
+  it("creates a folder from the toolbar", async () => {
+    const mkdir = vi.fn(() => HttpResponse.json({ ok: true }));
+    server.use(
+      http.get(TREE, () => HttpResponse.json({ run_id: "live-docs", nodes: [] })),
+      http.post(`${DOCS}/mkdir`, mkdir),
+    );
+    promptMock.mockReturnValueOnce("docs");
+    renderManager();
+
+    await screen.findByText("No documents yet");
+    fireEvent.click(screen.getByTestId("live-docs-new-folder"));
+    await waitFor(() => expect(mkdir).toHaveBeenCalled());
+  });
+
+  it("renames a file from the context menu", async () => {
+    const rename = vi.fn(() => HttpResponse.json({ ok: true }));
+    server.use(
+      http.get(TREE, () => HttpResponse.json({ run_id: "live-docs", nodes: [FILE_NODE] })),
+      http.post(`${DOCS}/rename`, rename),
+    );
+    promptMock.mockReturnValueOnce("renamed.md");
+    renderManager();
+
+    fireEvent.contextMenu(await screen.findByTestId("file-tree-file-intro.md"), {
+      clientX: 5,
+      clientY: 5,
+    });
+    fireEvent.click(await screen.findByText("Rename…"));
+    await waitFor(() => expect(rename).toHaveBeenCalled());
+  });
+
+  it("deletes a file from the context menu after confirmation", async () => {
+    const del = vi.fn(() => new HttpResponse(null, { status: 204 }));
+    server.use(
+      http.get(TREE, () => HttpResponse.json({ run_id: "live-docs", nodes: [FILE_NODE] })),
+      http.delete(`${DOCS}/intro.md`, del),
+    );
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    renderManager();
+
+    fireEvent.contextMenu(await screen.findByTestId("file-tree-file-intro.md"), {
+      clientX: 5,
+      clientY: 5,
+    });
+    fireEvent.click(await screen.findByText("Delete"));
+    await waitFor(() => expect(del).toHaveBeenCalled());
+  });
+});
+
+describe("LiveDocsManager — error", () => {
+  it("surfaces a non-404 tree load error", async () => {
+    server.use(http.get(TREE, () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+    renderManager();
+    await waitFor(() => expect(screen.getByText(/HTTP 500/)).toBeInTheDocument());
+  });
+});

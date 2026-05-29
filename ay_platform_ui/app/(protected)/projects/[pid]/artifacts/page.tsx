@@ -1,7 +1,14 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/artifacts/page.tsx
+//
+// v3 (2026-05-29): fix the Versions tab hanging on "Loading versions…".
+// The commits effect listed `commitsLoad.status` as a dependency AND
+// called setCommitsLoad("loading"), so the resulting re-render re-ran the
+// effect, whose cleanup cancelled the in-flight commits fetch before its
+// result could land. Dropped the self-triggering dependency (status is now
+// only a cache guard). Surfaced by tests/integration/artifacts.test.tsx.
 // Description: Project artifacts browser (Pass 1 of the Code source /
 //              DocGen feature, R-200-131). Lists runs in a left
 //              column, the selected run's file tree underneath, and
@@ -199,6 +206,13 @@ export default function ArtifactsPage() {
 
   // Load commits the first time the "Versions" tab is opened.
   // Subsequent re-clicks are idempotent — the load stays cached.
+  // NOTE: `commitsLoad.status` is read as a cache guard but intentionally
+  // NOT a dependency. Including it would re-run the effect when this very
+  // effect calls setCommitsLoad("loading"), whose cleanup would then flip
+  // `cancelled=true` on the in-flight fetch and drop its result — leaving
+  // the tab stuck on "Loading versions…". Firing on `activeTab` change is
+  // the correct trigger; the guard still short-circuits a cached reload.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: status is a cache guard, not a trigger (see note).
   useEffect(() => {
     if (activeTab !== "versions") return;
     if (commitsLoad.status === "ready" || commitsLoad.status === "loading") return;
@@ -220,7 +234,7 @@ export default function ArtifactsPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiClient, projectId, activeTab, commitsLoad.status]);
+  }, [apiClient, projectId, activeTab]);
 
   async function onDownload(): Promise<void> {
     if (!selectedRunId || !selectedPath) return;

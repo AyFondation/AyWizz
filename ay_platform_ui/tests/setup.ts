@@ -1,7 +1,10 @@
 // =============================================================================
 // File: setup.ts
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/tests/setup.ts
+//
+// v3 (2026-05-29): stub Element.scrollIntoView (absent in jsdom) so pages
+// that auto-scroll a bottom anchor in an effect (the chat view) don't throw.
 // Description: Vitest global setup. Loaded once per test process by
 //              `vitest.config.ts:test.setupFiles`.
 //
@@ -26,6 +29,13 @@ import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach } from "vitest";
 
 import { server } from "./helpers/msw-server";
+
+// jsdom does not implement Element.scrollIntoView. Pages that auto-scroll
+// (e.g. the chat view's bottom anchor in an effect) call it on mount and
+// would throw. Stub it to a no-op so those effects are inert under test.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
 
 beforeAll(() => {
   // `error` on unhandled requests : we never want a silent network
