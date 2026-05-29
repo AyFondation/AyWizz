@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_kind_smoke.sh
-# Version: 1
+# Version: 2
 # Path: infra/scripts/k8s_kind_smoke.sh
-# Description: L2 + L3 — apply the dev overlay to an ephemeral kind
-#              cluster and verify endpoints respond.
+# Description: L2 + L3 — apply the system-test overlay to an ephemeral
+#              kind cluster and verify endpoints respond.
+#
+#              v2 (2026-05-29): switched from `overlays/dev` to
+#              `overlays/system-test` and now builds + `kind load`s the
+#              platform images (aywizz-api:test / aywizz-ui:test) before
+#              applying, mirroring `run_k8s_system_tests.sh` (L4). The dev
+#              overlay is operator-facing — it pulls private GHCR `:latest`
+#              images (not present in a fresh kind node) and sources its
+#              ConfigMap/Secret from gitignored Tier-2 `.env`/`.env.secret`
+#              files (absent in CI). The system-test overlay uses locally
+#              built images and self-contained literal config, so it is the
+#              only CI-runnable target.
 #
 #                L2 (cluster smoke):
 #                  - kind create cluster
 #                  - install Traefik CRDs (required by IngressRoute /
 #                    Middleware resources)
-#                  - kubectl apply -k overlays/dev
+#                  - docker build + kind load (aywizz-api:test / -ui:test)
+#                  - kubectl apply -k overlays/system-test
 #                  - kubectl wait for every Deployment + StatefulSet
 #                  - kubectl wait for every Job to complete
 #
@@ -38,7 +50,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-OVERLAY_PATH="${INFRA_ROOT}/k8s/overlays/dev"
+MONOREPO_ROOT="$(cd "${INFRA_ROOT}/.." && pwd)"
+OVERLAY_PATH="${INFRA_ROOT}/k8s/overlays/system-test"
+DOCKERFILE_API="${INFRA_ROOT}/docker/Dockerfile.api"
+DOCKERFILE_UI="${INFRA_ROOT}/docker/Dockerfile.ui"
+IMAGE_TAG_API="aywizz-api:test"
+IMAGE_TAG_UI="aywizz-ui:test"
 CLUSTER_NAME="aywizz-ci"
 NAMESPACE="aywizz"
 PORT_FWD_LOCAL=18000
@@ -67,7 +84,7 @@ trap cleanup EXIT
 # Pre-flight
 # -----------------------------------------------------------------------------
 
-for tool in kind kubectl curl; do
+for tool in kind kubectl curl docker; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "ERROR: required tool not on PATH: ${tool}" >&2
         exit 2
@@ -85,6 +102,14 @@ kind create cluster --name "${CLUSTER_NAME}" --wait 2m
 echo "==> Installing Traefik ${TRAEFIK_VERSION} CRDs"
 kubectl apply -f "${TRAEFIK_CRDS_URL}"
 
+echo "==> Building API image ${IMAGE_TAG_API}"
+docker build -t "${IMAGE_TAG_API}" -f "${DOCKERFILE_API}" "${MONOREPO_ROOT}"
+echo "==> Building UI image ${IMAGE_TAG_UI}"
+docker build -t "${IMAGE_TAG_UI}" -f "${DOCKERFILE_UI}" "${MONOREPO_ROOT}"
+echo "==> Loading images into kind"
+kind load docker-image "${IMAGE_TAG_API}" --name "${CLUSTER_NAME}"
+kind load docker-image "${IMAGE_TAG_UI}" --name "${CLUSTER_NAME}"
+
 echo "==> Applying overlay ${OVERLAY_PATH}"
 kubectl apply -k "${OVERLAY_PATH}"
 
@@ -99,7 +124,7 @@ DEPLOYMENTS=(
     c7-memory
     c9-mcp
     c12-workflow
-    ollama
+    ay-platform-ui
 )
 for d in "${DEPLOYMENTS[@]}"; do
     echo "    waiting for deployment/${d}"
@@ -119,7 +144,7 @@ for s in "${STATEFULSETS[@]}"; do
 done
 
 echo "==> Waiting for bootstrap Jobs to complete"
-JOBS=(arangodb-init minio-init ollama-seed c12-workflow-seed)
+JOBS=(arangodb-init minio-init c12-workflow-seed)
 for j in "${JOBS[@]}"; do
     echo "    waiting for job/${j}"
     kubectl wait --for=condition=Complete -n "${NAMESPACE}" \

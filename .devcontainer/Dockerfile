@@ -1,11 +1,18 @@
 # =============================================================================
 # Dockerfile for Ubuntu Dev Environment
-# Version: 1.9.0
+# Version: 1.10.0
 # Path: .devcontainer/Dockerfile
-# Description: Development container with Python 3.13, Node.js LTS, kubectl,
+# Description: Development container with Python 3.13, Node.js 25, kubectl,
 #              Claude Code CLI. Python 3.13 installed via deadsnakes PPA.
 #
 # Versions:
+#   1.10.0: pin Node.js to 25 (nodesource setup_25.x) instead of `lts`
+#           (which resolved to 24). Aligns the devcontainer with CI
+#           (`node-version: "25"`), `ay_platform_ui` engines (`>=25`) and
+#           the `node:25-alpine` UI build image — so Node-25-specific
+#           behaviour (e.g. the default-on Web Storage API, vitest#8757)
+#           reproduces locally instead of only biting in CI. Requires a
+#           devcontainer rebuild to take effect.
 #   1.9.0: pre-install Playwright Chromium + system deps at build time.
 #          Browsers are installed to PLAYWRIGHT_BROWSERS_PATH=
 #          /opt/playwright-browsers (shared, OUTSIDE the workspace bind
@@ -77,8 +84,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
  && chmod +x kubectl && mv kubectl /usr/local/bin/
 
-# Install Node.js (latest LTS) - required for Claude Code CLI
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+# Install Node.js 25 - required for Claude Code CLI AND to match the rest
+# of the stack (CI `node-version: "25"`, `ay_platform_ui` engines `>=25`,
+# the `node:25-alpine` base in infra/docker/Dockerfile.ui). The previous
+# `setup_lts.x` resolved to Node 24, which diverged from CI and let the
+# Node-25-only web-storage behaviour (vitest#8757) slip past local runs.
+RUN curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 

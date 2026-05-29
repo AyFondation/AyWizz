@@ -1,10 +1,17 @@
 # =============================================================================
 # File: pyproject.toml
-# Version: 11
+# Version: 12
 # Path: ay_platform_core/pyproject.toml
 # Description: Python project configuration for the ay_platform_core
 #              sub-project of the monorepo. Targets Python 3.13.
 #              Dependency versions pinned to May 2026 latest stable releases.
+#              v12: cap `starlette<1.2`. starlette 1.2.0 (2026-05-28) made
+#                   its TestClient prefer `httpx2` and emit a
+#                   StarletteDeprecationWarning when only `httpx` is present;
+#                   our `filterwarnings=["error"]` gate promotes that to a
+#                   collection error. fastapi only requires `starlette>=0.46`,
+#                   so the cap is compatible. Lift it once we migrate the
+#                   test client to httpx2 deliberately.
 #              v11: tree-sitter (0.25) + tree-sitter-language-pack (1.8) added
 #                   as base deps for the C7 code-domain structural extractor
 #                   (V2 #3-A.a / R-400-200, D-004). Existing pins keep their
@@ -59,6 +66,10 @@ dependencies = [
     # with the [standard] extra includes `watchfiles` which enables the
     # --reload behaviour that the docker-compose bind-mount relies on.
     "fastapi>=0.115,<1.0",
+    # starlette is fastapi's ASGI engine (transitive). Capped <1.2 because
+    # 1.2.0 deprecated the httpx-based TestClient in favour of httpx2, which
+    # trips our `filterwarnings=["error"]` gate. fastapi needs only >=0.46.
+    "starlette>=1.1,<1.2",
     "uvicorn[standard]>=0.34,<1.0",
     "python-multipart>=0.0.20,<1.0",  # OAuth2 password grant + file uploads
     "httpx>=0.28,<1.0",

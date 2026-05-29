@@ -1,11 +1,24 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/overlays/system-test/kustomization.yaml
 # Description: Overlay for K8s system tests run by pytest
-#              (`tests/system/k8s/`). Differs from `overlays/dev` on 3
-#              points to keep the test run cheap + deterministic on a
-#              CI runner / kind cluster:
+#              (`tests/system/k8s/`) AND the L2+L3 kind smoke
+#              (`infra/scripts/k8s_kind_smoke.sh`). Differs from
+#              `overlays/dev` on 3 points to keep the test run cheap +
+#              deterministic on a CI runner / kind cluster:
+#
+#              v3 (2026-05-29): the configMap + Secret sources are now
+#              INLINE `literals` instead of `envs: [.env]` / [.env.secret].
+#              Rationale: this overlay is the CI bring-up target, so its
+#              config must live in the repo — but `.env` / `.env.secret`
+#              are gitignored Tier-2 names (CLAUDE.md §4.6) that cannot be
+#              committed. Literals carry deterministic TEST-ONLY values
+#              (no real secrets), are reviewable in the diff, and make the
+#              overlay self-contained (no fragile operator-file dependency
+#              that broke L1/L2/L4 with an evalsymlink error). Hostnames use
+#              K8s Service DNS (mock-llm / c5-requirements / c6-validation)
+#              and C7 uses the deterministic-hash embedder (Ollama excised).
 #
 #                1. **Ollama excluded.** Pulling all-minilm in-cluster
 #                   takes ~2 min on a cold cache and consumes 2 GB.
@@ -100,17 +113,166 @@ patches:
       metadata:
         name: ollama-seed
 
+# NON-secret runtime config -> `aywizz-config` ConfigMap (envFrom on every
+# pod + the init Jobs). TEST-ONLY values. Derived from the compose test env
+# (`ay_platform_core/tests/.env.test`, kept exhaustive over every Pydantic
+# Settings field by tests/coherence/test_env_completeness.py) with K8s
+# Service-DNS hostnames and the deterministic-hash embedder (Ollama excised).
 configMapGenerator:
   - name: aywizz-config
     behavior: create
-    envs:
-      - .env
+    literals:
+      # Platform-wide
+      - PLATFORM_ENVIRONMENT=testing
+      # Backend bootstrap — non-secret parts (init Jobs read these)
+      - ARANGO_ROOT_USERNAME=root
+      - MINIO_ROOT_USER=minioadmin
+      # Shared infra — app runtime (non-secret); K8s Service DNS hostnames
+      - ARANGO_DB=platform
+      - ARANGO_URL=http://arangodb:8529
+      - ARANGO_USERNAME=ay_app
+      - LOG_FORMAT=json
+      - LOG_LEVEL=INFO
+      - MINIO_ACCESS_KEY=ay_app
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_SECURE=false
+      - OLLAMA_URL=http://ollama:11434
+      - TRACE_SAMPLE_RATE=1.0
+      # C2 — Auth
+      - C2_GITEA_BASE_URL=http://gitea:3000
+      - C4_GITEA_BASE_URL=http://gitea:3000
+      - C2_AUTH_MODE=local
+      - C2_JWT_ALGORITHM=HS256
+      - C2_JWT_PRIVATE_KEY=
+      - C2_JWT_PUBLIC_KEY=
+      - C2_LOCAL_ADMIN_USERNAME=alice
+      - C2_LOCAL_TENANT_MANAGER_USERNAME=platform-admin
+      - C2_TOKEN_TTL_SECONDS=3600
+      - "C2_DEFAULT_USER_PROMPT=Do not invent things. Do not cheat. Do not lie. If you don't know, say so. If you are missing information, ask for it."
+      - C2_DEFAULT_PROJECT_PROMPT=
+      - C2_UX_BRAND_ACCENT_COLOR=#3b82f6
+      - C2_UX_BRAND_NAME=AyWizz Platform
+      - C2_UX_BRAND_SHORT_NAME=AyWizz
+      - C2_UX_DEV_MODE_ENABLED=false
+      - C2_UX_FEATURE_CHAT_ENABLED=true
+      - C2_UX_FEATURE_CROSS_TENANT_ENABLED=false
+      - C2_UX_FEATURE_FILE_DOWNLOAD_ENABLED=true
+      - C2_UX_FEATURE_KG_ENABLED=true
+      - C2_DEMO_SEED_ENABLED=false
+      - C2_DEMO_SEED_PROJECT_EDITOR_PASSWORD=dev-editor
+      - C2_DEMO_SEED_PROJECT_EDITOR_USERNAME=project-editor
+      - C2_DEMO_SEED_DOCGEN_PROJECT_ID=project-docgen
+      - C2_DEMO_SEED_DOCGEN_PROJECT_NAME=Demo DocGen Project
+      - C2_DEMO_SEED_PROJECT_ID=project-test
+      - C2_DEMO_SEED_PROJECT_NAME=Test Project
+      - C2_DEMO_SEED_PROJECT_VIEWER_PASSWORD=dev-viewer
+      - C2_DEMO_SEED_PROJECT_VIEWER_USERNAME=project-viewer
+      - C2_DEMO_SEED_SUPERROOT_PASSWORD=dev-superroot
+      - C2_DEMO_SEED_SUPERROOT_USERNAME=superroot
+      - C2_DEMO_SEED_TENANT_ADMIN_PASSWORD=dev-tenant
+      - C2_DEMO_SEED_TENANT_ADMIN_USERNAME=tenant-admin
+      - C2_DEMO_SEED_TENANT_ID=tenant-test
+      - C2_DEMO_SEED_TENANT_NAME=Test Tenant
+      # C3 — Conversation (stub-chat: empty RAG wiring)
+      - C3_C4_BASE_URL=
+      - C3_C7_BASE_URL=
+      # C4 — Orchestrator
+      - C4_DISPATCHER_BACKEND=in-process
+      - C4_DOMAIN=code
+      - C4_ENRICHMENT_ROUND_CAP=3
+      - C4_FIX_ATTEMPT_CAP=3
+      - C4_GENERATE_ENGINE=in_process
+      - C4_OPENHANDS_MODEL=litellm_proxy/claude-opus-flagship
+      - C4_OPENHANDS_MAX_ITERATIONS=50
+      - C4_K8S_IMAGE=aywizz-api:test
+      - C4_K8S_IMAGE_PULL_POLICY=IfNotPresent
+      - C4_K8S_KUBECONFIG_PATH=
+      - C4_K8S_NAMESPACE=c4-workers
+      - C4_K8S_POD_VIEW_C8_DEFAULT_MODEL=
+      - C4_K8S_POD_VIEW_C8_GATEWAY_URL=http://mock-llm:8000/v1
+      - C4_K8S_POD_VIEW_MINIO_ENDPOINT=minio:9000
+      - C4_K8S_SERVICE_ACCOUNT_NAME=c4-sub-agent
+      - C4_MINIO_BUCKET=orchestrator
+      - C4_NATS_URL=
+      - C4_NATS_CONNECT_TIMEOUT_SECONDS=5.0
+      - C4_SUB_AGENT_TIMEOUT_SECONDS=900
+      # C5 — Requirements
+      - C5_IDEMPOTENCY_TTL_SECONDS=86400
+      - C5_MINIO_BUCKET=requirements
+      - C5_RECONCILE_INTERVAL_SECONDS=900
+      # C6 — Validation
+      - C6_DEFAULT_CHECK_ENABLED=true
+      - C6_MAX_FINDINGS_PER_RUN=5000
+      - C6_MINIO_BUCKET=validation
+      - C6_JUDGE_ENABLED=false
+      - C6_JUDGE_AGENT=c6-judge
+      # C7 — Memory (deterministic-hash embedder; Ollama excised in this overlay)
+      - C7_AUTO_EXTRACT_KG_ON_UPLOAD=true
+      - C7_CHUNK_OVERLAP=64
+      - C7_CHUNK_TOKEN_SIZE=512
+      - C7_DEFAULT_QUOTA_BYTES=1073741824
+      - C7_EMBEDDING_ADAPTER=deterministic-hash
+      - C7_EMBEDDING_DIMENSION=384
+      - C7_EMBEDDING_MODEL_ID=all-minilm
+      - C7_EMBEDDING_OLLAMA_TIMEOUT_S=30.0
+      - C7_KG_EXPANSION_BOOST=1.3
+      - C7_KG_EXPANSION_DEPTH=1
+      - C7_KG_EXPANSION_NEIGHBOUR_CAP=20
+      - C7_MAX_UPLOAD_BYTES=52428800
+      - C7_MINIO_BUCKET=memory
+      - C7_RETRIEVAL_SCAN_CAP=50000
+      - C7_RETRIEVAL_MODE=hybrid
+      - C7_RRF_K=60
+      - C7_CONTEXTUALISATION_ENABLED=true
+      - C7_CONTEXTUALISATION_AGENT=c7-contextualizer
+      # C8 — LLM gateway client (in-cluster mock LLM)
+      - C8_AGENT_ROUTES_INLINE=
+      - C8_AGENT_ROUTES_YAML_PATH=
+      - C8_CONNECT_TIMEOUT_SECONDS=5.0
+      - C8_DEFAULT_MODEL=
+      - C8_GATEWAY_URL=http://mock-llm:8000/v1
+      - C8_LITELLM_CONFIG_PATH=
+      - C8_REQUEST_TIMEOUT_SECONDS=60.0
+      - C8_SSE_HEARTBEAT_SECONDS=15.0
+      # _sub_agent runtime
+      - SUB_AGENT_BUNDLE_BUCKET=orchestrator
+      - SUB_AGENT_BUNDLE_PREFIX=
+      # C9 — MCP (K8s Service DNS hostnames)
+      - C9_C5_BASE_URL=http://c5-requirements:8000
+      - C9_C6_BASE_URL=http://c6-validation:8000
+      - C9_HTTP_TIMEOUT_SECONDS=10.0
+      - C9_MAX_TOOL_ARGS_BYTES=256000
+      - C9_PROTOCOL_VERSION=2025-03-26
+      - C9_SERVER_NAME=ay-platform-core
+      - C9_SERVER_VERSION=1.0.0
+      # observability/workflow synthesis (inert under SPAN_SOURCE=buffer)
+      - OBS_SPAN_SOURCE=buffer
+      - OBS_LOKI_URL=http://loki:3100
+      - "OBS_LOKI_LABEL_SELECTOR={container=~\"ay-.*\"}"
+      - OBS_ELASTICSEARCH_URL=http://elasticsearch:9200
+      - OBS_ELASTICSEARCH_INDEX=ay-logs-*
+      - OBS_ELASTICSEARCH_USERNAME=
+      - OBS_QUERY_WINDOW_HOURS=24
+      - OBS_REQUEST_TIMEOUT_SECONDS=10
+      - OBS_FETCH_LIMIT=5000
 
+# Secret-class runtime values -> `aywizz-secrets` Secret (envFrom on every
+# pod + the init Jobs). TEST-ONLY deterministic values, NEVER real creds
+# (CLAUDE.md §4.6). ANTHROPIC_API_KEY is intentionally absent — this overlay
+# uses the in-cluster mock LLM, not LiteLLM/a real provider.
 secretGenerator:
   - name: aywizz-secrets
     behavior: create
-    envs:
-      - .env.secret
+    literals:
+      - ARANGO_ROOT_PASSWORD=arango-root-dev-password
+      - MINIO_ROOT_PASSWORD=minio-root-dev-password
+      - ARANGO_PASSWORD=ay-app-dev-password
+      - MINIO_SECRET_KEY=ay-app-dev-password
+      - C2_JWT_SECRET_KEY=local-dev-secret-min-32-chars!!!!
+      - C2_LOCAL_ADMIN_PASSWORD=seed-password
+      - C2_LOCAL_TENANT_MANAGER_PASSWORD=seed-tm-password
+      - OBS_ELASTICSEARCH_PASSWORD=
+      - C8_GATEWAY_API_KEY=
     type: Opaque
 
 generatorOptions:

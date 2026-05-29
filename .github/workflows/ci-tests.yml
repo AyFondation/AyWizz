@@ -10,9 +10,10 @@
 # pyproject.toml; this workflow does NOT re-encode the threshold.
 #
 # v3 (2026-05-29) : bump GitHub-maintained actions to their Node 24
-# majors (checkout v5, setup-python v6, upload-artifact v5) — clears
-# the Node 20 runtime deprecation warning. Third-party actions
-# (schneegans badge) keep their own runtime.
+# majors (checkout v5, setup-python v6, upload-artifact v7) — clears
+# the Node 20 runtime deprecation warning. upload-artifact v5/v6 still
+# ran on Node 20/24 respectively; v7 is the current Node 24 line.
+# Third-party actions (schneegans badge) keep their own runtime.
 #
 # v2 (2026-05-20) : adds `pull_request` trigger so contributors see
 # the CI verdict BEFORE merging — closes the "PR can break main"
@@ -101,7 +102,7 @@ jobs:
 
       - name: Upload test reports artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ github.sha }}
           path: ay_platform_core/reports/latest/

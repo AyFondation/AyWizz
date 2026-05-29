@@ -1,11 +1,22 @@
 // =============================================================================
 // File: vitest.config.ts
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/vitest.config.ts
 // Description: Vitest configuration for the UI test pyramid (unit +
 //              integration). E2E tests use Playwright and live in
 //              `playwright.config.ts` (mocked tier) +
 //              `playwright.system.config.ts` (real-stack tier).
+//
+//              v3 (2026-05-29) : disable Node's native Web Storage API in
+//              the test workers on Node >= 25. Node 25 enables
+//              globalThis.localStorage by default ; its presence makes
+//              jsdom skip installing its own window.localStorage, so the
+//              Storage methods the tests rely on (clear/getItem) are
+//              missing and `tests/setup.ts` throws "localStorage.clear is
+//              not a function" (vitest-dev/vitest#8757). `--no-webstorage`
+//              restores jsdom as the storage authority. The flag does not
+//              exist before Node 25 ("bad option"), so it is gated on the
+//              running major to keep Node <= 24 working.
 //
 //              v2 (2026-04-29) : excludes `tests/system/` from Vitest
 //              discovery — those are Playwright system specs, not
@@ -26,6 +37,14 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+// Node 25 turns on the Web Storage API (globalThis.localStorage) by default,
+// which makes jsdom skip its own window.localStorage and breaks the storage
+// reset in tests/setup.ts (vitest-dev/vitest#8757). Disable it in the test
+// workers so jsdom stays authoritative. `--no-webstorage` is unknown to
+// Node <= 24 ("bad option"), so gate it on the running major.
+const nodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
+const workerExecArgv = nodeMajor >= 25 ? ["--no-webstorage"] : [];
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -39,6 +58,12 @@ export default defineConfig({
     environment: "jsdom",
     globals: true, // expose `expect`, `describe`, `it` without imports
     setupFiles: ["./tests/setup.ts"],
+    // Run tests in forked child processes (vitest default) and pass the
+    // Node-25 web-storage opt-out to those workers — that is where jsdom
+    // and the storage reset actually run. `execArgv` is a top-level test
+    // option in Vitest 4 (poolOptions was removed). See header v3 note.
+    pool: "forks",
+    execArgv: workerExecArgv,
     include: ["tests/**/*.{test,spec}.{ts,tsx}"],
     exclude: [
       "node_modules/**",
