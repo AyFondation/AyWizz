@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**101 endpoints** across 7 components. Order: by component, method, path.
+**111 endpoints** across 7 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -151,12 +151,22 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 |---|---|---|---|---|---|---|---|
 | `POST` | `/api/v1/memory/retrieve` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 201 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources/upload` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 202 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_chunks` | 201 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-kg` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_kg_entities` | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-structural` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_kg_entities` | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/blob` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/enrichment-config` | authenticated | project | any authenticated | — | — | 200 |
+| `PUT` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `memory_project_config` | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | authenticated | project | any authenticated | — | — | 200 |
 | `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `admin` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 204 |
 | `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `admin` | `tenant_manager` | — | 201 |

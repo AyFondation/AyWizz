@@ -1,0 +1,672 @@
+{
+  "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
+  "route_count": 111,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/admin/tenants",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/tenants",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/projects/{project_id}/artifacts/seed",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/conversations",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/conversations/{conversation_id}",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations/{conversation_id}",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/conversations/{conversation_id}",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations/{conversation_id}/events",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations/{conversation_id}/messages",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/conversations/{conversation_id}/messages",
+      "component": "c3_conversation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/mcp",
+      "component": "c9_mcp",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mcp/health",
+      "component": "c9_mcp",
+      "auth": "open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/mcp/tools",
+      "component": "c9_mcp",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/entities/embed",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/health",
+      "component": "c7_memory",
+      "auth": "open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/enrichment-config",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/memory/projects/{project_id}/enrichment-config",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/kg/summary",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/quota",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/refresh",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/sources",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/sources/upload",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/blob",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-kg",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-structural",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/refresh/{job_id}",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/retrieve",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orchestrator/runs",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orchestrator/runs/{run_id}",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orchestrator/runs/{run_id}/feedback",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orchestrator/runs/{run_id}/resume",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orchestrator/runs/{run_id}/steer",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orchestrator/runs/{run_id}/trace",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/{project_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/artifacts/runs",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/documents",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/documents",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/documents/mkdir",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/documents/move",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/documents/rename",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}/documents/{path:path}",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/documents/{path:path}",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/projects/{project_id}/documents/{path:path}",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/git/commits",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}/members/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/members/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/documents",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/requirements/documents",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}/requirements/documents/{slug}",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/documents/{slug}",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/projects/{project_id}/requirements/documents/{slug}",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/entities",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/export",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/requirements/import",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/requirements/reconcile",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/requirements/reindex",
+      "component": "c5_requirements",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/reindex/{job_id}",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/relations",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/requirements/tailorings",
+      "component": "c5_requirements",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/projects/{project_id}/source/file/{path:path}",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/source/file/{path:path}/meta",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/source/mkdir",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/source/move",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/source/rename",
+      "component": "c4_orchestrator",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/source/tree",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me/preferences",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/users/me/preferences",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/domains",
+      "component": "c6_validation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/findings/{finding_id}",
+      "component": "c6_validation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/health",
+      "component": "c6_validation",
+      "auth": "open"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/plugins",
+      "component": "c6_validation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/validation/runs",
+      "component": "c6_validation",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/runs/{run_id}",
+      "component": "c6_validation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/validation/runs/{run_id}/findings",
+      "component": "c6_validation",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/config",
+      "component": "c2_auth",
+      "auth": "open"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/login",
+      "component": "c2_auth",
+      "auth": "open"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/logout",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/sessions",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/auth/sessions/{session_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/token",
+      "component": "c2_auth",
+      "auth": "open"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/auth/users/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/users/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PATCH",
+      "path": "/auth/users/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/{user_id}/reset-password",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/verify",
+      "component": "c2_auth",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/ux/config",
+      "component": "c2_auth",
+      "auth": "open"
+    }
+  ]
+}

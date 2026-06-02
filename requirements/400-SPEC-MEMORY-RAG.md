@@ -199,16 +199,16 @@ category: functional
 derives-from: [D-013, D-020]
 ```
 
-External source ingestion SHALL be a **four-step pipeline**, orchestrated end-to-end by C12 (n8n):
+External source ingestion SHALL be a **four-step pipeline** (R-100-081 v3 — C7 owns byte custody at the edges, C12 orchestrates on metadata only):
 
-1. **Upload** — the user POSTs the file to C12's `/uploads/*` webhook (mediated by C1 Gateway). C12 stores the raw bytes in MinIO under `sources/<tenant_id>/<project_id>/<source_id>/raw.<ext>` and emits NATS `ingestion.source.uploaded`.
-2. **Extract + chunk (C13)** — C12 HTTP-triggers C13 via `POST /analyze` with `{tenant_id, project_id, source_id, raw_object_key, quality_tier, config_overrides}`. C13 acknowledges immediately with `{run_id}` and processes asynchronously, writing all phase outputs to MinIO under the layout defined in **R-400-220**. C12 polls `GET /status/{run_id}` until `status ∈ {completed, failed}` (or subscribes to a NATS completion signal when wired). On completion, C12 emits `ingestion.source.parsed`.
-3. **Index (C7)** — C12 reads `chunks.jsonl` + `run_manifest.json` from MinIO and POSTs them to C7's `/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` endpoint (R-400-223). C7 computes embeddings on each chunk and writes the records to `memory_chunks` + `memory_sources`. On completion, C7 emits `ingestion.source.indexed`.
+1. **Upload (C7)** — the user POSTs the file as `multipart/form-data` to **C7** `POST /api/v1/memory/projects/{project_id}/sources/upload` (mediated by C1 Gateway). C7 enforces project RBAC, stores the raw bytes in MinIO under `sources/<tenant_id>/<project_id>/<source_id>/raw.<ext>` via its **authenticated** MinIO client, emits NATS `ingestion.source.uploaded`, **triggers the C12 webhook with metadata only** (`raw_object_key` + ids — no bytes), and returns `202 Accepted`.
+2. **Extract + chunk (C13)** — C12 HTTP-triggers C13 via `POST /analyze` with `{tenant_id, project_id, source_id, raw_object_key, quality_tier, config_overrides}`. C13 acknowledges immediately with `{run_id}` and processes asynchronously, writing all phase outputs to MinIO under the layout defined in **R-400-220**. C12 polls `GET /status/{run_id}` until `status ∈ {completed, failed}`. On completion, C12 emits `ingestion.source.parsed`.
+3. **Index (C7)** — C12 POSTs the **run reference** (`extraction_run_id` + ids) to C7's `/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` endpoint (R-400-223 v3). **C7 itself reads** `chunks.jsonl` + `run_manifest.json` from MinIO and writes the records (embeddings from the artifacts) to `memory_chunks` + `memory_sources`. On completion, C7 emits `ingestion.source.indexed`.
 4. **(optional) KG extraction (C7)** — if the project's `auto_extract_kg_on_upload` flag is enabled and the LLM client is configured, C7 SHALL trigger its existing schema-guided extractor (`R-400-200`) on the freshly indexed source as a best-effort follow-up. A failure here SHALL NOT cascade to the ingestion status.
 
 Each step SHALL be idempotent and individually re-runnable from the MinIO artifacts. On failure of step 2, C12 SHALL surface the error (`ingestion.source.failed`) to the UI and SHALL NOT attempt step 3.
 
-**Rationale.** Per **D-020**: re-partitions the v1 split (which made C7 the parser) so that parsing + chunking happen in a dedicated dependency component (C13, AyExtractor) — keeping C7 focused on embeddings + retrieval and giving the pipeline a natural file-based handover at each stage. The four-step model is what n8n actually orchestrates: webhook → C13 trigger → poll → C7 post.
+**Rationale.** Per **D-020**: parsing + chunking happen in a dedicated dependency component (C13, AyExtractor), keeping C7 focused on byte custody + embeddings + retrieval. **R-100-081 v3** moved the raw-blob MinIO write (step 1) and the artifact read (step 3) from C12 to C7 — n8n's `httpRequest` cannot sign S3 and is a poor binary custodian; C7 already holds an authenticated MinIO client + the sources RBAC. C12 stays a pure metadata orchestrator: webhook(metadata) → C13 trigger → poll → C7 post(run ref).
 
 **Supersedes** R-400-020 v1 (which delegated parsing to C7).
 
@@ -430,10 +430,10 @@ C7 SHALL store all `ChunkRich` fields (including `embedding`) in ArangoDB `memor
 
 ```yaml
 id: R-400-223
-version: 2
+version: 3
 status: draft
 category: functional
-derives-from: [D-020, R-400-020, R-400-222, R-400-207]
+derives-from: [D-020, R-400-020, R-400-222, R-400-207, R-100-081]
 ```
 
 C7 SHALL expose a new endpoint:
@@ -442,16 +442,12 @@ C7 SHALL expose a new endpoint:
 POST /api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks
 ```
 
-Request body:
+Request body (**v3 — run reference only; C7 pulls the artifacts itself**):
 
 ```json
 {
   "extraction_run_id": "20260528_0950_abc123def456",
-  "manifest_object_key": "c13-extractor-artifacts/{tenant}/{project}/{source}/runs/{run}/00_metadata/run_manifest.json",
-  "embedding_model": "voyage-3",
-  "embedding_model_version": "2024-01-15",
-  "embedding_dimension": 1024,
-  "chunks": [ <ChunkRich with `embedding` populated>, ... ],
+  "tenant_id": "<tenant>",
   "uploaded_by": "<user_sub>",
   "mime_type": "<source mime>"
 }
@@ -459,20 +455,19 @@ Request body:
 
 C7's handler SHALL:
 
-1. Validate the `ChunkRich` list against R-400-222 v2. Each chunk SHALL carry a non-null `embedding` of length `embedding_dimension`.
-2. Validate `embedding_model` / `embedding_model_version` / `embedding_dimension` consistency: all chunks SHALL share the same dimension; the manifest reference SHALL match the request fields (defence in depth against partial uploads).
-3. Enforce the per-project quota (R-400-024) against the cumulative `token_count`.
-4. **Pure INSERT path** — copy every `ChunkRich` field (including the `embedding`) into `memory_sources` + `memory_chunks` records. C7 SHALL NOT invoke its own embedder on this path; the embeddings are taken from the request.
-5. Stamp each chunk with `processing_version` (R-400-208) including the embedding model identity so downstream re-indexing detects staleness when AyExtractor's embedding model changes.
-6. Return `SourcePublic` (existing model) with `chunk_count = len(chunks)`.
-
-**Backward-compat fallback (transitional).** If a request omits the `embedding` field on the chunks (or sends `embedding: null`), C7 SHALL fall back to its existing embedder to populate the vectors. This fallback is transitional for session 5 testing (when n8n wiring lands before the embedding-in-C13 path is implemented) and SHALL be removed in v2.
+1. **Read the artifacts from MinIO** using C7's authenticated MinIO client (R-100-081 v3 — C12 no longer marshals bytes): from the C13 artifact prefix derived from `{tenant_id}/{project_id}/{source_id}/runs/{extraction_run_id}/` it SHALL fetch `00_metadata/run_manifest.json` and `02_chunks/chunks.jsonl` (one `ChunkRich` JSON object per line, each with its `embedding` populated per R-400-222 v2).
+2. Validate the parsed `ChunkRich` list against R-400-222 v2. Each chunk SHALL carry a non-null `embedding` of length `embedding_dimension` (taken from the manifest).
+3. Validate `embedding_model` / `embedding_model_version` / `embedding_dimension` consistency from the manifest: all chunks SHALL share the same dimension.
+4. Enforce the per-project quota (R-400-024) against the cumulative `token_count`.
+5. **Pure INSERT path** — copy every `ChunkRich` field (including the `embedding`) into `memory_sources` + `memory_chunks` records. C7 SHALL NOT invoke its own embedder on this path; the embeddings come from the artifacts.
+6. Stamp each chunk with `processing_version` (R-400-208) including the embedding model identity so downstream re-indexing detects staleness when AyExtractor's embedding model changes.
+7. Return `SourcePublic` (existing model) with `chunk_count = len(chunks)`.
 
 The endpoint SHALL be authenticated via the platform's forward-auth headers (X-User-Id / X-Tenant-Id / X-User-Roles) and gated to `project_editor`+ per E-100-002.
 
-**v2 changes vs v1.** (a) Embeddings are taken from the request, not computed by C7 — pure INSERT path per D-020 v2 §B1. (b) `embedding_model` / `embedding_model_version` / `embedding_dimension` are top-level request fields (validated against the manifest). (c) Transitional fallback documented so session 5 can land without a hard dependency on session 4's embedding wiring.
+**v3 changes vs v2.** The request no longer carries the `chunks` array, `manifest_object_key`, or the embedding-model fields — it carries only the **run reference** (`extraction_run_id` + `tenant_id`; project/source come from the path). C7 reads `run_manifest.json` + `chunks.jsonl` directly from MinIO with its authenticated client. This removes the last place C12 (n8n) touched object bytes (it previously GET the artifacts and marshalled them into this body) — C12 is now a pure metadata orchestrator (R-100-081 v3). The transitional embed-fallback documented in v2 is removed (the embedding-in-C13 path is the contract). **v2 vs v1.** Embeddings were taken from the request (pure INSERT), top-level model fields validated against the manifest.
 
-**Rationale.** Pure INSERT path: C7 ingest becomes quasi-instantaneous (no LLM/embedding compute wait), R-400-207 reproducible-rebuild mandate fully honoured (replay from MinIO produces byte-exact Arango state), embedding model identity is stamped in both the manifest AND C7's `processing_version` so staleness detection works across the upgrade boundary.
+**Rationale.** Pulling the artifacts inside C7 (rather than receiving them in-body) keeps n8n entirely out of binary/object I/O (R-100-081 v3 rationale), shrinks the request to a few identifiers, and keeps the R-400-207 reproducible-rebuild mandate (replay from MinIO produces byte-exact Arango state). C7 already owns an authenticated MinIO client for the raw-blob write (R-100-081 v3), so the read path reuses it.
 
 #### R-400-224
 

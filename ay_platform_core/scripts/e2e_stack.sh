@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: e2e_stack.sh
-# Version: 8
+# Version: 10
 # Path: ay_platform_core/scripts/e2e_stack.sh
 # Description: One-stop helper for the system-test stack.
 #              Wraps `docker compose` + seed + `pytest tests/system/`.
+#
+#              v10 (2026-06-02): `dev` now (a) passes `.env.secret` as a compose
+#              --env-file so C13 can interpolate `C8_GATEWAY_API_KEY` and route
+#              its enrichment LLMs to Claude via C8/LiteLLM, and (b) restarts
+#              c12 after the workflow seed so n8n reloads the re-imported
+#              workflow (config_overrides forwarding, R-400-224). Both docker
+#              calls stay inside the wrapper (§5.3).
+#
+#              v9 (2026-05-29): `up`/`build` (and thus `full`) now pass
+#              `--profile test`, activating mock_llm + c13-extractor so the
+#              D-020 C12→C13→C7 upload pipeline is exercisable by tests/system
+#              (and the UI Playwright system test) without real provider keys.
+#              `dev` keeps its own `litellm` profile (real proxy + keys).
+#              Also: `seed`/`system` now resolve the stack URL via
+#              `_internal_url` (localhost→host.docker.internal inside a
+#              container), so the wrapper works when run from a devcontainer
+#              as well as bare-metal (no-op on the host). Previously only
+#              `cmd_dev` used the helper, so in-container `seed`/`system`
+#              hit the container's own localhost and failed with ConnectError.
 #
 #              v8 (2026-05-27): adds the `build` subcommand — builds the
 #              platform images (ay-api:local + ay-ui:local) WITHOUT starting
@@ -92,7 +111,12 @@ cmd_up() {
   echo "==> Building images + starting stack"
   echo "    compose file: $COMPOSE_FILE"
   echo "    build ctx:    $MONOREPO_ROOT"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+  echo "    profile:      test (mock_llm + c13-extractor — D-020 ingestion path)"
+  # `--profile test` activates mock_llm (C8 stand-in) and c13-extractor so the
+  # C12→C13→C7 upload pipeline is exercisable by tests/system without real
+  # provider keys (operator decision 2026-05-29). The litellm-free CI flows
+  # rely on mock_llm being up; the dev stack uses its own `litellm` profile.
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile test up -d --build
   echo "==> Stack is starting; services will report healthy shortly"
   echo "    Public API:        $STACK_BASE_URL          # R-100-122 BASE+0"
   echo "    Traefik dashboard: http://localhost:56080   # R-100-122 BASE+80"
@@ -108,7 +132,8 @@ cmd_build() {
   echo "==> Building images only (no containers started)"
   echo "    compose:  $COMPOSE_FILE"
   echo "    override: $DEV_OVERRIDE  (defines the ay-ui build)"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$DEV_OVERRIDE" build
+  # `--profile test` so the mock_llm + c13-extractor images are built too.
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$DEV_OVERRIDE" --profile test build
   echo "==> Build OK : ay-api:local + ay-ui:local are in the local image store"
 }
 
@@ -136,6 +161,15 @@ cmd_dev() {
   # NEXT_PUBLIC_BUILD_VERSION. Visible in the UX footer to confirm a
   # rebuild actually shipped.
   export BUILD_VERSION="${BUILD_VERSION:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  # Pass `.env.secret` as a compose --env-file too (when present) so secret
+  # values (e.g. C8_GATEWAY_API_KEY) are available for `${VAR}` interpolation
+  # in the override — C13 sends the gateway key to LiteLLM as its OPENAI_API_KEY
+  # so its enrichment LLMs route to Claude via C8. Later --env-file wins.
+  local secret_env="$MONOREPO_ROOT/.env.secret"
+  local secret_arg=()
+  if [[ -f "$secret_env" ]]; then
+    secret_arg=(--env-file "$secret_env")
+  fi
   echo "==> Building images + starting DEV stack (demo seed enabled)"
   echo "    compose:   $COMPOSE_FILE"
   echo "    override:  $dev_override"
@@ -144,6 +178,7 @@ cmd_dev() {
   echo "    version:   $BUILD_VERSION"
   docker compose \
     --env-file "$ENV_FILE" \
+    "${secret_arg[@]}" \
     -f "$COMPOSE_FILE" \
     -f "$dev_override" \
     --profile litellm up -d --build
@@ -158,6 +193,21 @@ cmd_dev() {
   (cd "$AY_CORE" && \
     python scripts/seed_demo_ux.py --base-url "$internal_url" --timeout-s 180) \
     || echo "==> WARNING: demo-ux seed failed ; non-fatal, see logs above"
+
+  # Activate the freshly-imported n8n workflow. `c12_workflow_seed` runs
+  # `n8n import:workflow` (updates the DB) but a RUNNING n8n keeps the previous
+  # workflow in memory, so its webhook would forward the STALE body (dropping
+  # `config_overrides`, R-400-224). Restart c12 so it reloads the imported
+  # workflow. Encapsulated here per §5.3 — operators never run raw `docker`
+  # against the stack; the wrapper owns every destructive call.
+  echo "==> Restarting C12 (n8n) to activate the re-imported workflow"
+  docker compose \
+    --env-file "$ENV_FILE" \
+    "${secret_arg[@]}" \
+    -f "$COMPOSE_FILE" \
+    -f "$dev_override" \
+    --profile litellm restart c12 \
+    || echo "==> WARNING: c12 restart failed ; uploads may use a stale workflow"
 
   echo ""
   echo "    Open: $STACK_BASE_URL    # login page surfaces 4 demo creds"
@@ -195,21 +245,31 @@ cmd_logs() {
 }
 
 cmd_seed() {
-  echo "==> Seeding test data via $STACK_BASE_URL"
+  # Resolve the reachable URL : when this wrapper runs INSIDE a container
+  # (devcontainer) the stack's host-published ports are not on the
+  # container's own `localhost` — `_internal_url` rewrites it to
+  # `host.docker.internal`. On a bare-metal host `/.dockerenv` is absent
+  # and it returns STACK_BASE_URL unchanged, so this is a no-op there.
+  local internal_url
+  internal_url="$(_internal_url)"
+  echo "==> Seeding test data via $internal_url"
   # Invoke seed_e2e.py as a script (not via `python -m`) — `scripts/`
   # is intentionally NOT a Python package (no __init__.py: it mixes
   # bash + Python), so `python -m ay_platform_core.scripts.seed_e2e`
   # raises ModuleNotFoundError. Direct script invocation is the
   # contract.
   (cd "$AY_CORE" && \
-    STACK_BASE_URL="$STACK_BASE_URL" \
-    python scripts/seed_e2e.py --base-url "$STACK_BASE_URL")
+    STACK_BASE_URL="$internal_url" \
+    python scripts/seed_e2e.py --base-url "$internal_url")
 }
 
 cmd_system() {
-  echo "==> Running system tests against $STACK_BASE_URL"
+  # Same container-vs-host URL resolution as cmd_seed (no-op on bare metal).
+  local internal_url
+  internal_url="$(_internal_url)"
+  echo "==> Running system tests against $internal_url"
   (cd "$AY_CORE" && \
-    STACK_BASE_URL="$STACK_BASE_URL" \
+    STACK_BASE_URL="$internal_url" \
     python -m pytest tests/system -v --no-cov)
 }
 

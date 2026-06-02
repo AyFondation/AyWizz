@@ -40,6 +40,8 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 COLL_CHUNKS = "memory_chunks"
 COLL_SOURCES = "memory_sources"
 COLL_LINKS = "memory_links"
+# Per-project enrichment configuration (R-400-224), keyed `tenant:project`.
+COLL_PROJECT_CONFIG = "memory_project_config"
 # ArangoSearch view backing the BM25 lexical arm (R-400-202).
 VIEW_CHUNKS = "memory_chunks_search"
 
@@ -68,7 +70,7 @@ class MemoryRepository:
 
     def _ensure_collections_sync(self) -> None:
         existing = {c["name"] for c in self._db.collections()}
-        for name in (COLL_CHUNKS, COLL_SOURCES):
+        for name in (COLL_CHUNKS, COLL_SOURCES, COLL_PROJECT_CONFIG):
             if name not in existing:
                 self._db.create_collection(name)
         if COLL_LINKS not in existing:
@@ -372,6 +374,69 @@ class MemoryRepository:
             self._delete_chunks_for_source_sync, tenant_id, project_id, source_id
         )
 
+    def _list_chunks_for_source_sync(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> list[dict[str, Any]]:
+        aql = """
+        FOR c IN memory_chunks
+            FILTER c.tenant_id == @tenant_id
+                AND c.project_id == @project_id
+                AND c.source_id == @source_id
+            SORT c.chunk_index ASC
+            RETURN c
+        """
+        cursor = self._db.aql.execute(
+            aql,
+            bind_vars={
+                "tenant_id": tenant_id,
+                "project_id": project_id,
+                "source_id": source_id,
+            },
+        )
+        return list(cursor)
+
+    async def list_chunks_for_source(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> list[dict[str, Any]]:
+        """All chunk rows for a source (any model/status), sorted by index —
+        for the diagnostics view."""
+        return await self._run(
+            self._list_chunks_for_source_sync, tenant_id, project_id, source_id
+        )
+
+    def _get_chunk_sync(
+        self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
+    ) -> dict[str, Any] | None:
+        aql = """
+        FOR c IN memory_chunks
+            FILTER c.tenant_id == @tenant_id
+                AND c.project_id == @project_id
+                AND c.source_id == @source_id
+                AND c.chunk_id == @chunk_id
+            LIMIT 1
+            RETURN c
+        """
+        cursor = self._db.aql.execute(
+            aql,
+            bind_vars={
+                "tenant_id": tenant_id,
+                "project_id": project_id,
+                "source_id": source_id,
+                "chunk_id": chunk_id,
+            },
+        )
+        rows = list(cursor)
+        return rows[0] if rows else None
+
+    async def get_chunk(
+        self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch one chunk row by id (tenant+project+source scoped) — for the
+        lazy chunk-content view. Returns None when absent."""
+        return await self._run(
+            self._get_chunk_sync, tenant_id, project_id, source_id, chunk_id
+        )
+
     def _mark_entity_superseded_sync(
         self,
         tenant_id: str,
@@ -438,6 +503,43 @@ class MemoryRepository:
     ) -> dict[str, Any] | None:
         return await self._run(
             self._get_source_sync, tenant_id, project_id, source_id
+        )
+
+    # ------------------------------------------------------------------
+    # Per-project enrichment config (R-400-224)
+    # ------------------------------------------------------------------
+
+    def _get_project_config_sync(
+        self, tenant_id: str, project_id: str
+    ) -> dict[str, Any] | None:
+        key = f"{tenant_id}:{project_id}"
+        return cast(
+            dict[str, Any] | None, self._db.collection(COLL_PROJECT_CONFIG).get(key)
+        )
+
+    async def get_project_config(
+        self, tenant_id: str, project_id: str
+    ) -> dict[str, Any] | None:
+        """The stored enrichment config dict for a project, or None when unset
+        (caller applies the default)."""
+        return await self._run(self._get_project_config_sync, tenant_id, project_id)
+
+    def _upsert_project_config_sync(
+        self, tenant_id: str, project_id: str, config: dict[str, Any]
+    ) -> None:
+        row = {
+            "_key": f"{tenant_id}:{project_id}",
+            "tenant_id": tenant_id,
+            "project_id": project_id,
+            **config,
+        }
+        self._db.collection(COLL_PROJECT_CONFIG).insert(row, overwrite=True)
+
+    async def upsert_project_config(
+        self, tenant_id: str, project_id: str, config: dict[str, Any]
+    ) -> None:
+        await self._run(
+            self._upsert_project_config_sync, tenant_id, project_id, config
         )
 
     def _list_sources_sync(

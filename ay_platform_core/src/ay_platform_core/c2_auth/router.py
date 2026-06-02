@@ -1,10 +1,20 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/router.py
 # Description: FastAPI APIRouter for C2 Auth Service. 12 endpoints covering
 #              authentication, token verification, logout, user management,
 #              and session administration.
+#
+#              v3 (2026-06-01, E-100-002 fix): `/verify` forward-auth now
+#              propagates the caller's PROJECT-SCOPED role for the project
+#              named in the forwarded request URI (`X-Forwarded-Uri`), in
+#              addition to global roles. Before this it emitted only global
+#              roles, so every project-scoped gate (e.g. C7
+#              `POST /sources/upload`, requiring project_editor/owner/admin)
+#              was effectively global-admin-only and a project_editor got a
+#              spurious 403. No cross-project leak: only the request's
+#              project role is added.
 #
 # @relation implements:R-100-039
 # @relation implements:R-100-040
@@ -13,7 +23,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+import re
+from urllib.parse import unquote
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
 
 from ay_platform_core.c2_auth.models import (
@@ -105,8 +118,39 @@ async def login(
 # ---------------------------------------------------------------------------
 
 
+_PROJECT_URI_RE = re.compile(r"/projects/([^/?#]+)")
+
+
+def _project_id_from_uri(uri: str) -> str | None:
+    """Extract `{project_id}` from a project-scoped forwarded URI, e.g.
+    `/api/v1/memory/projects/{pid}/sources/upload` or
+    `/api/v1/projects/{pid}/...`. Returns None for non-project paths
+    (e.g. `/api/v1/projects` list, `/api/v1/conversations`)."""
+    match = _PROJECT_URI_RE.search(uri)
+    return unquote(match.group(1)) if match else None
+
+
+def _forward_auth_roles(claims: JWTClaims, request: Request) -> str:
+    """Build the `X-User-Roles` forward-auth value (E-100-002).
+
+    Global roles ALWAYS apply. Additionally, when the original request
+    (Traefik forwards it as `X-Forwarded-Uri`) targets a project-scoped
+    path, the caller's role FOR THAT SPECIFIC project is appended — so a
+    `project_editor` / `project_owner` can act on EVERY project they hold
+    a scope on, and ONLY those: a different project's id yields a different
+    (or empty) scope lookup, so there is no cross-project leak. Before this,
+    forward-auth emitted only the global roles, making every project-scoped
+    gate effectively global-admin-only."""
+    roles: list[str] = [r.value for r in claims.roles]
+    project_id = _project_id_from_uri(request.headers.get("X-Forwarded-Uri", ""))
+    if project_id is not None:
+        roles.extend(r.value for r in claims.project_scopes.get(project_id, []))
+    return ",".join(roles)
+
+
 @router.get("/verify", response_model=JWTClaims)
 async def verify(
+    request: Request,
     response: Response,
     claims: JWTClaims = Depends(_get_current_claims),
 ) -> JWTClaims:
@@ -115,9 +159,14 @@ async def verify(
     injected into the request forwarded to backend services. Backends rely
     on `X-User-Id`, `X-User-Roles`, AND `X-Tenant-Id` (some require all
     three; missing `X-Tenant-Id` triggers 401 on tenant-scoped routes).
+
+    `X-User-Roles` carries the caller's global roles PLUS, when the
+    forwarded request targets `…/projects/{pid}/…`, their project-scoped
+    role for that project (E-100-002) — so project_editor/owner can act on
+    every project they hold a scope on (and only those).
     """
     response.headers["X-User-Id"] = claims.sub
-    response.headers["X-User-Roles"] = ",".join(claims.roles)
+    response.headers["X-User-Roles"] = _forward_auth_roles(claims, request)
     response.headers["X-Platform-Auth-Mode"] = claims.auth_mode
     if claims.tenant_id:
         response.headers["X-Tenant-Id"] = claims.tenant_id

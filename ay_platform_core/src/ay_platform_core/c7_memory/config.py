@@ -69,6 +69,21 @@ class MemoryConfig(BaseSettings):
     # ---- C7-specific (C7_ prefix) ------------------------------------------
     minio_bucket: str = "memory"
 
+    # D-020 / R-100-081 v3 — ingestion pipeline wiring.
+    # C7 owns the raw-blob write + the C12 trigger now (C12 no longer touches
+    # bytes). After storing the raw upload, C7 POSTs this n8n webhook with
+    # METADATA ONLY (raw_object_key + ids — never the file bytes). Internal
+    # cluster URL (n8n exposes its webhooks under N8N_ENDPOINT_WEBHOOK=uploads,
+    # so the path is /uploads/<workflow-path>). Best-effort fire-and-forget:
+    # a webhook failure marks the source `failed` but does not 500 the upload.
+    c12_webhook_url: str = "http://c12:5678/uploads/extract-and-ingest"
+    c12_webhook_timeout_s: float = Field(default=10.0, ge=1.0)
+    # Bucket C13 (AyExtractor) writes its run artifacts to (R-400-220). C7
+    # reads `chunks.jsonl` + `run_manifest.json` from here on /ingest-chunks
+    # (R-400-223 v3). Distinct from C7's own `minio_bucket` (sources + C7
+    # artifacts).
+    c13_artifacts_bucket: str = "c13-extractor-artifacts"
+
     # Embedding adapter selection.
     #   - "deterministic-hash": zero-dep baseline (reproducible, no ML).
     #   - "ollama": call the running Ollama server at the shared `OLLAMA_URL`

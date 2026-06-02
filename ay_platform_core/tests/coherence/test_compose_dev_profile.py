@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_compose_dev_profile.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/coherence/test_compose_dev_profile.py
 # Description: Coherence checks on the dev compose stack
 #              (`docker-compose.yml` + `docker-compose.dev.override.yml`).
@@ -73,16 +73,27 @@ def test_mock_llm_is_in_test_profile_only() -> None:
 
 @pytest.mark.coherence
 def test_no_dev_service_depends_on_mock_llm() -> None:
-    """Once mock_llm is profile-gated, no service started in the dev
-    stack SHALL list it under `depends_on`. compose ignores depends_on
-    entries pointing to unstarted profiled services in v2+, but a
-    leftover `depends_on: mock_llm` is a strong signal the author
-    didn't realize the service is now gated — and is one rename away
-    from breaking pytest e2e too."""
+    """No service that can start in the dev stack SHALL list mock_llm
+    under `depends_on`. compose ignores depends_on entries pointing to
+    unstarted profiled services in v2+, but a leftover
+    `depends_on: mock_llm` on a dev-stack service is a strong signal the
+    author didn't realize mock_llm is profile-gated — and is one rename
+    away from breaking pytest e2e too.
+
+    Carve-out (2026-05-29): a service that shares a profile with mock_llm
+    (e.g. c13-extractor, also `profiles: [test]`) starts and stops
+    TOGETHER with it — the dependency is then valid and can never dangle,
+    because activating the profile brings up both. Only services that can
+    run WITHOUT mock_llm present (no shared profile) are offenders."""
     base = _load(_BASE)
+    services = base.get("services") or {}
+    mock_profiles = set((services.get("mock_llm") or {}).get("profiles") or [])
     offenders: list[str] = []
-    for name, svc in (base.get("services") or {}).items():
+    for name, svc in services.items():
         if name == "mock_llm":
+            continue
+        # Co-gated with mock_llm → starts together with it → valid dependency.
+        if set(svc.get("profiles") or []) & mock_profiles:
             continue
         deps = svc.get("depends_on") or {}
         keys: Iterable[str]
@@ -95,9 +106,10 @@ def test_no_dev_service_depends_on_mock_llm() -> None:
         if "mock_llm" in keys:
             offenders.append(name)
     assert not offenders, (
-        f"services depend on mock_llm but mock_llm is profile-gated: "
-        f"{offenders}. Remove the dependency or move it to a "
-        "test-only override file."
+        f"dev-stack services depend on mock_llm but mock_llm is "
+        f"profile-gated: {offenders}. Remove the dependency, move it to a "
+        "test-only override file, or co-gate the service behind mock_llm's "
+        "profile."
     )
 
 

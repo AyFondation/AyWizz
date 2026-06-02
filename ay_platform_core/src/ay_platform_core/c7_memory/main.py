@@ -19,6 +19,7 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 from minio import Minio
 
+from ay_platform_core.c7_memory.c12_client import C12WebhookClient
 from ay_platform_core.c7_memory.config import MemoryConfig
 from ay_platform_core.c7_memory.db.repository import MemoryRepository
 from ay_platform_core.c7_memory.embedding.base import EmbeddingProvider
@@ -87,6 +88,11 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         C8ClientSettings(),
         bearer_token=None,
     )
+    # R-100-081 v3 — outbound trigger to the C12 (n8n) ingestion webhook.
+    c12_client = C12WebhookClient(
+        webhook_url=cfg.c12_webhook_url,
+        timeout_s=cfg.c12_webhook_timeout_s,
+    )
     service = MemoryService(
         config=cfg,
         repo=repo,
@@ -94,6 +100,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         storage=storage,
         kg_repo=kg_repo,
         llm_client=llm_client,
+        c12_client=c12_client,
     )
 
     @asynccontextmanager
@@ -108,6 +115,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         if aclose is not None:
             await aclose()
         await llm_client.aclose()
+        await c12_client.aclose()
 
     app = FastAPI(title="C7 Memory Service", lifespan=lifespan)
     app.add_middleware(

@@ -213,10 +213,22 @@ class AuthService:
                 note=f"Admin of tenant {cfg.demo_seed_tenant_id!r}.",
             ),
             DevCredential(
+                username=cfg.demo_seed_project_owner_username,
+                password=cfg.demo_seed_project_owner_password,
+                role_label="project owner (full control + delete)",
+                note=(
+                    f"Owner of {cfg.demo_seed_project_id!r} and "
+                    f"{cfg.demo_seed_docgen_project_id!r}."
+                ),
+            ),
+            DevCredential(
                 username=cfg.demo_seed_project_editor_username,
                 password=cfg.demo_seed_project_editor_password,
                 role_label="project editor (read/write)",
-                note=f"On project {cfg.demo_seed_project_id!r}.",
+                note=(
+                    f"Editor on {cfg.demo_seed_project_id!r} and "
+                    f"{cfg.demo_seed_docgen_project_id!r}."
+                ),
             ),
             DevCredential(
                 username=cfg.demo_seed_project_viewer_username,

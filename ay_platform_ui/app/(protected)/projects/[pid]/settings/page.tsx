@@ -1,23 +1,25 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/settings/page.tsx
 // Description: Project settings page. v2 ships the per-project LLM
 //              system_prompt editor — admin / tenant_admin /
 //              project_owner only ; lower roles see a read-only view
 //              of the effective prompt and a hint pointing at the
-//              right contact. Project-wide metadata (members table,
-//              cross-tenant flags, etc.) lands in subsequent passes.
+//              right contact. v3 adds the per-project ENRICHMENT config
+//              (R-400-224): quality tier preset + per-option overrides +
+//              the independent image-analyzer model, persisted to C7 and
+//              applied to every subsequent upload.
 // =============================================================================
 
 "use client";
 
 import { useParams } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { Project } from "@/lib/types";
+import type { EnrichmentConfig, Project } from "@/lib/types";
 
 const EDITOR_ROLES = new Set(["admin", "tenant_admin"]);
 const PROJECT_EDITOR_ROLE = "project_owner";
@@ -252,6 +254,8 @@ export default function ProjectSettingsPage() {
         </p>
       ) : null}
 
+      <EnrichmentSection apiClient={apiClient} projectId={projectId} canEdit={canEdit} />
+
       <section className="mt-6 rounded-lg border border-dashed border-neutral-300 p-5 text-sm text-neutral-500">
         <p>Coming later :</p>
         <ul className="mt-1 list-disc pl-5">
@@ -261,5 +265,191 @@ export default function ProjectSettingsPage() {
         </ul>
       </section>
     </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment config — quality-tier preset + per-option overrides + the
+// independent image-analyzer model. Persisted to C7 (R-400-224).
+// ---------------------------------------------------------------------------
+
+const _TIERS: EnrichmentConfig["quality_tier"][] = ["minimal", "standard", "high"];
+type ToggleKey =
+  | "summarization_enabled"
+  | "decontextualization_enabled"
+  | "densification_enabled"
+  | "image_vision_enabled";
+const _TOGGLES: { key: ToggleKey; label: string }[] = [
+  { key: "summarization_enabled", label: "Document summary" },
+  { key: "decontextualization_enabled", label: "Term disambiguation" },
+  { key: "densification_enabled", label: "Densification" },
+  { key: "image_vision_enabled", label: "Image vision + dedup" },
+];
+
+/** tri-state select value ↔ boolean|null (null = inherit the tier preset). */
+function triValue(v: boolean | null): "inherit" | "on" | "off" {
+  return v == null ? "inherit" : v ? "on" : "off";
+}
+function fromTri(s: string): boolean | null {
+  return s === "inherit" ? null : s === "on";
+}
+
+function EnrichmentSection({
+  apiClient,
+  projectId,
+  canEdit,
+}: {
+  apiClient: ApiClient;
+  projectId: string;
+  canEdit: boolean;
+}) {
+  const [config, setConfig] = useState<EnrichmentConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getEnrichmentConfig(projectId)
+      .then((c) => {
+        if (!cancelled) setConfig(c);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, projectId]);
+
+  const patch = useCallback((p: Partial<EnrichmentConfig>) => {
+    setSaved(false);
+    setConfig((c) => (c ? { ...c, ...p } : c));
+  }, []);
+
+  async function onSave(): Promise<void> {
+    if (!config) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await apiClient.updateEnrichmentConfig(projectId, config);
+      setConfig(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? `Save failed (${err.status})` : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section
+      className="mt-8 rounded-lg border border-neutral-200 bg-white p-6"
+      data-testid="project-enrichment"
+    >
+      <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+        Ingestion enrichment
+      </h3>
+      <p className="mt-2 text-sm text-neutral-600">
+        Controls what runs when a source is uploaded. The <strong>quality tier</strong> is the
+        preset; each option can override it independently. Applies to subsequent uploads.
+      </p>
+
+      {error ? (
+        <p className="mt-3 text-sm text-red-700" role="alert" data-testid="enrichment-error">
+          {error}
+        </p>
+      ) : null}
+
+      {config === null ? (
+        <p className="mt-3 text-sm text-neutral-500">Loading enrichment config…</p>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="text-xs uppercase tracking-wide text-neutral-500">Quality tier</span>
+            <select
+              value={config.quality_tier}
+              onChange={(e) =>
+                patch({ quality_tier: e.target.value as EnrichmentConfig["quality_tier"] })
+              }
+              disabled={!canEdit || busy}
+              className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:bg-neutral-50"
+              data-testid="enrichment-tier"
+            >
+              {_TIERS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {_TOGGLES.map(({ key, label }) => (
+              <label key={key} className="block">
+                <span className="text-xs uppercase tracking-wide text-neutral-500">{label}</span>
+                <select
+                  value={triValue(config[key])}
+                  onChange={(e) =>
+                    patch({ [key]: fromTri(e.target.value) } as Partial<EnrichmentConfig>)
+                  }
+                  disabled={!canEdit || busy}
+                  className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:bg-neutral-50"
+                  data-testid={`enrichment-${key}`}
+                >
+                  <option value="inherit">Inherit from tier</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+            ))}
+          </fieldset>
+
+          <label className="block">
+            <span className="text-xs uppercase tracking-wide text-neutral-500">
+              Image-analyzer model (independent of text agents)
+            </span>
+            <input
+              type="text"
+              value={config.image_analyzer_model ?? ""}
+              onChange={(e) => patch({ image_analyzer_model: e.target.value || null })}
+              disabled={!canEdit || busy}
+              placeholder="(inherit default — e.g. ollama:llava, openai:gpt-4o-mini)"
+              className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-1.5 font-mono text-xs disabled:bg-neutral-50"
+              data-testid="enrichment-image-model"
+            />
+          </label>
+
+          {!canEdit ? (
+            <div className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-600">
+              Read-only — only project owners and tenant admins can change ingestion behaviour.
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={busy}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                data-testid="enrichment-save"
+              >
+                {busy ? "Saving…" : "Save enrichment config"}
+              </button>
+              {saved ? (
+                <span
+                  className="text-xs text-emerald-700"
+                  role="status"
+                  data-testid="enrichment-saved"
+                >
+                  Saved.
+                </span>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

@@ -171,6 +171,46 @@ services:
         ollama pull hermes3:8b
         echo "[dev] Seed done."
 
+  # c13-extractor (D-020) in the DEV stack routes its embeddings egress to the
+  # LOCAL, FREE Ollama OpenAI-compatible endpoint (`all-minilm`, already
+  # seeded) so a real upload actually extracts + embeds + indexes WITHOUT a
+  # paid provider key. The litellm proxy only carries Claude CHAT models (no
+  # embeddings), so it cannot serve C13's embedding phase. For a
+  # production-fidelity run, point OPENAI_BASE_URL at litellm and add an
+  # embeddings model (Voyage/OpenAI) there. Env changes require a container
+  # recreate (not just --reload).
+  c13-extractor:
+    environment:
+      # Enrichment CHAT LLMs (summary / decontextualization / densification /
+      # image vision) route through C8 LiteLLM → Claude (R-800, the platform's
+      # LLM egress). C13 authenticates with the shared gateway key, sent as its
+      # OPENAI_API_KEY (interpolated from .env.secret by e2e_stack `dev`). The
+      # image-analyzer uses an INDEPENDENT Claude route (R-400-224 — separate
+      # from the text default). A project still has to enable enrichment
+      # (quality_tier standard/high) for these to run.
+      OPENAI_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: "${C8_GATEWAY_API_KEY:-}"
+      LLM_DEFAULT_PROVIDER: openai
+      LLM_DEFAULT_MODEL: claude-sonnet-midtier
+      LLM_IMAGE_ANALYZER: "openai:claude-sonnet-midtier"
+      # Embeddings have NO model on LiteLLM, so they keep routing to the LOCAL,
+      # FREE Ollama endpoint (all-minilm) — independent of the chat egress.
+      EMBEDDING_BASE_URL: http://ollama:11434/v1
+      EMBEDDING_API_KEY: ollama-local
+      EMBEDDING_MODEL: all-minilm
+    # Bind-mount ay_extractor/src + uvicorn --reload so edits to the vendored
+    # C13 code land without an image rebuild (it is `pip install -e`, so the
+    # editable install picks up the mounted src). Dev-only ergonomics.
+    volumes:
+      - ../../ay_extractor/src:/app/ay_extractor/src:ro
+    command:
+      - "sh"
+      - "-c"
+      - "exec uvicorn ayextractor.api.http:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/ay_extractor/src"
+    depends_on:
+      ollama_model_seed:
+        condition: service_completed_successfully
+
   # Next.js UI — built from the monorepo root via Dockerfile.ui
   # (multi-stage standalone Next bundle). Exposed only inside the
   # compose network ; Traefik (c1) routes the catch-all `/` to it.

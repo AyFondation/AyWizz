@@ -1,8 +1,17 @@
 # =============================================================================
 # File: docker-compose.yml
-# Version: 8
+# Version: 9
 # Path: ay_platform_core/tests/docker-compose.yml
 # Description: End-to-end local stack for system tests. Brings up:
+#              v9 (D-020 ingestion, R-100-081 v3): adds the `c13-extractor`
+#              service (profiles `test` + `litellm` so it runs in both the
+#              mock CI/full stack and the dev/litellm stack). `minio_init`
+#              creates the `c13-extractor-artifacts` bucket (C13 writes its
+#              artifacts there; C7 writes the raw upload + reads chunks there
+#              — all authenticated, R-100-081 v3 moved byte custody to C7, so
+#              n8n no longer touches MinIO and no anonymous policy is needed).
+#              On the mock stack C13 has no `/v1/embeddings` so a run ends
+#              `failed` (proves wiring, not extraction).
 #              v8 (V2 #2): adds the opt-in `c4_openhands` service (profile
 #              `openhands`) — C4 built from Dockerfile.c15-runner with
 #              C4_GENERATE_ENGINE=openhands, so the OpenHands generate engine
@@ -271,7 +280,14 @@ services:
         set -e
         mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
         echo "Ensuring buckets"
-        for b in orchestrator requirements validation memory; do
+        # `sources` holds the raw uploaded bytes the C12 webhook PUTs;
+        # `c13-extractor-artifacts` holds C13's chunks.jsonl + run_manifest
+        # the workflow reads back before C7 /ingest-chunks (D-020 pipeline).
+        # `c13-extractor-artifacts` (R-400-220): C13 writes its run artifacts
+        # here AND C7 writes the raw upload + reads chunks.jsonl/run_manifest
+        # here (R-100-081 v3). All access is authenticated (C7 ay_app, C13
+        # root) — no anonymous policy needed (n8n no longer touches MinIO).
+        for b in orchestrator requirements validation memory c13-extractor-artifacts; do
           mc mb --ignore-existing "local/$$b"
         done
         echo "Ensuring policy ay-app-readwrite"
@@ -285,7 +301,8 @@ services:
                 "arn:aws:s3:::orchestrator", "arn:aws:s3:::orchestrator/*",
                 "arn:aws:s3:::requirements", "arn:aws:s3:::requirements/*",
                 "arn:aws:s3:::validation",   "arn:aws:s3:::validation/*",
-                "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*"
+                "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*",
+                "arn:aws:s3:::c13-extractor-artifacts", "arn:aws:s3:::c13-extractor-artifacts/*"
               ]
             }
           ]
@@ -506,6 +523,76 @@ services:
     # not part of the platform public surface.
     ports:
       - "${PORT_MOCK_LLM}:8000"
+
+  # ---------------------------------------------------------------------------
+  # C13 — AyExtractor (D-020 / R-100-125 v2). The HTTP extract+chunk service
+  # the C12 ingestion workflow calls: webhook → MinIO PUT (raw) →
+  # C13 POST /analyze → poll GET /status → MinIO artifacts → C7 /ingest-chunks.
+  # Built from its own image (separate `ay_extractor/` codebase) — NOT part of
+  # the shared ay-api tier, so it does not use the x-api-service anchor.
+  #
+  # PROFILES — `test`, co-located with `mock_llm`: C13 routes its LLM egress
+  # to the mock (`OPENAI_BASE_URL=http://mock_llm:8000/v1`) so the ingestion
+  # pipeline is exercisable end-to-end WITHOUT real provider keys. CAVEAT
+  # (operator decision 2026-05-29): the mock exposes only
+  # `/v1/chat/completions`, not `/v1/embeddings`; C13 with `voyage-3`
+  # embeddings will therefore terminate `failed` at the embedding phase. This
+  # proves the WIRING (webhook → MinIO → C13 → status poll → respond), not
+  # real extraction. Swap to the `litellm` profile + a real key to exercise
+  # genuine extraction. C13 is internal-only (no Traefik route, R-100-125 v2);
+  # host port published for manual smoke tests only.
+  c13-extractor:
+    build:
+      context: ../..
+      dockerfile: infra/c13_extractor/docker/Dockerfile
+      args:
+        MONOREPO_GIT_SHA: ${MONOREPO_GIT_SHA:-dev}
+    image: ay-c13-extractor:local
+    container_name: ay-c13-extractor
+    # `test` → the mock-LLM CI/full stack ; `litellm` → the dev stack (where
+    # the dev override re-points OPENAI_BASE_URL at the real C8 proxy). c13
+    # is needed for uploads in BOTH, so it joins both profile sets.
+    profiles: ["test", "litellm"]
+    environment:
+      <<: *common-env
+      # LLM egress → mock (chat only; embeddings 404 by design — see CAVEAT).
+      OPENAI_BASE_URL: "http://mock_llm:8000/v1"
+      OPENAI_API_KEY: "mock-no-key"
+      # MinIO writer — same instance + root creds as the rest of the stack.
+      OUTPUT_WRITER: minio
+      OUTPUT_MINIO_BUCKET: c13-extractor-artifacts
+      OUTPUT_MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: us-east-1
+      EMBEDDING_MODEL: voyage-3
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    # No depends_on mock_llm: c13 connects to its LLM target lazily, and
+    # mock_llm (profile `test`) is absent from the dev/`litellm` stack — a
+    # hard depends_on there makes the compose project invalid. The LLM target
+    # is OPENAI_BASE_URL (mock in `test`, litellm via the dev override).
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+    networks:
+      - platform
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
 
   # NATS server with JetStream — backbone for the C4 orchestrator's
   # hybrid-exposure event channel (R-200-070 / R-200-071) and the C3

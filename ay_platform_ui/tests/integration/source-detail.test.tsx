@@ -141,3 +141,374 @@ describe("SourceDetailPage", () => {
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith("/projects/p1/sources"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Transparency surface (R-400-221): runs table, artifact browser, chunk
+// expand + downloads.
+// ---------------------------------------------------------------------------
+
+function diagWithOneChunk() {
+  return {
+    source_id: "doc-a",
+    project_id: "p1",
+    parse_status: "indexed",
+    parse_error: null,
+    chunk_count: 1,
+    model_id: "all-minilm",
+    processing_version: "chunk=512/64;embed=all-minilm",
+    uploaded_by: "alice",
+    uploaded_at: "2026-01-01T00:00:00Z",
+    mime_type: "text/markdown",
+    size_bytes: 2048,
+    extraction_run_id: "run-new",
+    storage: {
+      raw_bucket: "c13-extractor-artifacts",
+      raw_object_key: "sources/t/p1/doc-a/raw.md",
+      artifacts_bucket: "c13-extractor-artifacts",
+      artifacts_prefix: "t/p1/doc-a/runs/run-new/",
+      chunks_jsonl_key: "t/p1/doc-a/runs/run-new/02_chunks/chunks.jsonl",
+      manifest_key: "t/p1/doc-a/runs/run-new/00_metadata/run_manifest.json",
+    },
+    chunks: [
+      {
+        chunk_id: "c0",
+        seq: 0,
+        token_count: 8,
+        char_start: 0,
+        char_end: 42,
+        has_embedding: true,
+      },
+    ],
+  };
+}
+
+function runsListing() {
+  return {
+    source_id: "doc-a",
+    project_id: "p1",
+    active_run_id: "run-new",
+    runs: [
+      {
+        run_id: "run-old",
+        ayextractor_version: "0.9.0",
+        git_sha: "old123",
+        created_at: "2026-01-01T09:00:00Z",
+        completed_at: "2026-01-01T09:00:05Z",
+        status: "completed",
+        is_active: false,
+        chunk_count: null,
+      },
+      {
+        run_id: "run-new",
+        ayextractor_version: "1.2.0",
+        git_sha: "new456",
+        created_at: "2026-01-02T10:00:00Z",
+        completed_at: "2026-01-02T10:00:05Z",
+        status: "completed",
+        is_active: true,
+        chunk_count: 1,
+      },
+    ],
+  };
+}
+
+function artifactsListing() {
+  return {
+    source_id: "doc-a",
+    project_id: "p1",
+    run_id: "run-new",
+    prefix: "t/p1/doc-a/runs/run-new/",
+    entries: [
+      {
+        path: "00_metadata/run_manifest.json",
+        size_bytes: 120,
+        content_type: "application/json",
+      },
+      { path: "02_chunks/chunks.jsonl", size_bytes: 80, content_type: "application/x-ndjson" },
+    ],
+  };
+}
+
+describe("SourceDetailPage — runs, artifacts & chunk content", () => {
+  function wireBaseStack() {
+    server.use(
+      http.get(SRC_URL, () => HttpResponse.json(makeSource())),
+      http.get(`${SRC_URL}/diagnostics`, () => HttpResponse.json(diagWithOneChunk())),
+      http.get(`${SRC_URL}/runs`, () => HttpResponse.json(runsListing())),
+      http.get(`${SRC_URL}/runs/run-new/artifacts`, () => HttpResponse.json(artifactsListing())),
+    );
+  }
+
+  it("lists extraction runs with parser version and an active badge", async () => {
+    wireBaseStack();
+    renderWithProviders(<SourceDetailPage />);
+
+    await waitFor(() => expect(screen.getByTestId("runs-table")).toBeInTheDocument());
+    expect(screen.getByText("1.2.0")).toBeInTheDocument(); // active run's extractor version
+    expect(screen.getByText("0.9.0")).toBeInTheDocument(); // the older run too
+    expect(screen.getByText("active")).toBeInTheDocument();
+  });
+
+  it("browses a run and views an artifact's content", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/runs/run-new/artifacts/00_metadata/run_manifest.json`, () =>
+        HttpResponse.text('{"ayextractor_version":"1.2.0"}', {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    // The active run is auto-selected → its artifacts load.
+    const opener = await screen.findByText("00_metadata/run_manifest.json");
+    await user.click(opener);
+
+    await waitFor(() => expect(screen.getByTestId("artifact-view")).toBeInTheDocument());
+    expect(screen.getByText(/ayextractor_version/)).toBeInTheDocument();
+  });
+
+  it("expands a chunk to load and show its content", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/chunks/c0`, () =>
+        HttpResponse.json({
+          chunk_id: "c0",
+          seq: 0,
+          content: "Voyager 1 launched in 1977.",
+          context: "About spacecraft.",
+          original_text: "Voyager 1 launched in 1977.",
+          char_start: 0,
+          char_end: 27,
+          token_count: 8,
+          section_path: ["Intro"],
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    const row = await screen.findByTestId("chunk-row");
+    await user.click(row);
+
+    await waitFor(() => expect(screen.getByTestId("chunk-content")).toBeInTheDocument());
+    expect(screen.getByText("Voyager 1 launched in 1977.")).toBeInTheDocument();
+    expect(screen.getByText(/Intro/)).toBeInTheDocument();
+  });
+
+  it("shows the decontextualization before/after when the chunk was disambiguated", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/chunks/c0`, () =>
+        HttpResponse.json({
+          chunk_id: "c0",
+          seq: 0,
+          content: "Voyager 1 launched in 1977.", // decontextualized
+          context: null,
+          original_text: "It launched in 1977.", // original (differs)
+          char_start: 0,
+          char_end: 27,
+          token_count: 8,
+          section_path: [],
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("chunk-row"));
+    await waitFor(() => expect(screen.getByTestId("chunk-content")).toBeInTheDocument());
+    expect(screen.getByText("decontextualized")).toBeInTheDocument();
+    expect(screen.getByTestId("chunk-original")).toBeInTheDocument();
+    expect(screen.getByText("It launched in 1977.")).toBeInTheDocument();
+  });
+
+  it("renders the document summary + image captions (enrichment digest)", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/runs/run-new/artifacts`, () =>
+        HttpResponse.json({
+          source_id: "doc-a",
+          project_id: "p1",
+          run_id: "run-new",
+          prefix: "t/p1/doc-a/runs/run-new/",
+          entries: [
+            { path: "02_chunks/dense_summary.md", size_bytes: 50, content_type: "text/markdown" },
+            {
+              path: "01_extraction/images/img_abc12345.json",
+              size_bytes: 60,
+              content_type: "application/json",
+            },
+          ],
+        }),
+      ),
+      http.get(`${SRC_URL}/runs/run-new/artifacts/02_chunks/dense_summary.md`, () =>
+        HttpResponse.text("Voyager 1 is the most distant human-made object.", {
+          headers: { "Content-Type": "text/markdown" },
+        }),
+      ),
+      http.get(`${SRC_URL}/runs/run-new/artifacts/01_extraction/images/img_abc12345.json`, () =>
+        HttpResponse.json({
+          sha256: "abc12345deadbeef",
+          type: "diagram",
+          description: "A trajectory diagram of the probe.",
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+
+    await waitFor(() => expect(screen.getByTestId("run-summary")).toBeInTheDocument());
+    expect(screen.getByText(/most distant human-made object/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("run-images")).toBeInTheDocument());
+    expect(screen.getByText(/trajectory diagram of the probe/)).toBeInTheDocument();
+  });
+
+  it("downloads all chunks as a zip via an object URL", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/chunks.zip`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([80, 75, 3, 4]).buffer, {
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="doc-a_chunks.zip"',
+          },
+        }),
+      ),
+    );
+    const createObjectURL = vi.fn(() => "blob:mock");
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL;
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("download-chunks-zip"));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+  });
+
+  it("downloads a single artifact and the whole-run zip via object URLs", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/runs/run-new/artifacts/00_metadata/run_manifest.json`, () =>
+        HttpResponse.text("{}", {
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Disposition": 'inline; filename="run_manifest.json"',
+          },
+        }),
+      ),
+      http.get(`${SRC_URL}/runs/run-new/artifacts.zip`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([80, 75, 3, 4]).buffer, {
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="doc-a_run-new_artifacts.zip"',
+          },
+        }),
+      ),
+    );
+    const createObjectURL = vi.fn(() => "blob:mock");
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL;
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    const dlButtons = await screen.findAllByTestId("artifact-download");
+    await user.click(dlButtons[0]);
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+
+    await user.click(screen.getByTestId("download-artifacts-zip"));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a binary placeholder for non-textual artifacts", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/runs/run-new/artifacts/00_metadata/run_manifest.json`, () =>
+        HttpResponse.arrayBuffer(new Uint8Array([1, 2, 3]).buffer, {
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("00_metadata/run_manifest.json"));
+    await waitFor(() => expect(screen.getByTestId("artifact-view")).toBeInTheDocument());
+    expect(screen.getByText(/binary/)).toBeInTheDocument();
+  });
+
+  it("collapses an expanded chunk on a second click", async () => {
+    wireBaseStack();
+    server.use(
+      http.get(`${SRC_URL}/chunks/c0`, () =>
+        HttpResponse.json({
+          chunk_id: "c0",
+          seq: 0,
+          content: "chunk body",
+          context: null,
+          original_text: null,
+          char_start: 0,
+          char_end: 10,
+          token_count: 2,
+          section_path: [],
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    const user = userEvent.setup();
+
+    const row = await screen.findByTestId("chunk-row");
+    await user.click(row);
+    await waitFor(() => expect(screen.getByTestId("chunk-content")).toBeInTheDocument());
+    await user.click(row);
+    await waitFor(() => expect(screen.queryByTestId("chunk-content")).not.toBeInTheDocument());
+  });
+
+  it("handles a runs-load failure gracefully", async () => {
+    server.use(
+      http.get(SRC_URL, () => HttpResponse.json(makeSource())),
+      http.get(`${SRC_URL}/diagnostics`, () => HttpResponse.json(diagWithOneChunk())),
+      http.get(`${SRC_URL}/runs`, () => HttpResponse.json({ detail: "boom" }, { status: 500 })),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    await waitFor(() => expect(screen.getByText(/Failed to load runs:/)).toBeInTheDocument());
+  });
+
+  it("shows an empty state when the source has no runs", async () => {
+    server.use(
+      http.get(SRC_URL, () => HttpResponse.json(makeSource())),
+      http.get(`${SRC_URL}/diagnostics`, () => HttpResponse.json(diagWithOneChunk())),
+      http.get(`${SRC_URL}/runs`, () =>
+        HttpResponse.json({
+          source_id: "doc-a",
+          project_id: "p1",
+          active_run_id: null,
+          runs: [],
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    await waitFor(() => expect(screen.getByText(/No extraction runs found/)).toBeInTheDocument());
+  });
+
+  it("shows an empty state when the active run has no artifacts", async () => {
+    server.use(
+      http.get(SRC_URL, () => HttpResponse.json(makeSource())),
+      http.get(`${SRC_URL}/diagnostics`, () => HttpResponse.json(diagWithOneChunk())),
+      http.get(`${SRC_URL}/runs`, () => HttpResponse.json(runsListing())),
+      http.get(`${SRC_URL}/runs/run-new/artifacts`, () =>
+        HttpResponse.json({
+          source_id: "doc-a",
+          project_id: "p1",
+          run_id: "run-new",
+          prefix: "t/p1/doc-a/runs/run-new/",
+          entries: [],
+        }),
+      ),
+    );
+    renderWithProviders(<SourceDetailPage />);
+    await waitFor(() => expect(screen.getByText(/No artifacts in this run/)).toBeInTheDocument());
+  });
+});

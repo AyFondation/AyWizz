@@ -261,6 +261,8 @@ class AuthConfig(BaseSettings):
     demo_seed_superroot_password: str = Field(default="dev-superroot")
     demo_seed_tenant_admin_username: str = Field(default="tenant-admin")
     demo_seed_tenant_admin_password: str = Field(default="dev-tenant")
+    demo_seed_project_owner_username: str = Field(default="project-owner")
+    demo_seed_project_owner_password: str = Field(default="dev-owner")
     demo_seed_project_editor_username: str = Field(default="project-editor")
     demo_seed_project_editor_password: str = Field(default="dev-editor")
     demo_seed_project_viewer_username: str = Field(default="project-viewer")

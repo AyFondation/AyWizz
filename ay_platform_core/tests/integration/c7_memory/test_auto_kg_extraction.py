@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_auto_kg_extraction.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c7_memory/test_auto_kg_extraction.py
 # Description: Verifies the gap-UX-#3 behaviour : when C7 is wired with
 #              both kg_repo and llm_client, AND
@@ -42,6 +42,7 @@ from ay_platform_core.c7_memory.embedding.deterministic import (
     DeterministicHashEmbedder,
 )
 from ay_platform_core.c7_memory.kg.repository import KGRepository
+from ay_platform_core.c7_memory.models import ChunkIngestRequest, ChunkRich
 from ay_platform_core.c7_memory.router import router as c7_router
 from ay_platform_core.c7_memory.service import MemoryService
 from ay_platform_core.c7_memory.service import get_service as c7_get_service
@@ -170,6 +171,7 @@ async def kg_upload_stack(
             default_quota_bytes=1024 * 1024 * 1024,
             retrieval_scan_cap=1000,
             auto_extract_kg_on_upload=True,
+            c13_artifacts_bucket=bucket,
         ),
         repo=repo,
         embedder=embedder,
@@ -194,43 +196,68 @@ async def kg_upload_stack(
 async def _upload_text(
     app: FastAPI, source_id: str, body: bytes,
 ) -> httpx.Response:
-    """D-020 session 7 — drives ingestion through the new
-    `/ingest-chunks` path. Builds a minimal ChunkIngestRequest from the
-    raw text so the auto-KG hook (now wired into
+    """D-020 session 7 / R-400-223 v3 — drives ingestion through the new
+    `/ingest-chunks` path. C7 reads chunks.jsonl + run_manifest.json from
+    MinIO, so the helper SEEDS those C13 artifacts (with C7-computed
+    embeddings) into the artifacts bucket, then POSTs the minimal
+    run-reference payload. The auto-KG hook (wired into
     `ingest_chunks_from_extractor`) fires on the indexed chunk."""
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    service: MemoryService = app.dependency_overrides[c7_get_service]()
+    assert service._storage is not None
     text = body.decode("utf-8")
-    chunk_request: dict[str, Any] = {
-        "extraction_run_id": f"test-{uuid.uuid4().hex[:8]}",
-        "manifest_object_key": None,
-        "embedding_model": "deterministic-hash-v1",
-        "embedding_model_version": "test-v1",
-        "embedding_dimension": 64,
-        "uploaded_by": _HEADERS["X-User-Id"],
-        "mime_type": "text/plain",
-        "chunks": [
+    run_id = f"test-{uuid.uuid4().hex[:8]}"
+    dimension = service._embedder.dimension
+    vectors = await service._embedder.embed_batch([text])
+    chunk = ChunkRich(
+        chunk_id=f"{source_id}:0000",
+        seq=0,
+        text=text,
+        original_text=text,
+        section_path=[],
+        char_start=0,
+        char_end=len(text),
+        token_count=len(text.split()),
+        references=[],
+        images=[],
+        tables=[],
+        extraction_run_id=run_id,
+        embedding=vectors[0],
+    )
+    bucket = service._config.c13_artifacts_bucket
+    await service._storage.put_to_bucket(
+        bucket=bucket,
+        key=MemorySourceStorage.c13_artifact_key(
+            _TENANT, _PROJECT, source_id, run_id, "00_metadata/run_manifest.json"
+        ),
+        data=json.dumps(
             {
-                "chunk_id": f"{source_id}:0000",
-                "seq": 0,
-                "text": text,
-                "original_text": text,
-                "section_path": [],
-                "char_start": 0,
-                "char_end": len(text),
-                "token_count": len(text.split()),
-                "references": [],
-                "images": [],
-                "tables": [],
-                "extraction_run_id": f"test-{uuid.uuid4().hex[:8]}",
-                "embedding": None,
+                "embedding_model": "deterministic-hash-v1",
+                "embedding_model_version": "test-v1",
+                "embedding_dimension": dimension,
             }
-        ],
-    }
+        ).encode("utf-8"),
+        content_type="application/json",
+    )
+    await service._storage.put_to_bucket(
+        bucket=bucket,
+        key=MemorySourceStorage.c13_artifact_key(
+            _TENANT, _PROJECT, source_id, run_id, "02_chunks/chunks.jsonl"
+        ),
+        data=json.dumps(chunk.model_dump()).encode("utf-8"),
+        content_type="application/x-ndjson",
+    )
+    payload = ChunkIngestRequest(
+        extraction_run_id=run_id,
+        uploaded_by=_HEADERS["X-User-Id"],
+        mime_type="text/plain",
+        tenant_id=_TENANT,
+    )
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         return await c.post(
             f"/api/v1/memory/projects/{_PROJECT}/sources/{source_id}/ingest-chunks",
             headers={**_HEADERS, "Content-Type": "application/json"},
-            json=chunk_request,
+            json=payload.model_dump(),
         )
 
 
@@ -328,6 +355,7 @@ async def test_malformed_llm_response_does_not_break_upload(
                     default_quota_bytes=1024 * 1024 * 1024,
                     retrieval_scan_cap=1000,
                     auto_extract_kg_on_upload=True,
+                    c13_artifacts_bucket=bucket,
                 ),
                 repo=repo,
                 embedder=embedder,

@@ -606,9 +606,29 @@ _C7_MEMORY: list[EndpointSpec] = [
         backend=Backend.ARANGO,
         backend_collection="c7_sources",
     ),
-    # D-020 session 7 — `/sources/upload` EndpointSpec removed alongside
-    # the route + service method. Use `/ingest-chunks` (R-400-223 v2) for
-    # the platform-blessed ingestion path.
+    # R-100-081 v3 — `/sources/upload` RE-INTRODUCED as a thin store-and-
+    # trigger edge (multipart): C7 writes the raw bytes to MinIO + triggers
+    # the C12 workflow with metadata only (NOT the D-020-removed in-process
+    # parse+chunk). Byte custody moved from C12 (n8n) to C7.
+    EndpointSpec(
+        component="c7_memory",
+        method="POST",
+        path="/api/v1/memory/projects/{project_id}/sources/upload",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=202,
+        accept_roles=("project_editor", "project_owner"),
+        accept_global_roles=("admin",),
+        excluded_global_roles=("tenant_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c7_sources",
+        notes=(
+            "R-100-081 v3 multipart upload — stores the raw bytes in MinIO "
+            "(authenticated) and triggers the C12 ingestion webhook with "
+            "metadata only; records a `pending` source row. Heavy extraction "
+            "stays asynchronous in C13."
+        ),
+    ),
     EndpointSpec(
         component="c7_memory",
         method="POST",
@@ -690,10 +710,108 @@ _C7_MEMORY: list[EndpointSpec] = [
     EndpointSpec(
         component="c7_memory",
         method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes=(
+            "Observability view: index status + MinIO storage locations + "
+            "per-chunk status (R-100-082 / transparency)."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
         path="/api/v1/memory/projects/{project_id}/sources/{source_id}/blob",
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/runs",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes=(
+            "List all C13 extraction runs of a source with parser/extractor "
+            "version + status, marking the active (indexed) run (R-400-221)."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes="Browse the artifact tree of one extraction run (R-400-221).",
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes="Download every artifact of a run as a single zip (R-400-221).",
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes=(
+            "Fetch one run artifact's bytes for visualisation or single-file "
+            "download (catch-all path param, R-400-221)."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes="Download every indexed chunk (active run) as a zip (R-400-221).",
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes="Full content of one indexed chunk, lazy-loaded on expand (R-400-221).",
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/enrichment-config",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes=(
+            "Per-project enrichment config (quality tier + per-option overrides "
+            "+ independent image-analyzer model), default when unset (R-400-224)."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="PUT",
+        path="/api/v1/memory/projects/{project_id}/enrichment-config",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin"),
+        excluded_global_roles=("tenant_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="memory_project_config",
+        notes="Persist the project's enrichment config (owner/admin only, R-400-224).",
     ),
     EndpointSpec(
         component="c7_memory",

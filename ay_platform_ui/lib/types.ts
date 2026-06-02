@@ -254,6 +254,110 @@ export interface SourceList {
   sources: Source[];
 }
 
+/** Per-chunk status row (source diagnostics). */
+export interface ChunkDiagnostic {
+  chunk_id: string;
+  seq: number;
+  token_count: number;
+  char_start: number;
+  char_end: number;
+  has_embedding: boolean;
+}
+
+/** MinIO storage locations of a source's raw bytes + C13 run artifacts. */
+export interface SourceStorageInfo {
+  raw_bucket: string;
+  raw_object_key: string | null;
+  artifacts_bucket: string;
+  artifacts_prefix: string | null;
+  chunks_jsonl_key: string | null;
+  manifest_key: string | null;
+}
+
+/** `GET /sources/{sid}/diagnostics` — index status + MinIO storage +
+ *  per-chunk status (ingestion observability). */
+export interface SourceDiagnostics {
+  source_id: string;
+  project_id: string;
+  parse_status: ParseStatus;
+  parse_error: string | null;
+  chunk_count: number;
+  model_id: string | null;
+  processing_version: string | null;
+  uploaded_by: string;
+  uploaded_at: string;
+  mime_type: string;
+  size_bytes: number;
+  extraction_run_id: string | null;
+  storage: SourceStorageInfo;
+  chunks: ChunkDiagnostic[];
+}
+
+/** One C13 extraction run of a source, summarised from its manifest
+ *  (R-400-221). Surfaces the parser/extractor version. */
+export interface ExtractionRunInfo {
+  run_id: string;
+  ayextractor_version: string | null;
+  git_sha: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+  status: string | null;
+  is_active: boolean;
+  chunk_count: number | null;
+}
+
+/** `GET /sources/{sid}/runs` — all extraction runs of a source. */
+export interface SourceRunListing {
+  source_id: string;
+  project_id: string;
+  active_run_id: string | null;
+  runs: ExtractionRunInfo[];
+}
+
+/** One artifact object inside a run's prefix (file-browser row). */
+export interface ArtifactEntry {
+  path: string;
+  size_bytes: number;
+  content_type: string | null;
+}
+
+/** `GET /sources/{sid}/runs/{run_id}/artifacts` — a run's artifact tree. */
+export interface RunArtifactListing {
+  source_id: string;
+  project_id: string;
+  run_id: string;
+  prefix: string;
+  entries: ArtifactEntry[];
+}
+
+/** `GET /sources/{sid}/chunks/{chunk_id}` — full content of one indexed
+ *  chunk (lazy-loaded on expand). */
+export interface ChunkContent {
+  chunk_id: string;
+  seq: number;
+  content: string;
+  context: string | null;
+  original_text: string | null;
+  char_start: number;
+  char_end: number;
+  token_count: number;
+  section_path: string[];
+}
+
+/** Per-project ingestion enrichment config (R-400-224). `quality_tier` is the
+ *  preset; the per-option booleans override it (null = inherit the preset).
+ *  `image_analyzer_model` selects the vision model independently of the text
+ *  agents. GET/PUT `/api/v1/memory/projects/{pid}/enrichment-config`. */
+export interface EnrichmentConfig {
+  quality_tier: "minimal" | "standard" | "high";
+  summarization_enabled: boolean | null;
+  decontextualization_enabled: boolean | null;
+  densification_enabled: boolean | null;
+  image_vision_enabled: boolean | null;
+  chain_of_density_iterations: number | null;
+  image_analyzer_model: string | null;
+}
+
 // ===========================================================================
 // C3 — Conversations
 // ===========================================================================

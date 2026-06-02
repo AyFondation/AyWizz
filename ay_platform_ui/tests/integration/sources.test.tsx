@@ -16,7 +16,7 @@
 //                  cancel → no network call.
 // =============================================================================
 
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -95,9 +95,11 @@ describe("SourcesPage list states", () => {
     expect(screen.getByTestId("source-row-doc-a")).toBeInTheDocument();
     expect(screen.getByText("indexed")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
-    // mime label resolved from SUPPORTED_MIME_TYPES
-    expect(screen.getByText("Markdown")).toBeInTheDocument();
-    expect(screen.getByText("PDF")).toBeInTheDocument();
+    // mime label resolved from SUPPORTED_MIME_TYPES — scoped to the table,
+    // since the type-filter chips now surface the same labels too.
+    const table = within(screen.getByTestId("sources-table"));
+    expect(table.getByText("Markdown")).toBeInTheDocument();
+    expect(table.getByText("PDF")).toBeInTheDocument();
     // row links to the source detail
     expect(screen.getByText("doc-a")).toHaveAttribute("href", "/projects/p1/sources/doc-a");
   });
@@ -120,7 +122,11 @@ describe("SourcesPage upload card", () => {
   it("stages a supported file with a derived source_id, then uploads + resets", async () => {
     server.use(
       http.get(SOURCES_URL, () => HttpResponse.json({ sources: [] })),
-      http.post(`${SOURCES_URL}/upload`, () => HttpResponse.json(makeSource())),
+      // R-100-081 v3: upload is a multipart POST to C7 /sources/upload
+      // (C7 stores the raw bytes + triggers C12 with metadata only).
+      http.post(`${SOURCES_URL}/upload`, () =>
+        HttpResponse.json({ source_id: "my-doc", parse_status: "pending" }, { status: 202 }),
+      ),
     );
     renderWithProviders(<SourcesPage />);
     await waitFor(() => expect(screen.getByTestId("upload-dropzone")).toBeInTheDocument());
@@ -194,5 +200,208 @@ describe("SourcesPage row delete", () => {
     expect(deleteHandler).not.toHaveBeenCalled();
     // row still present
     expect(screen.getByTestId("source-row-doc-a")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Client-side filtering: live search + clear + owner/type facets.
+// ---------------------------------------------------------------------------
+
+describe("SourcesPage filtering", () => {
+  function wireThreeSources() {
+    server.use(
+      http.get(SOURCES_URL, () =>
+        HttpResponse.json({
+          sources: [
+            makeSource({ source_id: "doc-alpha", mime_type: "text/markdown" }),
+            makeSource({ source_id: "doc-beta", mime_type: "application/pdf" }),
+            makeSource({
+              source_id: "shared-note",
+              mime_type: "text/markdown",
+              ownership_scope: "tenant",
+            }),
+          ],
+        }),
+      ),
+    );
+  }
+
+  it("filters rows live as the user types and clears with the cross", async () => {
+    wireThreeSources();
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId("sources-table")).toBeInTheDocument());
+    expect(screen.getByTestId("sources-count")).toHaveTextContent("3 sources");
+
+    // Partial-word match ("lph" ⊂ "alpha") → only doc-alpha survives.
+    await user.type(screen.getByTestId("sources-search-input"), "lph");
+    await waitFor(() =>
+      expect(screen.queryByTestId("source-row-doc-beta")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("source-row-doc-alpha")).toBeInTheDocument();
+    expect(screen.queryByTestId("source-row-shared-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sources-count")).toHaveTextContent("1 / 3 sources");
+
+    // The clear cross resets the search instantly.
+    await user.click(screen.getByTestId("sources-search-clear"));
+    await waitFor(() => expect(screen.getByTestId("source-row-doc-beta")).toBeInTheDocument());
+    expect(screen.getByTestId("sources-count")).toHaveTextContent("3 sources");
+  });
+
+  it("deselecting a file-type facet hides matching rows", async () => {
+    wireThreeSources();
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId("sources-table")).toBeInTheDocument());
+    // Turn PDF off → doc-beta (the only PDF) disappears.
+    await user.click(screen.getByTestId("filter-type-application/pdf"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("source-row-doc-beta")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("source-row-doc-alpha")).toBeInTheDocument();
+    expect(screen.getByTestId("source-row-shared-note")).toBeInTheDocument();
+    expect(screen.getByTestId("sources-count")).toHaveTextContent("2 / 3 sources");
+  });
+
+  it("deselecting an owner facet hides matching rows", async () => {
+    wireThreeSources();
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId("sources-table")).toBeInTheDocument());
+    // Turn the tenant owner off → shared-note disappears.
+    await user.click(screen.getByTestId("filter-owner-tenant"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("source-row-shared-note")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("source-row-doc-alpha")).toBeInTheDocument();
+    expect(screen.getByTestId("source-row-doc-beta")).toBeInTheDocument();
+  });
+
+  it("shows a no-matches placeholder when nothing matches the search", async () => {
+    wireThreeSources();
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId("sources-table")).toBeInTheDocument());
+    await user.type(screen.getByTestId("sources-search-input"), "zzz-nothing");
+    await waitFor(() => expect(screen.getByTestId("sources-no-matches")).toBeInTheDocument());
+    expect(screen.queryByTestId("sources-table")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-file upload — queue + strictly sequential processing.
+// ---------------------------------------------------------------------------
+
+// Extract the `source_id` field from a raw multipart body. Reading the body
+// as text sidesteps undici's `request.formData()` parser, which chokes on the
+// jsdom-built FormData under MSW.
+function sourceIdFromMultipart(body: string): string {
+  return body.match(/name="source_id"\r?\n\r?\n([^\r\n]+)/)?.[1] ?? "";
+}
+
+describe("SourcesPage multi-file upload", () => {
+  it("queues several files and uploads them one after another, in order", async () => {
+    const order: string[] = [];
+    server.use(
+      http.get(SOURCES_URL, () => HttpResponse.json({ sources: [] })),
+      http.post(`${SOURCES_URL}/upload`, async ({ request }) => {
+        const id = sourceIdFromMultipart(await request.text());
+        order.push(id);
+        return HttpResponse.json({ source_id: id, parse_status: "pending" }, { status: 202 });
+      }),
+    );
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("upload-dropzone")).toBeInTheDocument());
+
+    const files = [
+      new File(["# a"], "alpha.md", { type: "text/markdown" }),
+      new File(["# b"], "beta.md", { type: "text/markdown" }),
+    ];
+    await user.upload(screen.getByTestId("upload-file-input"), files);
+
+    // Two queued rows, with editable source ids.
+    expect(screen.getAllByTestId("upload-staged-file")).toHaveLength(2);
+    expect(screen.getByTestId("upload-submit")).toHaveTextContent("Upload 2 files");
+
+    await user.click(screen.getByTestId("upload-submit"));
+
+    // Both end up uploaded, and the POSTs happened in queue order.
+    await waitFor(() => {
+      const badges = screen.getAllByTestId("upload-status");
+      expect(badges).toHaveLength(2);
+      for (const b of badges) expect(b).toHaveTextContent("uploaded");
+    });
+    expect(order).toEqual(["alpha", "beta"]);
+  });
+
+  it("continues the batch when one file fails", async () => {
+    const order: string[] = [];
+    server.use(
+      http.get(SOURCES_URL, () => HttpResponse.json({ sources: [] })),
+      http.post(`${SOURCES_URL}/upload`, async ({ request }) => {
+        const id = sourceIdFromMultipart(await request.text());
+        order.push(id);
+        return id === "fail-me"
+          ? HttpResponse.json({ detail: "boom" }, { status: 500 })
+          : HttpResponse.json({ source_id: id, parse_status: "pending" }, { status: 202 });
+      }),
+    );
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("upload-dropzone")).toBeInTheDocument());
+
+    await user.upload(screen.getByTestId("upload-file-input"), [
+      new File(["x"], "fail-me.md", { type: "text/markdown" }),
+      new File(["y"], "ok.md", { type: "text/markdown" }),
+    ]);
+    await user.click(screen.getByTestId("upload-submit"));
+
+    // Both were attempted (the failure did not abort the batch).
+    await waitFor(() => expect(order).toEqual(["fail-me", "ok"]));
+    await waitFor(() => {
+      const labels = screen.getAllByTestId("upload-status").map((b) => b.textContent);
+      expect(labels).toContain("✗ failed");
+      expect(labels).toContain("✓ uploaded");
+    });
+  });
+
+  it("skips unsupported files but queues the supported ones", async () => {
+    server.use(http.get(SOURCES_URL, () => HttpResponse.json({ sources: [] })));
+    renderWithProviders(<SourcesPage />);
+    await waitFor(() => expect(screen.getByTestId("upload-dropzone")).toBeInTheDocument());
+
+    // fireEvent bypasses the input `accept` filter so the component's own
+    // mime gate runs on the mixed batch.
+    fireEvent.change(screen.getByTestId("upload-file-input"), {
+      target: {
+        files: [
+          new File(["# ok"], "good.md", { type: "text/markdown" }),
+          new File(["MZ"], "virus.exe", { type: "application/octet-stream" }),
+        ],
+      },
+    });
+
+    expect(screen.getAllByTestId("upload-staged-file")).toHaveLength(1);
+    expect(screen.getByTestId("upload-error")).toHaveTextContent(/Unsupported file extension/);
+    expect(screen.getByTestId("upload-error")).toHaveTextContent(/virus\.exe/);
+  });
+
+  it("clears the whole queue", async () => {
+    server.use(http.get(SOURCES_URL, () => HttpResponse.json({ sources: [] })));
+    renderWithProviders(<SourcesPage />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("upload-dropzone")).toBeInTheDocument());
+
+    await user.upload(screen.getByTestId("upload-file-input"), [
+      new File(["x"], "alpha.md", { type: "text/markdown" }),
+    ]);
+    expect(screen.getByTestId("upload-staged-file")).toBeInTheDocument();
+    await user.click(screen.getByTestId("upload-clear"));
+    expect(screen.queryByTestId("upload-staged-file")).not.toBeInTheDocument();
   });
 });

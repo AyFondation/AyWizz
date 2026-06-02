@@ -1,24 +1,33 @@
 // =============================================================================
 // File: _global-setup.ts
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/tests/system/_global-setup.ts
 // Description: Playwright global setup hook for the **system** tier.
 //              Polls `<baseURL>/ux/config` once before any test runs ;
 //              fails fast with a helpful message if the stack isn't up
 //              so the operator doesn't waste time on a forest of
-//              ECONNREFUSED traces. Also sanity-checks that
-//              `dev_credentials` is populated — the whole point of the
-//              system suite is to exercise the demo-seed end-to-end.
+//              ECONNREFUSED traces.
+//
+//              v2 (2026-05-29): the `dev_credentials` presence check is
+//              now a WARNING, not a hard throw. Rationale: dev_credentials
+//              (C2_UX_DEV_MODE_ENABLED) is a precondition for the
+//              demo-seed-login spec ONLY — those specs assert the
+//              dev-credentials panel themselves and fail clearly without
+//              it. Specs that authenticate via the real `/auth/login`
+//              (e.g. source-upload, which runs against the `e2e_stack.sh
+//              full` / `--profile test` stack where dev mode is OFF) MUST
+//              NOT be gated on it. Reachability + auth_mode=local stay
+//              hard preconditions (universal to the tier).
 // =============================================================================
 
 import type { FullConfig } from "@playwright/test";
 
 const HINT = `
 
-  System tests need a running stack with the demo seed.
-  Bring it up first :
+  System tests need a running stack. Bring one up first :
 
-      ay_platform_core/scripts/e2e_stack.sh dev
+      ay_platform_core/scripts/e2e_stack.sh dev    # demo-seed UX specs
+      ay_platform_core/scripts/e2e_stack.sh full   # real-login specs (source-upload)
 
   Then re-run :
 
@@ -50,9 +59,13 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     );
   }
   if (!Array.isArray(body.dev_credentials) || body.dev_credentials.length === 0) {
-    throw new Error(
-      `/ux/config returned no dev_credentials. Did you start the stack with ` +
-        `\`e2e_stack.sh dev\` (which enables C2_UX_DEV_MODE_ENABLED) ?${HINT}`,
+    // Non-fatal : only the demo-seed specs need this (they assert the
+    // dev-credentials panel themselves). Real-login specs run fine
+    // against the `full`/`--profile test` stack where dev mode is OFF.
+    console.warn(
+      `[system-setup] /ux/config returned no dev_credentials — the ` +
+        `demo-seed specs need \`e2e_stack.sh dev\` (C2_UX_DEV_MODE_ENABLED). ` +
+        `Real-login specs (source-upload) are unaffected.`,
     );
   }
 }

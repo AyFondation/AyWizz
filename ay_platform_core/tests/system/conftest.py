@@ -1,6 +1,6 @@
 # =============================================================================
 # File: conftest.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/system/conftest.py
 # Description: Fixtures for the `system` test tier. Assumes the platform
 #              docker-compose stack is ALREADY running (use
@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -32,11 +33,21 @@ def _mock_llm_admin_url() -> str | None:
     exclusively test infrastructure. `tests/docker-compose.yml` exposes
     the mock service on host port `${PORT_MOCK_LLM}` (default 59800,
     R-100-122) so system tests running outside the compose network can
-    still script LLM responses. Override via ``MOCK_LLM_ADMIN_URL`` when
-    running pytest inside the network (in which case you'd use
-    http://mock_llm:8000).
+    still script LLM responses.
+
+    The default derives its HOST from ``STACK_BASE_URL`` (via `_base_url`)
+    rather than hardcoding ``localhost`` — so when pytest runs inside a
+    container (devcontainer) and the wrapper points STACK_BASE_URL at
+    ``host.docker.internal``, the mock admin port is reachable too. On a
+    bare-metal host the gateway host is ``localhost`` and behaviour is
+    unchanged. Override the whole URL via ``MOCK_LLM_ADMIN_URL`` (e.g.
+    ``http://mock_llm:8000`` when running pytest inside the compose network).
     """
-    return os.environ.get("MOCK_LLM_ADMIN_URL", "http://localhost:59800")
+    explicit = os.environ.get("MOCK_LLM_ADMIN_URL")
+    if explicit:
+        return explicit
+    host = urlsplit(_base_url()).hostname or "localhost"
+    return f"http://{host}:59800"
 
 
 @pytest_asyncio.fixture(scope="session")

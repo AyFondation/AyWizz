@@ -12,7 +12,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ProjectSettingsPage from "@/app/(protected)/projects/[pid]/settings/page";
 import { AuthProvider } from "@/app/auth-provider";
@@ -47,6 +47,20 @@ vi.mock("next/navigation", () => ({
 }));
 
 const PROJECT_URL = "/api/v1/projects/p1";
+const ENRICH_URL = "/api/v1/memory/projects/p1/enrichment-config";
+
+function makeEnrichment(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    quality_tier: "minimal",
+    summarization_enabled: null,
+    decontextualization_enabled: null,
+    densification_enabled: null,
+    image_vision_enabled: null,
+    chain_of_density_iterations: null,
+    image_analyzer_model: null,
+    ...over,
+  };
+}
 
 function seedToken(roles: string[], projectScopes: Record<string, string[]> = {}) {
   window.localStorage.setItem(
@@ -79,6 +93,12 @@ function makeProject(over: Partial<Record<string, unknown>> = {}) {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+// The settings page now loads the enrichment config on mount; give every test
+// a default handler so the section renders (per-test `server.use` can override).
+beforeEach(() => {
+  server.use(http.get(ENRICH_URL, () => HttpResponse.json(makeEnrichment())));
+});
 
 function renderSettings() {
   return render(
@@ -160,5 +180,49 @@ describe("ProjectSettingsPage", () => {
       expect(screen.getByTestId("project-settings-saved")).toHaveTextContent(/reset to default/i),
     );
     expect(patch).toHaveBeenCalled();
+  });
+});
+
+describe("ProjectSettingsPage — enrichment config", () => {
+  it("loads the config and saves an edited tier + image model (admin)", async () => {
+    seedToken(["admin"]);
+    let sentBody: Record<string, unknown> | null = null;
+    const put = vi.fn(async ({ request }: { request: Request }) => {
+      sentBody = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json(sentBody);
+    });
+    server.use(
+      http.get(PROJECT_URL, () => HttpResponse.json(makeProject())),
+      http.get(ENRICH_URL, () => HttpResponse.json(makeEnrichment({ quality_tier: "high" }))),
+      http.put(ENRICH_URL, put),
+    );
+    renderSettings();
+
+    await waitFor(() => expect(screen.getByTestId("enrichment-tier")).toHaveValue("high"));
+    expect(screen.getByTestId("enrichment-tier")).not.toBeDisabled();
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByTestId("enrichment-tier"), "standard");
+    await user.selectOptions(screen.getByTestId("enrichment-image_vision_enabled"), "off");
+    await user.type(screen.getByTestId("enrichment-image-model"), "ollama:llava");
+    await user.click(screen.getByTestId("enrichment-save"));
+
+    await waitFor(() => expect(screen.getByTestId("enrichment-saved")).toBeInTheDocument());
+    expect(put).toHaveBeenCalled();
+    expect(sentBody).toMatchObject({
+      quality_tier: "standard",
+      image_vision_enabled: false,
+      image_analyzer_model: "ollama:llava",
+    });
+  });
+
+  it("renders the enrichment config read-only for a non-editor role", async () => {
+    seedToken(["project_viewer"]);
+    server.use(http.get(PROJECT_URL, () => HttpResponse.json(makeProject())));
+    renderSettings();
+
+    await waitFor(() => expect(screen.getByTestId("enrichment-tier")).toBeInTheDocument());
+    expect(screen.getByTestId("enrichment-tier")).toBeDisabled();
+    expect(screen.queryByTestId("enrichment-save")).not.toBeInTheDocument();
   });
 });

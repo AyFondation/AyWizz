@@ -1,6 +1,6 @@
 # =============================================================================
 # File: minio_storage.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/storage/minio_storage.py
 # Description: MinIO blob storage for uploaded sources (Phase B of v1
 #              functional plan). The raw file bytes are persisted under
@@ -39,6 +39,14 @@ class BlobMetadata:
     size: int
     etag: str
     content_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectEntry:
+    """One object under a prefix (for the artifact browser)."""
+
+    key: str
+    size: int
 
 
 class StorageError(RuntimeError):
@@ -192,3 +200,138 @@ class MemorySourceStorage:
         when the artifact does not exist (e.g. KG never extracted)."""
         path = self.artifact_path(tenant_id, project_id, source_id, name)
         return await asyncio.to_thread(self._get_object_sync, path)
+
+    # ------------------------------------------------------------------
+    # C13 (AyExtractor) run artifacts (R-400-220 / R-400-223 v3) — these
+    # live in a SEPARATE bucket with C13's own key layout, so they are
+    # read by explicit bucket + full key rather than the source-prefix
+    # helpers above.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def c13_artifact_key(
+        tenant_id: str, project_id: str, source_id: str, run_id: str, name: str
+    ) -> str:
+        """Full object key for a C13 run artifact (R-400-220 layout).
+
+        `name` is the in-run relative path, e.g. ``00_metadata/run_manifest.json``
+        or ``02_chunks/chunks.jsonl``.
+        """
+        return f"{tenant_id}/{project_id}/{source_id}/runs/{run_id}/{name}"
+
+    def _put_to_bucket_sync(
+        self, bucket: str, key: str, data: bytes, content_type: str
+    ) -> BlobMetadata:
+        try:
+            stream = io.BytesIO(data)
+            result = self._client.put_object(
+                bucket, key, data=stream, length=len(data), content_type=content_type
+            )
+        except S3Error as exc:
+            raise StorageError(f"MinIO put failed for {bucket}/{key}: {exc}") from exc
+        return BlobMetadata(
+            path=key, size=len(data), etag=result.etag or "", content_type=content_type
+        )
+
+    async def put_to_bucket(
+        self,
+        *,
+        bucket: str,
+        key: str,
+        data: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> BlobMetadata:
+        """Write `data` to an explicit bucket + full key. Used to place the
+        raw upload in the C13 input bucket (R-100-081 v3) — C13 reads its
+        `raw_object_key` from its own (artifacts) bucket."""
+        return await asyncio.to_thread(
+            self._put_to_bucket_sync, bucket, key, data, content_type
+        )
+
+    def _get_from_bucket_sync(self, bucket: str, key: str) -> bytes:
+        try:
+            response = self._client.get_object(bucket, key)
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise FileNotFoundError(f"{bucket}/{key}") from exc
+            raise StorageError(
+                f"MinIO get failed for {bucket}/{key}: {exc}"
+            ) from exc
+
+    async def get_extraction_artifact(self, *, bucket: str, key: str) -> bytes:
+        """Read a C13 run artifact by explicit bucket + full key. Raises
+        ``FileNotFoundError`` when the object does not exist."""
+        return await asyncio.to_thread(self._get_from_bucket_sync, bucket, key)
+
+    def _delete_prefix_sync(self, bucket: str, prefix: str) -> int:
+        try:
+            objects = self._client.list_objects(bucket, prefix=prefix, recursive=True)
+            keys = [obj.object_name for obj in objects if obj.object_name]
+            for key in keys:
+                self._client.remove_object(bucket, key)
+            return len(keys)
+        except S3Error as exc:
+            raise StorageError(
+                f"MinIO prefix delete failed for {bucket}/{prefix}: {exc}"
+            ) from exc
+
+    async def delete_prefix(self, *, bucket: str, prefix: str) -> int:
+        """Delete every object under ``prefix`` in ``bucket``. Returns the
+        count removed. Used to cascade source deletion to its raw blob + C13
+        run artifacts (R-100-082)."""
+        return await asyncio.to_thread(self._delete_prefix_sync, bucket, prefix)
+
+    def _list_run_ids_sync(self, bucket: str, runs_prefix: str) -> list[str]:
+        try:
+            # Non-recursive list with the trailing slash yields the run_id
+            # sub-prefixes (e.g. ``.../runs/test-abc/``) as common prefixes.
+            objects = self._client.list_objects(
+                bucket, prefix=runs_prefix, recursive=False
+            )
+            run_ids: list[str] = []
+            for obj in objects:
+                name = obj.object_name or ""
+                if not name.startswith(runs_prefix):
+                    continue
+                tail = name[len(runs_prefix):].strip("/")
+                if tail:
+                    run_ids.append(tail)
+            return run_ids
+        except S3Error as exc:
+            raise StorageError(
+                f"MinIO run listing failed for {bucket}/{runs_prefix}: {exc}"
+            ) from exc
+
+    async def list_run_ids(self, *, bucket: str, runs_prefix: str) -> list[str]:
+        """List the distinct run_ids under ``{...}/runs/`` for a source.
+
+        ``runs_prefix`` SHALL end with a trailing slash so the SDK returns
+        the run sub-directories as common prefixes (R-400-220 layout)."""
+        return await asyncio.to_thread(self._list_run_ids_sync, bucket, runs_prefix)
+
+    def _list_artifacts_sync(self, bucket: str, prefix: str) -> list[ObjectEntry]:
+        try:
+            objects = self._client.list_objects(
+                bucket, prefix=prefix, recursive=True
+            )
+            return [
+                ObjectEntry(key=obj.object_name, size=obj.size or 0)
+                for obj in objects
+                if obj.object_name and not obj.object_name.endswith("/")
+            ]
+        except S3Error as exc:
+            raise StorageError(
+                f"MinIO artifact listing failed for {bucket}/{prefix}: {exc}"
+            ) from exc
+
+    async def list_artifacts(
+        self, *, bucket: str, prefix: str
+    ) -> list[ObjectEntry]:
+        """List every object under ``prefix`` (recursive) — the file browser
+        of a single C13 run's artifact tree (R-400-221)."""
+        return await asyncio.to_thread(self._list_artifacts_sync, bucket, prefix)

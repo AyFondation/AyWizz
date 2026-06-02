@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_ux_config.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/integration/c2_auth/test_ux_config.py
 # Description: Pin the public `GET /ux/config` endpoint contract used
 #              by the Next.js frontend bootstrap. Verifies:
@@ -179,8 +179,10 @@ async def test_ux_config_dev_credentials_populated_when_dev_mode_on(
     ux_repo: AuthRepository,
 ) -> None:
     """When both `auth_mode=local` AND `ux_dev_mode_enabled=True`,
-    `dev_credentials` SHALL list the 4 demo accounts with their
-    plaintext passwords (intentional, for auto-fill)."""
+    `dev_credentials` SHALL list the 5 demo accounts with their
+    plaintext passwords (intentional, for auto-fill). The 5th account
+    `project-owner` was added so the UX login can demo a project-scoped
+    owner (delete rights on its own project)."""
     cfg = AuthConfig(
         jwt_secret_key=_JWT_SECRET,
         auth_mode="local",
@@ -195,12 +197,13 @@ async def test_ux_config_dev_credentials_populated_when_dev_mode_on(
     body = resp.json()
     creds = body.get("dev_credentials")
     assert isinstance(creds, list)
-    assert len(creds) == 4
+    assert len(creds) == 5
 
     usernames = {entry["username"] for entry in creds}
     assert usernames == {
         "superroot",
         "tenant-admin",
+        "project-owner",
         "project-editor",
         "project-viewer",
     }
@@ -208,6 +211,7 @@ async def test_ux_config_dev_credentials_populated_when_dev_mode_on(
     by_user = {entry["username"]: entry for entry in creds}
     assert by_user["superroot"]["password"] == "dev-superroot"
     assert by_user["tenant-admin"]["password"] == "dev-tenant"
+    assert by_user["project-owner"]["password"] == "dev-owner"
     assert by_user["project-editor"]["password"] == "dev-editor"
     assert by_user["project-viewer"]["password"] == "dev-viewer"
 

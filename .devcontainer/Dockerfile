@@ -1,11 +1,17 @@
 # =============================================================================
 # Dockerfile for Ubuntu Dev Environment
-# Version: 1.10.0
+# Version: 1.11.0
 # Path: .devcontainer/Dockerfile
 # Description: Development container with Python 3.13, Node.js 25, kubectl,
 #              Claude Code CLI. Python 3.13 installed via deadsnakes PPA.
 #
 # Versions:
+#   1.11.0: editable-install the `ay_extractor` (C13) sub-project with its
+#           full dependency set (`[all,dev,integration]`) at build time,
+#           mirroring the ay_platform_core install. This makes the C13
+#           pipeline importable + its test suite runnable inside the
+#           devcontainer (previously `ayextractor` was not installed, so its
+#           tests could not run on the host). Requires a devcontainer rebuild.
 #   1.10.0: pin Node.js to 25 (nodesource setup_25.x) instead of `lts`
 #           (which resolved to 24). Aligns the devcontainer with CI
 #           (`node-version: "25"`), `ay_platform_ui` engines (`>=25`) and
@@ -121,6 +127,19 @@ RUN npm install -g @anthropic-ai/claude-code \
 COPY ay_platform_core/pyproject.toml ${LOCAL_WORKSPACE_FOLDER}/ay_platform_core/pyproject.toml
 COPY ay_platform_core/src ${LOCAL_WORKSPACE_FOLDER}/ay_platform_core/src
 RUN python3.13 -m pip install --no-cache-dir -e "${LOCAL_WORKSPACE_FOLDER}/ay_platform_core[all]"
+
+# -----------------------------------------------------------------------------
+# ay_extractor (C13) build-time install — same editable-install pattern as
+# ay_platform_core above (the build-time COPY path matches the runtime bind
+# mount so pip's `.pth` stays valid once the live source is mounted). The
+# `[all,dev,integration]` extras pull every runtime dep (pymupdf, ebooklib,
+# beautifulsoup4, scikit-learn, openai, boto3, fastapi, refextract, …) plus
+# the test toolchain (pytest, testcontainers) so the C13 suite runs
+# inside the devcontainer.
+# -----------------------------------------------------------------------------
+COPY ay_extractor/pyproject.toml ${LOCAL_WORKSPACE_FOLDER}/ay_extractor/pyproject.toml
+COPY ay_extractor/src ${LOCAL_WORKSPACE_FOLDER}/ay_extractor/src
+RUN python3.13 -m pip install --no-cache-dir -e "${LOCAL_WORKSPACE_FOLDER}/ay_extractor[all,dev,integration]"
 
 # -----------------------------------------------------------------------------
 # ay_platform_ui build-time dependency install (Option A: bake + symlink).

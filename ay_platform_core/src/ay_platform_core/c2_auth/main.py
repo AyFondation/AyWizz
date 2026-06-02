@@ -197,6 +197,13 @@ async def _ensure_demo_seed(
             RBACGlobalRole.ADMIN,
         ),
         (
+            cfg.demo_seed_project_owner_username,
+            cfg.demo_seed_project_owner_password,
+            "demo-project-owner",
+            tenant_id,
+            RBACGlobalRole.USER,
+        ),
+        (
             cfg.demo_seed_project_editor_username,
             cfg.demo_seed_project_editor_password,
             "demo-project-editor",
@@ -259,6 +266,7 @@ async def _ensure_demo_seed(
     # viewer credentials work on each one. `grant_project_role` uses
     # `overwrite=True` so re-running is safe.
     grants_to_seed: list[tuple[str, RBACProjectRole]] = [
+        ("demo-project-owner", RBACProjectRole.OWNER),
         ("demo-project-editor", RBACProjectRole.EDITOR),
         ("demo-project-viewer", RBACProjectRole.VIEWER),
     ]

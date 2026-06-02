@@ -117,6 +117,161 @@ class SourcePublic(BaseModel):
     version, i.e. a `reprocess` would change the result (R-400-208)."""
 
 
+class ChunkDiagnostic(BaseModel):
+    """Per-chunk status row for the source diagnostics view."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str
+    seq: int
+    token_count: int
+    char_start: int
+    char_end: int
+    has_embedding: bool
+
+
+class SourceStorageInfo(BaseModel):
+    """MinIO locations of a source's raw bytes + C13 run artifacts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_bucket: str
+    raw_object_key: str | None = None
+    artifacts_bucket: str
+    artifacts_prefix: str | None = None
+    chunks_jsonl_key: str | None = None
+    manifest_key: str | None = None
+
+
+class SourceDiagnostics(BaseModel):
+    """Observability view of one source: index status + MinIO storage +
+    per-chunk status (transparency for the ingestion pipeline)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    project_id: str
+    parse_status: ParseStatus
+    parse_error: str | None = None
+    chunk_count: int
+    model_id: str | None = None
+    processing_version: str | None = None
+    uploaded_by: str
+    uploaded_at: datetime
+    mime_type: str
+    size_bytes: int
+    extraction_run_id: str | None = None
+    storage: SourceStorageInfo
+    chunks: list[ChunkDiagnostic]
+
+
+class ExtractionRunInfo(BaseModel):
+    """One C13 extraction run of a source, summarised from its
+    ``run_manifest.json`` (R-400-221). Surfaces the parser/extractor
+    version so a document processed by several runs can be compared."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    ayextractor_version: str | None = None
+    git_sha: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+    status: str | None = None
+    is_active: bool = False
+    chunk_count: int | None = None
+
+
+class SourceRunListing(BaseModel):
+    """All extraction runs known for a source (R-400-221 transparency)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    project_id: str
+    active_run_id: str | None = None
+    runs: list[ExtractionRunInfo]
+
+
+class ArtifactEntry(BaseModel):
+    """One artifact object inside a run's prefix (file browser row)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    size_bytes: int
+    content_type: str | None = None
+
+
+class RunArtifactListing(BaseModel):
+    """The artifact tree of a single C13 run (browse view)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    project_id: str
+    run_id: str
+    prefix: str
+    entries: list[ArtifactEntry]
+
+
+class ChunkContent(BaseModel):
+    """Full content of one indexed chunk (lazy-loaded on expand)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str
+    seq: int
+    content: str
+    context: str | None = None
+    original_text: str | None = None
+    char_start: int
+    char_end: int
+    token_count: int
+    section_path: list[str]
+
+
+class EnrichmentConfig(BaseModel):
+    """Per-project ingestion enrichment configuration (R-400-224).
+
+    `quality_tier` is the preset; the per-option booleans OVERRIDE it (None =
+    inherit the preset). `image_analyzer_model` selects the vision model used
+    for image analysis INDEPENDENTLY of the text agents (it maps to C13
+    `llm_assignments["image_analyzer"]`, so a project can run a different
+    model / provider / size for images). Persisted by C7, read at upload time,
+    and forwarded to C13 (via C12) as `quality_tier` + `config_overrides`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    quality_tier: Literal["minimal", "standard", "high"] = "minimal"
+    summarization_enabled: bool | None = None
+    decontextualization_enabled: bool | None = None
+    densification_enabled: bool | None = None
+    image_vision_enabled: bool | None = None
+    chain_of_density_iterations: int | None = Field(default=None, ge=1, le=10)
+    image_analyzer_model: str | None = None
+
+    def to_config_overrides(self) -> dict[str, Any]:
+        """Translate to the C13 `/analyze` `config_overrides` dict — only the
+        non-default fields ; the image model becomes an `llm_assignments`
+        entry for the `image_analyzer` agent."""
+        out: dict[str, Any] = {}
+        for field_name in (
+            "summarization_enabled",
+            "decontextualization_enabled",
+            "densification_enabled",
+            "image_vision_enabled",
+            "chain_of_density_iterations",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                out[field_name] = value
+        if self.image_analyzer_model:
+            out["llm_assignments"] = {"image_analyzer": self.image_analyzer_model}
+        return out
+
+
 # ---------------------------------------------------------------------------
 # Retrieval surface (R-400-040)
 # ---------------------------------------------------------------------------
@@ -248,29 +403,25 @@ class ChunkRich(BaseModel):
 
 class ChunkIngestRequest(BaseModel):
     """POST /memory/projects/{pid}/sources/{sid}/ingest-chunks body
-    (R-400-223 v2 pure-INSERT path).
+    (R-400-223 **v3** — run reference only; C7 pulls the artifacts).
 
-    Body fields mirror the R-400-220 v2 artifact set produced by C13.
-    `embedding_model` / `embedding_dimension` are cross-validated
-    against the `embedding` field of each `ChunkRich` so a partial
-    upload corrupts neither the index nor the manifest.
+    v3 (R-100-081 v3): the request no longer carries the `chunks` array,
+    the embedding-model fields, or `manifest_object_key`. It carries only
+    the run reference; C7 reads `run_manifest.json` + `chunks.jsonl`
+    directly from the C13 artifacts bucket with its own authenticated
+    MinIO client (C12/n8n no longer marshals object bytes). `tenant_id`
+    is informational — the authoritative tenant is the X-Tenant-Id
+    forward-auth header.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     extraction_run_id: str = Field(min_length=1)
-    """RunManifest.run_id stamped by C13."""
-    manifest_object_key: str | None = None
-    """MinIO key of the run_manifest.json — diagnostic reference only;
-    C7 does NOT re-read it (the request body is authoritative)."""
-    embedding_model: str = Field(min_length=1)
-    """Model id reported by C13 (must equal `ChunkRich.embedding` shape)."""
-    embedding_model_version: str = ""
-    """Optional version pin from the provider; empty string acceptable."""
-    embedding_dimension: int = Field(ge=1)
-    chunks: list[ChunkRich] = Field(min_length=1)
+    """RunManifest.run_id stamped by C13 — locates the artifacts in MinIO."""
     uploaded_by: str = Field(min_length=1)
     mime_type: str = Field(min_length=1)
+    tenant_id: str | None = None
+    """Informational; the authoritative tenant is the X-Tenant-Id header."""
 
 
 class EntityEmbedRequest(BaseModel):

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
 
@@ -166,6 +167,9 @@ def c7_upload_service(
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,
             retrieval_scan_cap=1000,
+            # R-400-223 v3 reads C13 artifacts from this bucket — point it at
+            # the test's own MinIO bucket so the helper can seed them there.
+            c13_artifacts_bucket=c7_storage._bucket,
         ),
         repo=c7_repo,
         embedder=c7_deterministic_embedder,
@@ -232,6 +236,13 @@ async def _ingest_text_via_chunks(
             break
         i += stride
 
+    # R-400-223 v3: C7 reads chunks.jsonl + run_manifest.json from MinIO, so
+    # the helper SEEDS those artifacts (with C7-computed embeddings, since v3
+    # has no embed-fallback) into the C13 artifacts bucket, then calls the
+    # endpoint with the run reference only.
+    run_id = f"test-{uuid.uuid4().hex[:8]}"
+    dimension = service._embedder.dimension
+    vectors = await service._embedder.embed_batch(chunk_texts)
     chunks = [
         ChunkRich(
             chunk_id=f"{source_id}:{idx:04d}",
@@ -245,20 +256,40 @@ async def _ingest_text_via_chunks(
             references=[],
             images=[],
             tables=[],
-            extraction_run_id=f"test-{uuid.uuid4().hex[:8]}",
-            embedding=None,  # let C7 fall back to its embedder
+            extraction_run_id=run_id,
+            embedding=vectors[idx],
         )
         for idx, text_ in enumerate(chunk_texts)
     ]
+    assert service._storage is not None  # c7_upload_service wires real MinIO
+    bucket = service._config.c13_artifacts_bucket
+    await service._storage.put_to_bucket(
+        bucket=bucket,
+        key=MemorySourceStorage.c13_artifact_key(
+            tenant_id, project_id, source_id, run_id, "00_metadata/run_manifest.json"
+        ),
+        data=json.dumps(
+            {
+                "embedding_model": embedding_model,
+                "embedding_model_version": "test-v1",
+                "embedding_dimension": dimension,
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+    )
+    await service._storage.put_to_bucket(
+        bucket=bucket,
+        key=MemorySourceStorage.c13_artifact_key(
+            tenant_id, project_id, source_id, run_id, "02_chunks/chunks.jsonl"
+        ),
+        data="\n".join(json.dumps(c.model_dump()) for c in chunks).encode("utf-8"),
+        content_type="application/x-ndjson",
+    )
     payload = ChunkIngestRequest(
-        extraction_run_id=chunks[0].extraction_run_id,
-        manifest_object_key=None,
-        embedding_model=embedding_model,
-        embedding_model_version="test-v1",
-        embedding_dimension=service._embedder.dimension,
-        chunks=chunks,
+        extraction_run_id=run_id,
         uploaded_by=uploaded_by,
         mime_type=mime_type,
+        tenant_id=tenant_id,
     )
     return await service.ingest_chunks_from_extractor(
         tenant_id=tenant_id,

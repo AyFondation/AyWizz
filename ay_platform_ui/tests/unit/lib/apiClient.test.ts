@@ -654,16 +654,40 @@ describe("ApiClient sources", () => {
     expect(lastUrl(m2)).toBe("/api/v1/memory/projects/p1/sources/s1");
   });
 
-  it("uploadSource POSTs a FormData body (no forced JSON Content-Type)", async () => {
-    const m = fetchJson({ source_id: "s1" });
+  it("uploadSource POSTs the file as multipart to C7 /sources/upload (R-100-081 v3)", async () => {
+    // R-100-081 v3: C7 owns byte custody — the UI sends raw multipart to
+    // POST /api/v1/memory/projects/{pid}/sources/upload (no base64-in-JSON).
+    const m = fetchJson({ source_id: "s1", parse_status: "pending" });
     vi.stubGlobal("fetch", m);
     const file = new File(["hello"], "doc.txt", { type: "text/plain" });
     await client().uploadSource("p1", file, "s1", "text/plain");
+
+    expect(lastUrl(m)).toBe("/api/v1/memory/projects/p1/sources/upload");
     const init = lastInit(m);
     expect(init.method).toBe("POST");
-    expect(init.body).toBeInstanceOf(FormData);
+    // FormData body → client leaves Content-Type unset (browser adds the
+    // multipart boundary); it is NEVER application/json here.
     expect(new Headers(init.headers).get("Content-Type")).toBeNull();
-    expect(lastUrl(m)).toBe("/api/v1/memory/projects/p1/sources/upload");
+    const form = (init as { body: FormData }).body;
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get("source_id")).toBe("s1");
+    expect(form.get("mime_type")).toBe("text/plain");
+    expect(form.get("format")).toBe("txt");
+    expect(form.get("file")).toBeInstanceOf(File);
+  });
+
+  it("uploadSource throws ApiError + funnels a 401, and tolerates an extension-less filename", async () => {
+    writeStoredToken("tok");
+    const handler = vi.fn();
+    setSessionRevokedHandler(handler);
+    vi.stubGlobal("fetch", errResp(401, '{"detail":"expired"}'));
+    // no "." in the name → the format field derives to "" (branch coverage)
+    const file = new File(["x"], "noextension", { type: "application/octet-stream" });
+    await expect(
+      client().uploadSource("p1", file, "s1", "application/octet-stream"),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(handler).toHaveBeenCalledTimes(1);
+    setSessionRevokedHandler(null);
   });
 
   it("deleteSource issues a DELETE", async () => {

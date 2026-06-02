@@ -1,12 +1,24 @@
 // =============================================================================
 // File: apiClient.ts
-// Version: 7
+// Version: 11
 // Path: ay_platform_ui/lib/apiClient.ts
 // Description: Thin wrapper over `fetch` that prepends the runtime-config
 //              `apiBaseUrl` to every call and (optionally) attaches the
 //              user's JWT bearer token. Components use this rather than
 //              calling `fetch` directly so the API base URL is honoured
 //              uniformly.
+//
+//              v9 (2026-06-01) : `uploadSource` → multipart POST to C7
+//              `POST /api/v1/memory/projects/{pid}/sources/upload`
+//              (R-100-081 v3). Byte custody moved from C12 (n8n) to C7:
+//              C7 writes the raw bytes to MinIO + triggers the C12 workflow
+//              with metadata only. Drops the base64-in-JSON transport (and
+//              the `_fileToBase64` / `decodeJWT` helpers) the v8 webhook
+//              path used — n8n's binary/SigV4 limitations no longer apply.
+//
+//              v8 (2026-05-29) : `uploadSource` rewired to the C12 (n8n)
+//              ingestion webhook `POST /uploads/extract-and-ingest` (JSON,
+//              file as base64). Superseded by v9.
 //
 //              v7 (2026-05-19) : unified inline channel.
 //              `sendMessageStream` parses ONE `event: inline` SSE
@@ -43,11 +55,13 @@ import type {
   ArtifactCommitList,
   ArtifactRunList,
   ArtifactTree,
+  ChunkContent,
   Conversation,
   ConversationList,
   ConversationResponse,
   DocumentRef,
   DocumentStructuralOpResult,
+  EnrichmentConfig,
   Finding,
   FindingPage,
   InlineEvent,
@@ -65,9 +79,12 @@ import type {
   RequirementDocumentDetail,
   RequirementDocumentList,
   RequirementEntityList,
+  RunArtifactListing,
   Source,
+  SourceDiagnostics,
   SourceFileMeta,
   SourceList,
+  SourceRunListing,
   SourceStructuralOpResult,
   SourceTreeResponse,
   TraceEvent,
@@ -141,6 +158,28 @@ function _notifySessionRevoked(): void {
   const handler = _sessionRevokedHandler;
   _sessionRevokedHandler = null;
   handler?.();
+}
+
+/** Auth-aware blob fetch (module-level so it is not a prototype method
+ *  subject to the contract-test completeness guard). Returns the blob,
+ *  its MIME type, and the filename suggested by Content-Disposition. */
+async function fetchAuthedBlob(
+  url: string,
+): Promise<{ blob: Blob; contentType: string; filename: string | null }> {
+  const token = readStoredToken();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const resp = await fetch(url, { method: "GET", headers, cache: "no-store" });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    if (resp.status === 401 && token) _notifySessionRevoked();
+    throw new ApiError(resp.status, url, body);
+  }
+  const blob = await resp.blob();
+  const contentType = resp.headers.get("Content-Type") ?? "application/octet-stream";
+  const cd = resp.headers.get("Content-Disposition") ?? "";
+  const match = cd.match(/filename="?([^"]+)"?/i);
+  return { blob, contentType, filename: match ? match[1] : null };
 }
 
 export class ApiClient {
@@ -264,20 +303,39 @@ export class ApiClient {
     );
   }
 
-  /** POST /api/v1/memory/projects/{pid}/sources/upload — multipart upload.
-   *  Required form fields : `file`, `source_id`, `mime_type`. C7 stores
-   *  the raw bytes in MinIO then runs parse → chunk → embed → index. */
+  /** GET /api/v1/memory/projects/{pid}/sources/{sid}/diagnostics — ingestion
+   *  observability: index status + MinIO storage locations + per-chunk
+   *  status. The source-detail page polls this while the source is `pending`. */
+  async getSourceDiagnostics(projectId: string, sourceId: string): Promise<SourceDiagnostics> {
+    return this.request<SourceDiagnostics>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/diagnostics`,
+      { method: "GET" },
+    );
+  }
+
+  /** POST /api/v1/memory/projects/{pid}/sources/upload — multipart upload
+   *  to C7 (R-100-081 v3). C7 owns byte custody now: it writes the raw
+   *  bytes to MinIO (authenticated) and triggers the C12 (n8n) workflow
+   *  with metadata only, then returns 202 with a `pending` source. The
+   *  heavy extraction runs asynchronously (C13); the caller refreshes the
+   *  source list afterwards. Sending raw multipart (not base64-in-JSON)
+   *  keeps file bytes off the JSON path entirely. `tenant_id` is taken
+   *  server-side from the forward-auth header (no JWT decode here). */
   async uploadSource(
     projectId: string,
     file: File,
     sourceId: string,
     mimeType: string,
-  ): Promise<Source> {
+  ): Promise<void> {
+    const format = file.name.includes(".") ? (file.name.split(".").pop() ?? "").toLowerCase() : "";
     const form = new FormData();
     form.append("file", file, file.name);
     form.append("source_id", sourceId);
     form.append("mime_type", mimeType);
-    return this.request<Source>(
+    form.append("format", format);
+    // `request()` leaves Content-Type unset for FormData (so the browser
+    // adds the multipart boundary), attaches the bearer, and funnels 401s.
+    await this.request<void>(
       `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/upload`,
       { method: "POST", body: form },
     );
@@ -326,6 +384,109 @@ export class ApiClient {
     const cd = resp.headers.get("Content-Disposition") ?? "";
     const match = cd.match(/filename="?([^"]+)"?/i);
     return { blob, filename: match ? match[1] : null };
+  }
+
+  // -------------------------------------------------------------------------
+  // C7 — run / artifact browsing + chunk content + downloads (R-400-221)
+  // -------------------------------------------------------------------------
+
+  /** GET /sources/{sid}/runs — every C13 extraction run of a source with
+   *  its parser/extractor version, marking the active (indexed) run. */
+  async listSourceRuns(projectId: string, sourceId: string): Promise<SourceRunListing> {
+    return this.request<SourceRunListing>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/runs`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/memory/projects/{pid}/enrichment-config — the project's
+   *  ingestion enrichment config (default when unset). */
+  async getEnrichmentConfig(projectId: string): Promise<EnrichmentConfig> {
+    return this.request<EnrichmentConfig>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/enrichment-config`,
+      { method: "GET" },
+    );
+  }
+
+  /** PUT /api/v1/memory/projects/{pid}/enrichment-config — persist the config
+   *  (owner/admin only; applies to subsequent uploads). */
+  async updateEnrichmentConfig(
+    projectId: string,
+    config: EnrichmentConfig,
+  ): Promise<EnrichmentConfig> {
+    return this.request<EnrichmentConfig>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/enrichment-config`,
+      { method: "PUT", body: JSON.stringify(config) },
+    );
+  }
+
+  /** GET /sources/{sid}/runs/{run_id}/artifacts — browse one run's tree. */
+  async listRunArtifacts(
+    projectId: string,
+    sourceId: string,
+    runId: string,
+  ): Promise<RunArtifactListing> {
+    return this.request<RunArtifactListing>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/runs/${encodeURIComponent(runId)}/artifacts`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /sources/{sid}/runs/{run_id}/artifacts/{path} — one artifact's
+   *  bytes, for in-browser visualisation or a single-file download. The
+   *  catch-all path segments are NOT URL-encoded (the backend matches the
+   *  full sub-path), only the surrounding ids are. */
+  async getRunArtifact(
+    projectId: string,
+    sourceId: string,
+    runId: string,
+    artifactPath: string,
+  ): Promise<{ blob: Blob; contentType: string; filename: string | null }> {
+    return fetchAuthedBlob(
+      this.url(
+        `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/runs/${encodeURIComponent(runId)}/artifacts/${artifactPath}`,
+      ),
+    );
+  }
+
+  /** GET /sources/{sid}/runs/{run_id}/artifacts.zip — download every
+   *  artifact of a run as a zip. */
+  async downloadRunArtifactsZip(
+    projectId: string,
+    sourceId: string,
+    runId: string,
+  ): Promise<{ blob: Blob; contentType: string; filename: string | null }> {
+    return fetchAuthedBlob(
+      this.url(
+        `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/runs/${encodeURIComponent(runId)}/artifacts.zip`,
+      ),
+    );
+  }
+
+  /** GET /sources/{sid}/chunks.zip — download every indexed chunk
+   *  (active run) as a zip, one JSON per chunk. */
+  async downloadChunksZip(
+    projectId: string,
+    sourceId: string,
+  ): Promise<{ blob: Blob; contentType: string; filename: string | null }> {
+    return fetchAuthedBlob(
+      this.url(
+        `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/chunks.zip`,
+      ),
+    );
+  }
+
+  /** GET /sources/{sid}/chunks/{chunk_id} — full content of one indexed
+   *  chunk (lazy-loaded on expand). */
+  async getChunkContent(
+    projectId: string,
+    sourceId: string,
+    chunkId: string,
+  ): Promise<ChunkContent> {
+    return this.request<ChunkContent>(
+      `/api/v1/memory/projects/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(sourceId)}/chunks/${encodeURIComponent(chunkId)}`,
+      { method: "GET" },
+    );
   }
 
   // -------------------------------------------------------------------------

@@ -32,12 +32,17 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import io
+import json
+import mimetypes
 import time
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, status
+from pydantic import ValidationError
 
 from ay_platform_core.c7_memory.artifacts import (
     CHUNKS_ARTIFACT,
@@ -47,6 +52,7 @@ from ay_platform_core.c7_memory.artifacts import (
     serialize_chunks,
     serialize_kg,
 )
+from ay_platform_core.c7_memory.c12_client import C12WebhookClient, C12WebhookError
 from ay_platform_core.c7_memory.config import MemoryConfig
 from ay_platform_core.c7_memory.contextualizer import contextualise_chunks
 from ay_platform_core.c7_memory.db.repository import MemoryRepository
@@ -69,10 +75,16 @@ from ay_platform_core.c7_memory.kg.ontology import (
 from ay_platform_core.c7_memory.kg.repository import KGRepository
 from ay_platform_core.c7_memory.kg.structural_extractor import extract_structural
 from ay_platform_core.c7_memory.models import (
+    ArtifactEntry,
+    ChunkContent,
+    ChunkDiagnostic,
     ChunkIngestRequest,
     ChunkPublic,
+    ChunkRich,
     ChunkStatus,
+    EnrichmentConfig,
     EntityEmbedRequest,
+    ExtractionRunInfo,
     IndexKind,
     KGExtractionResult,
     KGRelationSample,
@@ -83,14 +95,29 @@ from ay_platform_core.c7_memory.models import (
     RetrievalHit,
     RetrievalRequest,
     RetrievalResponse,
+    RunArtifactListing,
+    SourceDiagnostics,
     SourceIngestRequest,
     SourceListResponse,
     SourcePublic,
+    SourceRunListing,
+    SourceStorageInfo,
 )
 from ay_platform_core.c7_memory.retrieval.fusion import reciprocal_rank_fusion
 from ay_platform_core.c7_memory.retrieval.similarity import cosine, snippet
 from ay_platform_core.c7_memory.storage.minio_storage import MemorySourceStorage
 from ay_platform_core.c8_llm.client import LLMGatewayClient
+
+
+def _parse_iso_dt(value: Any) -> datetime | None:
+    """Parse an ISO-8601 string into a datetime, tolerating None / garbage
+    (manifests are external artifacts; a bad timestamp must not 500)."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 class MemoryService:
@@ -104,6 +131,7 @@ class MemoryService:
         storage: MemorySourceStorage | None = None,
         kg_repo: KGRepository | None = None,
         llm_client: LLMGatewayClient | None = None,
+        c12_client: C12WebhookClient | None = None,
     ) -> None:
         self._config = config
         self._repo = repo
@@ -116,6 +144,9 @@ class MemoryService:
         # are required for the extract endpoint; absent → 503.
         self._kg_repo = kg_repo
         self._llm = llm_client
+        # R-100-081 v3 — C12 ingestion-webhook trigger (metadata only) after
+        # C7 stores the raw upload. Required by /sources/upload; absent → 503.
+        self._c12 = c12_client
 
     # ------------------------------------------------------------------
     # Ingestion (admin/test direct path — C12 upload still goes via NATS
@@ -157,6 +188,138 @@ class MemoryService:
             size_bytes=payload.size_bytes,
             parsed_text=text,
         )
+
+    async def store_raw_upload_and_trigger(
+        self,
+        *,
+        tenant_id: str,
+        project_id: str,
+        source_id: str,
+        filename: str,
+        mime_type: str,
+        source_format: str,
+        data: bytes,
+        uploaded_by: str,
+        quality_tier: str | None = None,
+        document_type: str | None = None,
+    ) -> SourcePublic:
+        """R-100-081 v3 — store the raw upload + trigger the C12 workflow.
+
+        C7 owns byte custody now: it writes the raw bytes into the C13 input
+        bucket (where C13 reads `raw_object_key` from), records a `pending`
+        source row, and POSTs the C12 ingestion webhook with METADATA ONLY
+        (no bytes). Returns the `pending` `SourcePublic`; the chunks land
+        later via `ingest_chunks_from_extractor` (C12 → C13 → C7 callback).
+        """
+        if self._storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="source storage not configured",
+            )
+        if self._c12 is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="C12 webhook client not configured",
+            )
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="empty upload"
+            )
+        if len(data) > self._config.max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"upload exceeds {self._config.max_upload_bytes} bytes",
+            )
+        await self._enforce_quota(tenant_id, project_id, len(data))
+
+        # Build the pending source row up front (415 fast on unsupported mime).
+        try:
+            synth = SourceIngestRequest(
+                source_id=source_id,
+                project_id=project_id,
+                mime_type=mime_type,  # type: ignore[arg-type]
+                content="pending-extraction",
+                size_bytes=max(len(data), 1),
+                uploaded_by=uploaded_by,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"unsupported mime_type {mime_type!r}: {exc.errors()[0]['msg']}",
+            ) from exc
+
+        # 1. Raw bytes → the C13 INPUT bucket. C13 reads `raw_object_key` from
+        #    its own (artifacts) bucket via the same writer it uses for output
+        #    (ay_extractor `_read_raw_object`), so the raw lands there under the
+        #    platform `sources/...` prefix.
+        raw_object_key = (
+            f"sources/{tenant_id}/{project_id}/{source_id}/raw.{source_format}"
+        )
+        await self._storage.put_to_bucket(
+            bucket=self._config.c13_artifacts_bucket,
+            key=raw_object_key,
+            data=data,
+            content_type=mime_type,
+        )
+        # Keep a copy in C7's own bucket for download/audit (best-effort —
+        # the /sources/{sid}/blob download reads from there).
+        with contextlib.suppress(Exception):
+            await self._storage.put_source_blob(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                source_id=source_id,
+                data=data,
+                mime_type=mime_type,
+            )
+
+        # 2. Record the pending source row.
+        row = _source_row(
+            payload=synth,
+            tenant_id=tenant_id,
+            model_id=None,
+            chunk_count=0,
+            parse_status=ParseStatus.PENDING,
+            processing_version=None,
+        )
+        # Record where the raw bytes live so the diagnostics view can surface
+        # the MinIO location (R-100-082 / observability).
+        row["minio_raw_path"] = raw_object_key
+        await self._repo.upsert_source(row)
+
+        # 3. Trigger the C12 workflow with metadata only (no bytes).
+        meta: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "project_id": project_id,
+            "source_id": source_id,
+            "raw_object_key": raw_object_key,
+            "filename": filename,
+            "mime_type": mime_type,
+            "format": source_format,
+            "uploaded_by": uploaded_by,
+        }
+        # The per-project enrichment config (R-400-224) is the source of truth
+        # for what C13 runs: it sets `quality_tier` + `config_overrides` (incl.
+        # the independent image-analyzer model). A per-upload `quality_tier`
+        # arg is legacy and no longer overrides the project config.
+        cfg = await self.get_project_enrichment_config(tenant_id, project_id)
+        meta["quality_tier"] = cfg.quality_tier
+        overrides = cfg.to_config_overrides()
+        if overrides:
+            meta["config_overrides"] = overrides
+        if document_type:
+            meta["document_type"] = document_type
+        try:
+            await self._c12.trigger_ingestion(meta)
+        except C12WebhookError as exc:
+            row["parse_status"] = ParseStatus.FAILED.value
+            row["parse_error"] = f"ingestion trigger failed: {exc}"
+            await self._repo.upsert_source(row)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"could not trigger ingestion workflow: {exc}",
+            ) from exc
+
+        return _source_public(row, current_version=None)
 
     # D-020 session 7 — `ingest_uploaded_source` (Phase B legacy upload path)
     # physically removed. The C12 → C13 → C7 chain now owns parsing +
@@ -207,6 +370,67 @@ class MemoryService:
             index_kind=IndexKind.CONVERSATIONS,
         )
 
+    async def _load_c13_artifacts(
+        self, *, tenant_id: str, project_id: str, source_id: str, run_id: str
+    ) -> tuple[list[ChunkRich], str, int]:
+        """Read + parse C13's `run_manifest.json` + `chunks.jsonl` from the
+        artifacts bucket (R-400-223 v3). Returns (chunks, embedding_model,
+        embedding_dimension). Raises 503/404/422 on storage / missing /
+        malformed artifacts."""
+        if self._storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="source storage not configured — cannot read C13 artifacts",
+            )
+        bucket = self._config.c13_artifacts_bucket
+        manifest_key = MemorySourceStorage.c13_artifact_key(
+            tenant_id, project_id, source_id, run_id, "00_metadata/run_manifest.json"
+        )
+        chunks_key = MemorySourceStorage.c13_artifact_key(
+            tenant_id, project_id, source_id, run_id, "02_chunks/chunks.jsonl"
+        )
+        try:
+            manifest_bytes = await self._storage.get_extraction_artifact(
+                bucket=bucket, key=manifest_key
+            )
+            chunks_bytes = await self._storage.get_extraction_artifact(
+                bucket=bucket, key=chunks_key
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"C13 run artifacts not found for run {run_id}: {exc}",
+            ) from exc
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"run_manifest.json is not valid JSON: {exc}",
+            ) from exc
+        chunks: list[ChunkRich] = []
+        for lineno, raw_line in enumerate(chunks_bytes.decode("utf-8").splitlines(), 1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                chunks.append(ChunkRich(**json.loads(line)))
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"chunks.jsonl line {lineno} invalid for run {run_id}: {exc}",
+                ) from exc
+        if not chunks:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"chunks.jsonl for run {run_id} is empty",
+            )
+        embedding_model = str(manifest.get("embedding_model") or "unknown")
+        embedding_dimension = int(manifest.get("embedding_dimension") or 0)
+        if embedding_dimension <= 0 and chunks[0].embedding is not None:
+            embedding_dimension = len(chunks[0].embedding)
+        return chunks, embedding_model, embedding_dimension
+
     async def ingest_chunks_from_extractor(
         self,
         *,
@@ -215,15 +439,17 @@ class MemoryService:
         source_id: str,
         payload: ChunkIngestRequest,
     ) -> SourcePublic:
-        """R-400-223 v2 — pure-INSERT path for chunks produced by C13.
+        """R-400-223 v3 — C7 reads C13's run artifacts from MinIO and indexes.
 
-        The request body carries:
-          - the full set of ChunkRich items (R-400-222 v2),
-          - the embedding model metadata stamped by C13 (D-020 v2 §B1).
+        The request carries only the RUN REFERENCE (`extraction_run_id`).
+        C7 pulls `00_metadata/run_manifest.json` (embedding model identity)
+        and `02_chunks/chunks.jsonl` (the rich chunks with their vectors)
+        from the C13 artifacts bucket using its own authenticated MinIO
+        client — C12 (n8n) no longer marshals object bytes (R-100-081 v3).
 
         C7's responsibilities here are STRICTLY:
-          1. Validate payload shape (Pydantic — already enforced by FastAPI).
-          2. Cross-validate embedding metadata vs each chunk's vector.
+          1. Read + parse the manifest + chunks.jsonl from MinIO.
+          2. Cross-validate embedding dimension vs each chunk's vector.
           3. Enforce the per-project quota (R-400-024) against the chunks'
              cumulative token_count.
           4. Persist `memory_chunks` + `memory_sources` records, copying
@@ -232,27 +458,34 @@ class MemoryService:
           5. Stamp each source row with a `processing_version` carrying
              the C13 embedding model identity so staleness detection works
              across the upgrade boundary.
-
-        Backward-compat fallback (transitional, D-020 session 7 removes it):
-          when a chunk's `embedding` field is None, C7 falls back to its
-          own embedder. Operators relying on this path SHOULD migrate to
-          C13-produced embeddings.
         """
-        # 1. Cross-validate embedding metadata.
-        chunks = payload.chunks
-        chunks_with_embedding = [c for c in chunks if c.embedding is not None]
-        if chunks_with_embedding:
-            dims = {len(c.embedding) for c in chunks_with_embedding}  # type: ignore[arg-type]
-            if dims != {payload.embedding_dimension}:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"embedding_dimension mismatch: declared "
-                        f"{payload.embedding_dimension}, vectors carry {sorted(dims)}"
-                    ),
-                )
+        chunks, embedding_model, embedding_dimension = await self._load_c13_artifacts(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            source_id=source_id,
+            run_id=payload.extraction_run_id,
+        )
 
-        # 2. Quota enforcement on cumulative token_count
+        # 2. Cross-validate embedding dimension. Every chunk SHALL carry a
+        #    vector of the manifest dimension (R-400-222 v2 — embeddings are
+        #    produced by C13, not by C7 on this path).
+        missing = [c.chunk_id for c in chunks if c.embedding is None]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"chunks missing embedding (R-400-222 v2): {missing[:5]}",
+            )
+        dims = {len(c.embedding) for c in chunks}  # type: ignore[arg-type]
+        if dims != {embedding_dimension}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"embedding_dimension mismatch: manifest "
+                    f"{embedding_dimension}, vectors carry {sorted(dims)}"
+                ),
+            )
+
+        # 3. Quota enforcement on cumulative token_count
         # (token_count proxy for size_bytes — chunks are post-parse, so the
         # raw blob was already accounted for in the upload path).
         total_tokens = sum(c.token_count for c in chunks)
@@ -261,7 +494,7 @@ class MemoryService:
         size_estimate = total_tokens * 4
         await self._enforce_quota(tenant_id, project_id, size_estimate)
 
-        # 3. Persist a synthetic SourceIngestRequest for _source_row helpers.
+        # 4. Persist a synthetic SourceIngestRequest for _source_row helpers.
         size_bytes = sum(len(c.text.encode("utf-8")) for c in chunks)
         synth_payload = SourceIngestRequest(
             source_id=source_id,
@@ -272,30 +505,18 @@ class MemoryService:
             uploaded_by=payload.uploaded_by,
         )
 
-        # 4. Resolve embeddings — use payload vectors where present, fall back
-        #    to the local embedder otherwise (transitional path).
-        needs_fallback = [i for i, c in enumerate(chunks) if c.embedding is None]
-        fallback_vectors: list[list[float]] = []
-        if needs_fallback:
-            fallback_vectors = await self._embedder.embed_batch(
-                [chunks[i].text for i in needs_fallback]
-            )
-
         # 5. Build chunk rows. The processing_version uses the C13 embedding
         #    model id (not C7's) so a future C13 model upgrade marks rows
         #    stale and triggers a re-ingest.
         version = _format_processing_version(
             self._config.chunk_token_size,
             self._config.chunk_overlap,
-            payload.embedding_model,
+            embedding_model,
         )
         now = datetime.now(UTC).isoformat()
         chunk_rows: list[dict[str, Any]] = []
-        fallback_iter = iter(fallback_vectors)
         for chunk in chunks:
             vector = chunk.embedding
-            if vector is None:
-                vector = next(fallback_iter)
             content_hash = (
                 "sha256:" + hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
             )
@@ -314,8 +535,8 @@ class MemoryService:
                 "context": chunk.context_summary or "",
                 "content_hash": content_hash,
                 "vector": vector,
-                "model_id": payload.embedding_model,
-                "model_dim": payload.embedding_dimension,
+                "model_id": embedding_model,
+                "model_dim": embedding_dimension,
                 "created_at": now,
                 "status": ChunkStatus.ACTIVE.value,
                 "metadata": {
@@ -343,13 +564,13 @@ class MemoryService:
                 project_id=project_id,
                 source_id=source_id,
                 name=CHUNKS_ARTIFACT,
-                data=serialize_chunks(source_id, payload.embedding_model, chunk_rows),
+                data=serialize_chunks(source_id, embedding_model, chunk_rows),
             )
 
         source_row = _source_row(
             payload=synth_payload,
             tenant_id=tenant_id,
-            model_id=payload.embedding_model,
+            model_id=embedding_model,
             chunk_count=len(chunks),
             parse_status=ParseStatus.INDEXED,
             processing_version=version,
@@ -860,6 +1081,32 @@ class MemoryService:
         await self._repo.delete_chunks_for_source(tenant_id, project_id, source_id)
         await self._repo.delete_source(tenant_id, project_id, source_id)
 
+        # R-100-082 — cascade to MinIO. Best-effort: the Arango rows are
+        # already gone, so a storage hiccup must not fail the delete (it
+        # would leave the index clean but error the caller). Covers C7's own
+        # memory-bucket artifacts (download copy + chunks.json) AND the C13
+        # input raw + run artifacts in the C13 bucket.
+        if self._storage is not None:
+            with contextlib.suppress(Exception):
+                await self._storage.delete_source_blob(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    source_id=source_id,
+                    mime_type=existing.get("mime_type", "application/octet-stream"),
+                )
+            with contextlib.suppress(Exception):
+                await self._storage.delete_prefix(
+                    bucket=self._config.minio_bucket,
+                    prefix=f"sources/{tenant_id}/{project_id}/{source_id}/",
+                )
+            c13_bucket = self._config.c13_artifacts_bucket
+            for prefix in (
+                f"sources/{tenant_id}/{project_id}/{source_id}/",
+                f"{tenant_id}/{project_id}/{source_id}/runs/",
+            ):
+                with contextlib.suppress(Exception):
+                    await self._storage.delete_prefix(bucket=c13_bucket, prefix=prefix)
+
     async def list_sources(
         self, tenant_id: str, project_id: str
     ) -> SourceListResponse:
@@ -878,6 +1125,320 @@ class MemoryService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="source not found"
             )
         return _source_public(row, current_version=self._current_processing_version())
+
+    async def get_source_diagnostics(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> SourceDiagnostics:
+        """Observability view: index status + MinIO storage locations +
+        per-chunk status. Transparency for the ingestion pipeline."""
+        row = await self._repo.get_source(tenant_id, project_id, source_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="source not found"
+            )
+        chunk_rows = await self._repo.list_chunks_for_source(
+            tenant_id, project_id, source_id
+        )
+        chunks: list[ChunkDiagnostic] = []
+        run_id: str | None = None
+        for cr in chunk_rows:
+            meta = cr.get("metadata") or {}
+            if run_id is None:
+                run_id = meta.get("extraction_run_id")
+            chunks.append(
+                ChunkDiagnostic(
+                    chunk_id=cr.get("chunk_id", ""),
+                    seq=cr.get("chunk_index", 0),
+                    token_count=meta.get("token_count", 0),
+                    char_start=meta.get("char_start", 0),
+                    char_end=meta.get("char_end", 0),
+                    has_embedding=bool(cr.get("vector")),
+                )
+            )
+        c13 = self._config.c13_artifacts_bucket
+        prefix = f"{tenant_id}/{project_id}/{source_id}/runs/{run_id}/" if run_id else None
+        storage = SourceStorageInfo(
+            raw_bucket=c13,
+            raw_object_key=row.get("minio_raw_path"),
+            artifacts_bucket=c13,
+            artifacts_prefix=prefix,
+            chunks_jsonl_key=f"{prefix}02_chunks/chunks.jsonl" if prefix else None,
+            manifest_key=f"{prefix}00_metadata/run_manifest.json" if prefix else None,
+        )
+        return SourceDiagnostics(
+            source_id=source_id,
+            project_id=project_id,
+            parse_status=ParseStatus(row["parse_status"]),
+            parse_error=row.get("parse_error"),
+            chunk_count=row.get("chunk_count", 0),
+            model_id=row.get("model_id"),
+            processing_version=row.get("processing_version"),
+            uploaded_by=row["uploaded_by"],
+            uploaded_at=datetime.fromisoformat(row["uploaded_at"]),
+            mime_type=row["mime_type"],
+            size_bytes=row["size_bytes"],
+            extraction_run_id=run_id,
+            storage=storage,
+            chunks=chunks,
+        )
+
+    # ------------------------------------------------------------------
+    # Per-project enrichment config (R-400-224)
+    # ------------------------------------------------------------------
+
+    async def get_project_enrichment_config(
+        self, tenant_id: str, project_id: str
+    ) -> EnrichmentConfig:
+        """The project's enrichment config, or the default (minimal) when unset.
+        Read at upload time to drive C13 + exposed to the settings UI."""
+        row = await self._repo.get_project_config(tenant_id, project_id)
+        if not row:
+            return EnrichmentConfig()
+        fields = set(EnrichmentConfig.model_fields)
+        data = {k: v for k, v in row.items() if k in fields}
+        try:
+            return EnrichmentConfig(**data)
+        except ValidationError:
+            # A stored config that no longer validates (schema drift) falls back
+            # to the default rather than breaking ingestion / the settings page.
+            return EnrichmentConfig()
+
+    async def set_project_enrichment_config(
+        self, tenant_id: str, project_id: str, config: EnrichmentConfig
+    ) -> EnrichmentConfig:
+        """Persist a project's enrichment config (applies to subsequent uploads)."""
+        await self._repo.upsert_project_config(
+            tenant_id, project_id, config.model_dump()
+        )
+        return config
+
+    # ------------------------------------------------------------------
+    # Run + artifact browsing / chunk content + downloads (R-400-221
+    # transparency). All read-only ; tenant+project+source scoped.
+    # ------------------------------------------------------------------
+
+    async def _active_run_id(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> str | None:
+        """The run currently in the index — derived from chunk metadata."""
+        chunk_rows = await self._repo.list_chunks_for_source(
+            tenant_id, project_id, source_id
+        )
+        for cr in chunk_rows:
+            rid = (cr.get("metadata") or {}).get("extraction_run_id")
+            if rid:
+                return str(rid)
+        return None
+
+    async def _read_run_manifest(
+        self, bucket: str, tenant_id: str, project_id: str,
+        source_id: str, run_id: str,
+    ) -> dict[str, Any]:
+        """Best-effort read of a run's manifest. Returns {} when absent or
+        malformed so a run with no/corrupt manifest still lists."""
+        assert self._storage is not None
+        key = MemorySourceStorage.c13_artifact_key(
+            tenant_id, project_id, source_id, run_id,
+            "00_metadata/run_manifest.json",
+        )
+        try:
+            data = await self._storage.get_extraction_artifact(bucket=bucket, key=key)
+            parsed = json.loads(data.decode("utf-8"))
+            return parsed if isinstance(parsed, dict) else {}
+        except (FileNotFoundError, ValueError, UnicodeDecodeError):
+            return {}
+
+    def _require_storage(self) -> MemorySourceStorage:
+        if self._storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="source storage not configured",
+            )
+        return self._storage
+
+    async def list_source_runs(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> SourceRunListing:
+        """List every C13 extraction run of a source with its parser/extractor
+        version, timing and status (R-400-221). Marks the run currently in
+        the index as active."""
+        row = await self._repo.get_source(tenant_id, project_id, source_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="source not found"
+            )
+        storage = self._require_storage()
+        bucket = self._config.c13_artifacts_bucket
+        active_run_id = await self._active_run_id(tenant_id, project_id, source_id)
+        runs_prefix = f"{tenant_id}/{project_id}/{source_id}/runs/"
+        run_ids = await storage.list_run_ids(bucket=bucket, runs_prefix=runs_prefix)
+        runs: list[ExtractionRunInfo] = []
+        for run_id in sorted(run_ids):
+            mf = await self._read_run_manifest(
+                bucket, tenant_id, project_id, source_id, run_id
+            )
+            is_active = run_id == active_run_id
+            runs.append(
+                ExtractionRunInfo(
+                    run_id=run_id,
+                    ayextractor_version=mf.get("ayextractor_version"),
+                    git_sha=mf.get("monorepo_git_sha"),
+                    created_at=_parse_iso_dt(mf.get("created_at")),
+                    completed_at=_parse_iso_dt(mf.get("completed_at")),
+                    status=mf.get("status"),
+                    is_active=is_active,
+                    chunk_count=row.get("chunk_count", 0) if is_active else None,
+                )
+            )
+        return SourceRunListing(
+            source_id=source_id,
+            project_id=project_id,
+            active_run_id=active_run_id,
+            runs=runs,
+        )
+
+    @staticmethod
+    def _run_prefix(
+        tenant_id: str, project_id: str, source_id: str, run_id: str
+    ) -> str:
+        return f"{tenant_id}/{project_id}/{source_id}/runs/{run_id}/"
+
+    async def list_run_artifacts(
+        self, tenant_id: str, project_id: str, source_id: str, run_id: str
+    ) -> RunArtifactListing:
+        """Browse the artifact tree of a single run (R-400-221)."""
+        storage = self._require_storage()
+        bucket = self._config.c13_artifacts_bucket
+        prefix = self._run_prefix(tenant_id, project_id, source_id, run_id)
+        objs = await storage.list_artifacts(bucket=bucket, prefix=prefix)
+        if not objs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no artifacts found for run {run_id}",
+            )
+        entries = [
+            ArtifactEntry(
+                path=o.key[len(prefix):],
+                size_bytes=o.size,
+                content_type=mimetypes.guess_type(o.key)[0],
+            )
+            for o in objs
+        ]
+        entries.sort(key=lambda e: e.path)
+        return RunArtifactListing(
+            source_id=source_id,
+            project_id=project_id,
+            run_id=run_id,
+            prefix=prefix,
+            entries=entries,
+        )
+
+    @staticmethod
+    def _safe_rel_path(rel_path: str) -> str:
+        safe = rel_path.lstrip("/")
+        if not safe or ".." in safe.split("/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid artifact path",
+            )
+        return safe
+
+    async def get_run_artifact(
+        self, tenant_id: str, project_id: str, source_id: str,
+        run_id: str, rel_path: str,
+    ) -> tuple[bytes, str, str]:
+        """Fetch one artifact's bytes. Returns (data, content_type, filename)."""
+        storage = self._require_storage()
+        bucket = self._config.c13_artifacts_bucket
+        safe = self._safe_rel_path(rel_path)
+        key = self._run_prefix(tenant_id, project_id, source_id, run_id) + safe
+        try:
+            data = await storage.get_extraction_artifact(bucket=bucket, key=key)
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"artifact not found: {safe}",
+            ) from exc
+        content_type = mimetypes.guess_type(safe)[0] or "application/octet-stream"
+        return data, content_type, safe.rsplit("/", 1)[-1]
+
+    async def build_run_artifacts_zip(
+        self, tenant_id: str, project_id: str, source_id: str, run_id: str
+    ) -> bytes:
+        """Bundle every artifact of a run into a zip (download-all)."""
+        storage = self._require_storage()
+        bucket = self._config.c13_artifacts_bucket
+        prefix = self._run_prefix(tenant_id, project_id, source_id, run_id)
+        objs = await storage.list_artifacts(bucket=bucket, prefix=prefix)
+        if not objs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no artifacts found for run {run_id}",
+            )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for o in objs:
+                data = await storage.get_extraction_artifact(bucket=bucket, key=o.key)
+                zf.writestr(o.key[len(prefix):], data)
+        return buf.getvalue()
+
+    @staticmethod
+    def _chunk_row_to_content(row: dict[str, Any]) -> ChunkContent:
+        meta = row.get("metadata") or {}
+        return ChunkContent(
+            chunk_id=row.get("chunk_id", ""),
+            seq=row.get("chunk_index", 0),
+            content=row.get("content", ""),
+            context=(row.get("context") or None),
+            original_text=meta.get("original_text"),
+            char_start=meta.get("char_start", 0),
+            char_end=meta.get("char_end", 0),
+            token_count=meta.get("token_count", 0),
+            section_path=meta.get("section_path", []),
+        )
+
+    async def get_chunk_content(
+        self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
+    ) -> ChunkContent:
+        """Full content of one indexed chunk (lazy-loaded on expand)."""
+        row = await self._repo.get_chunk(tenant_id, project_id, source_id, chunk_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="chunk not found"
+            )
+        return self._chunk_row_to_content(row)
+
+    async def build_chunks_zip(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> bytes:
+        """Bundle every indexed chunk (active run) into a zip, one JSON per
+        chunk (download-all)."""
+        row = await self._repo.get_source(tenant_id, project_id, source_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="source not found"
+            )
+        chunk_rows = await self._repo.list_chunks_for_source(
+            tenant_id, project_id, source_id
+        )
+        if not chunk_rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="source has no indexed chunks",
+            )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for cr in chunk_rows:
+                content = self._chunk_row_to_content(cr)
+                safe_id = content.chunk_id.replace("/", "_").replace(":", "_")
+                name = f"{content.seq:04d}_{safe_id}.json"
+                zf.writestr(
+                    name,
+                    json.dumps(
+                        content.model_dump(), indent=2, ensure_ascii=False
+                    ),
+                )
+        return buf.getvalue()
 
     # D-020 session 7 — `reprocess_source` (R-400-208) physically removed.
     # In the new world a reprocess means "re-run the n8n
@@ -1227,10 +1788,10 @@ def _source_row(
     *,
     payload: SourceIngestRequest,
     tenant_id: str,
-    model_id: str,
+    model_id: str | None,
     chunk_count: int,
     parse_status: ParseStatus,
-    processing_version: str,
+    processing_version: str | None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     return {

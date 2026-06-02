@@ -13,6 +13,29 @@ Per-release headings replace the `[Unreleased]` section at release time.
 
 ## [Unreleased]
 
+### 2026-05-29 — D-020 ingestion re-partition (byte custody → C7)
+
+Deployment of the D-020 upload pipeline surfaced that C12 (n8n) is a poor
+custodian of file bytes (its `httpRequest` node cannot S3-SigV4-sign a MinIO
+write, which forced a base64-in-JSON transport, an anonymous-bucket
+workaround, and brittle `$json.body.*` plumbing). Byte custody is moved to
+C7, which already owns the sources surface, project RBAC, and an
+authenticated MinIO client.
+
+**Changed (semantic — version bumps)**
+- `100-SPEC-ARCHITECTURE.md` `R-100-081` v2 → **v3** — re-partitions byte
+  custody: **C7** owns upload reception (`POST …/sources/upload`,
+  multipart), the authenticated raw-blob MinIO write, and the metadata-only
+  C12 trigger; **C12** becomes a pure metadata orchestrator (never touches
+  a byte, never reads/writes MinIO); **C13** unchanged. Does NOT reinstate
+  D-020's removed synchronous parse/chunk in C7.
+- `400-SPEC-MEMORY-RAG.md` `R-400-223` v2 → **v3** — `/ingest-chunks`
+  receives a **run reference only** (`extraction_run_id` + ids); C7 reads
+  `chunks.jsonl` + `run_manifest.json` from MinIO itself (was: chunks
+  marshalled in-body by n8n). Removes the last place C12 touched object
+  bytes. Transitional embed-fallback removed. §3 four-step pipeline prose
+  updated to match.
+
 ### 2026-05-28 (later) — D-020 v2 optimisations (pre-strip spec amendments)
 
 Following a critical-partner review of the D-020 v1 plan, five quality/cost
