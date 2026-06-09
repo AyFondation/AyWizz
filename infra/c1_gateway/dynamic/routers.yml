@@ -1,8 +1,16 @@
 # =============================================================================
 # File: routers.yml
-# Version: 7
+# Version: 9
 # Path: infra/c1_gateway/dynamic/routers.yml
-# Description: Traefik HTTP router definitions. v3 adds the UI catch-all
+# Description: Traefik HTTP router definitions. v9 adds `ui-admin-llm`
+#              (priority 60) so the UI governance PAGE paths `/admin/llm-*`
+#              reach the Next.js UI instead of C2 (they collided with the
+#              c2-admin `/admin` prefix). The API prefix `/admin/v1/llm`
+#              is unaffected (distinct string, still c8-admin-registry@100).
+#              v8 adds the C8 admin LLM
+#              governance surfaces (`/admin/v1/llm` priority 100 to win over
+#              c2-admin ; `/api/v1/llm` priority 50), both forward-auth gated.
+#              v3 adds the UI catch-all
 #              (priority 1) so the Next.js standalone server receives
 #              everything not claimed by an explicit backend route
 #              (`/`, `/login`, `/dashboard`, `/_next/*`, etc.).
@@ -161,6 +169,20 @@ http:
         - secure-headers
       priority: 50
 
+    # UI governance pages live at `/admin/llm-registry` + `/admin/llm-catalogue`
+    # (Next.js routes). They collide with the C2 admin PathPrefix(`/admin`)
+    # above, so this higher-priority (60 > 50) router sends the `/admin/llm-*`
+    # PAGE paths to the UI WITHOUT forward-auth (the browser fetches the page;
+    # the UI's own apiClient carries the JWT on the API calls). It does NOT
+    # match the API prefix `/admin/v1/llm` (distinct string), which keeps
+    # winning via c8-admin-registry (priority 100).
+    ui-admin-llm:
+      rule: "PathPrefix(`/admin/llm`)"
+      service: ui
+      entryPoints:
+        - web
+      priority: 60
+
     # -------------------------------------------------------------------------
     # C2 — Projects (lifecycle + membership grants)
     # -------------------------------------------------------------------------
@@ -229,6 +251,59 @@ http:
     c7-memory:
       rule: "PathPrefix(`/api/v1/memory`)"
       service: c7
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # C8 admin — platform LLM registry + tenant catalogue + quality resolver
+    # (LLM-governance HMI). The registry sub-path `/admin/v1/llm` MUST win
+    # over `c2-admin` (`PathPrefix(/admin)`, priority 50) → priority 100.
+    # The catalogue/resolve sub-path `/api/v1/llm` has no collision (distinct
+    # from `/api/v1/projects` etc.) → priority 50. Both forward-auth gated ;
+    # per-role authorization is enforced in-app (tenant_manager for registry,
+    # admin/tenant_admin for catalogue).
+    # -------------------------------------------------------------------------
+
+    c8-admin-registry:
+      rule: "PathPrefix(`/admin/v1/llm`)"
+      service: c8-admin
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    c8-admin-catalog:
+      rule: "PathPrefix(`/api/v1/llm`)"
+      service: c8-admin
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # Global LLM quota policy (Lot 3). Admin surface `/admin/v1/quota` MUST win
+    # over c2-admin (`PathPrefix(/admin)`, priority 50) → priority 100. The
+    # user-facing self-status `/api/v1/quota` has no collision (distinct string).
+    c8-admin-quota:
+      rule: "PathPrefix(`/admin/v1/quota`)"
+      service: c8-admin
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    c8-admin-quota-self:
+      rule: "PathPrefix(`/api/v1/quota`)"
+      service: c8-admin
       entryPoints:
         - web
       middlewares:

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: client.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/client.py
 # Description: Python client for the C8 LLM gateway. All internal components
 #              (C3, C4, C6, C7, …) use this class rather than importing
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -48,6 +48,7 @@ from ay_platform_core.c8_llm.models import (
     ChatCompletionResponse,
     CostSummary,
 )
+from ay_platform_core.c8_llm.registry.key_provider import CallTarget
 from ay_platform_core.observability import make_traced_client
 
 
@@ -169,6 +170,54 @@ def _retry_after_seconds(resp: httpx.Response) -> float:
     return min(delay, _RETRY_429_CAP_SECONDS)
 
 
+# Wire formats whose request shape keys the prompt cache on an EXPLICIT
+# breakpoint marker. Providers with automatic server-side caching (OpenAI,
+# Gemini, …) are deliberately absent: they need no marker, AND an
+# Anthropic-shaped ``cache_control`` block sent to them is REJECTED. The cache
+# decision is thus translated per provider at the C8 gateway (spec R-800-042).
+_CACHE_MARKER_WIRE_FORMATS = frozenset({"anthropic"})
+
+
+def _apply_static_prompt_cache(body: dict[str, Any]) -> None:
+    """Mark the (stable) system prompt as a prompt-cache breakpoint — PROVIDER
+    AWARE.
+
+    Invoked AFTER upstream resolution (when ``cache_hint="static"``), so
+    ``body['model']`` is ``<wire_format>/<upstream>``. Only wire formats that
+    require an explicit marker (Anthropic) get ``cache_control: {type:
+    ephemeral}`` on the last system message ; for every other provider — or an
+    unresolved alias / mock (no ``/`` in the model) — this is a no-op, because
+    they either cache automatically or would reject the Anthropic-shaped block.
+
+    For a marker-using provider, below the model's minimum cacheable size
+    (Haiku 4096 / Sonnet 1024 tokens) the API silently skips caching — a safe
+    no-op — so callers can always opt in ; it only ever helps when a large
+    stable prefix (long system prompt + shared context) recurs across calls in
+    the cache window (e.g. C3 chat turns). Mutates ``body`` in place."""
+    model = body.get("model")
+    if not isinstance(model, str) or "/" not in model:
+        return  # unresolved alias / mock — provider unknown, never guess
+    if model.split("/", 1)[0] not in _CACHE_MARKER_WIRE_FORMATS:
+        return  # automatic-caching provider — emitting a marker would error
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return
+    sys_idx: int | None = None
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and m.get("role") == "system":
+            sys_idx = i  # keep the LAST system message — the stable prefix end
+    if sys_idx is None:
+        return
+    msg = messages[sys_idx]
+    content = msg.get("content")
+    if isinstance(content, str):
+        msg["content"] = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+        ]
+    elif isinstance(content, list) and content and isinstance(content[-1], dict):
+        content[-1].setdefault("cache_control", {"type": "ephemeral"})
+
+
 class LLMGatewayClient:
     """HTTP client for the C8 LiteLLM proxy.
 
@@ -186,8 +235,25 @@ class LLMGatewayClient:
         bearer_token: str | None = None,
         http_client: httpx.AsyncClient | None = None,
         agent_routes: dict[str, str] | None = None,
+        key_provider: (
+            Callable[[str], Awaitable[CallTarget | None]] | None
+        ) = None,
+        quota_guard: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
+        # LLM-governance Lot 3 : optional per-call quota guard. Given the call's
+        # tenant_id it enforces the global QuotaPolicy — best-effort warn, hard
+        # raise (QuotaExceededError) on an exceeded window, which stops the call
+        # BEFORE any upstream spend. None / no tenant_id → no enforcement.
+        self._quota_guard = quota_guard
+        # LLM-governance #3 (option B) : optional per-request upstream-override
+        # injector. Given the RESOLVED model name it returns an
+        # `UpstreamConnection` (decrypted registry `api_key` + optional
+        # `api_base`), injected into the request body to override the proxy's
+        # defaults for that call (litellm `configurable_clientside_auth_params`).
+        # None → no override (proxy env fallback). Best-effort : a provider
+        # returning None or raising leaves the call on the fallback.
+        self._key_provider = key_provider
         # Single shared gateway credential (R-800-012) : an explicit
         # constructor `bearer_token` (e.g. user-scoped JWT forwarding)
         # wins ; otherwise the client uses `C8_GATEWAY_API_KEY` from
@@ -243,6 +309,62 @@ class LLMGatewayClient:
             return payload  # let the proxy emit a 400 per R-800-030
         return payload.model_copy(update={"model": target})
 
+    async def _inject_upstream_key(self, body: dict[str, Any]) -> None:
+        """Resolve the alias in ``body['model']`` to its registry CallTarget and
+        REWRITE the request: ``model`` → ``<provider.wire_format>/<upstream>``,
+        plus the provider's mandatory ``api_base`` and (when stored) ``api_key``.
+        Routing thus depends on the provider's explicit endpoint, never a
+        built-in default.
+
+        Best-effort and SILENT on any failure: an unknown alias (e.g. the test
+        mock model), a dangling provider, or a resolver error all leave the body
+        untouched so the proxy/mock handles the original model. The plaintext
+        key is set on the body but is NEVER logged (the client logs no bodies)."""
+        if self._key_provider is None:
+            return
+        model = body.get("model")
+        if not isinstance(model, str) or not model:
+            return
+        try:
+            target = await self._key_provider(model)
+        except Exception:
+            # Resolver is best-effort; a registry/decrypt failure must NEVER
+            # break an LLM call — fall back to the original model + proxy env.
+            return
+        if target is None:
+            return
+        body["model"] = target.model
+        body["api_base"] = target.api_base
+        if target.api_key:
+            body["api_key"] = target.api_key
+
+    async def _enforce_quota(
+        self,
+        tenant_id: str | None,
+        project_id: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
+        """Run the per-call quota guard BEFORE sending, enforcing every level
+        whose subject is known (global always; tenant/project/user when their id
+        is supplied). A blocked subject raises `QuotaExceededError` so no upstream
+        spend occurs. No guard or no tenant_id → no-op."""
+        if self._quota_guard is None or not tenant_id:
+            return
+        await self._quota_guard(tenant_id, project_id=project_id, user_id=user_id)
+
+    async def check_quota(
+        self,
+        *,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
+        """Run the quota guard WITHOUT sending an LLM call. A STREAMING caller
+        invokes this eagerly — before returning its `StreamingResponse` — so a
+        hard block raises `QuotaExceededError` (→ 429) BEFORE the SSE stream
+        starts (once streaming, the in-flight guard's block can't become a 429)."""
+        await self._enforce_quota(tenant_id, project_id, user_id)
+
     # ------------------------------------------------------------------
     # Chat completions
     # ------------------------------------------------------------------
@@ -255,6 +377,7 @@ class LLMGatewayClient:
         session_id: str,
         tenant_id: str | None = None,
         project_id: str | None = None,
+        user_id: str | None = None,
         phase: str | None = None,
         sub_agent_id: str | None = None,
         cache_hint: str | None = None,
@@ -276,12 +399,19 @@ class LLMGatewayClient:
             session_id=session_id,
             tenant_id=tenant_id,
             project_id=project_id,
+            user_id=user_id,
             phase=phase,
             sub_agent_id=sub_agent_id,
             cache_hint=cache_hint,
             bearer_token=bearer_token,
         )
         body = payload.model_dump(exclude_none=True)
+        await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
+        await self._inject_upstream_key(body)
+        # Cache marker AFTER upstream resolution: the marker is provider-aware
+        # and reads the now-rewritten `<wire_format>/<upstream>` model.
+        if cache_hint == "static":
+            _apply_static_prompt_cache(body)
         last_resp: httpx.Response | None = None
         for attempt in range(_RETRY_429_MAX_ATTEMPTS):
             resp = await self._client.post(
@@ -307,6 +437,7 @@ class LLMGatewayClient:
         session_id: str,
         tenant_id: str | None = None,
         project_id: str | None = None,
+        user_id: str | None = None,
         phase: str | None = None,
         sub_agent_id: str | None = None,
         cache_hint: str | None = None,
@@ -329,15 +460,22 @@ class LLMGatewayClient:
             session_id=session_id,
             tenant_id=tenant_id,
             project_id=project_id,
+            user_id=user_id,
             phase=phase,
             sub_agent_id=sub_agent_id,
             cache_hint=cache_hint,
             bearer_token=bearer_token,
         )
+        stream_body = stream_payload.model_dump(exclude_none=True)
+        await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
+        await self._inject_upstream_key(stream_body)
+        # Cache marker AFTER upstream resolution (provider-aware — see above).
+        if cache_hint == "static":
+            _apply_static_prompt_cache(stream_body)
         req = self._client.build_request(
             "POST",
             "/chat/completions",
-            json=stream_payload.model_dump(exclude_none=True),
+            json=stream_body,
             headers=headers,
         )
         resp = await self._client.send(req, stream=True)
@@ -404,6 +542,7 @@ class LLMGatewayClient:
         session_id: str,
         tenant_id: str | None,
         project_id: str | None,
+        user_id: str | None = None,
         phase: str | None,
         sub_agent_id: str | None,
         cache_hint: str | None,
@@ -423,6 +562,10 @@ class LLMGatewayClient:
             headers["X-Tenant-Id"] = tenant_id
         if project_id:
             headers["X-Project-Id"] = project_id
+        if user_id:
+            # Attribute the call to the user in the ledger so per-user quota can
+            # sum + enforce (the cost tracker reads X-User-Id).
+            headers["X-User-Id"] = user_id
         if phase:
             headers["X-Phase"] = phase
         if sub_agent_id:

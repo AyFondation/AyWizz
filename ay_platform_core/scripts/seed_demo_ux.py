@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: seed_demo_ux.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/scripts/seed_demo_ux.py
 # Description: Post-stack demo data seeder for the manual-test stack
-#              brought up by `e2e_stack.sh dev`. Distinct from
+#              brought up by `e2e_stack.sh dev`.
+#
+#              v4 (2026-06-05): LLM-governance demo seed — registers the 3
+#              Claude tiers in the platform registry (as `superroot` /
+#              tenant_manager), catalogues them for `tenant-test`, and sets
+#              `model_quality=medium` on `project-test` so the registry /
+#              catalogue / picker surfaces render populated and an upload
+#              resolves a concrete model. No API key is set (dev c8-admin has
+#              no master key ; the proxy authenticates upstream with its env
+#              key — the registry only selects WHICH model runs).
+#
+#              Distinct from
 #              `seed_e2e.py` (which targets the `demo` project for the
 #              pytest e2e suite) — this one targets the `project-test`
 #              that C2's `_ensure_demo_seed()` provisioned at lifespan
@@ -44,6 +55,52 @@ DOCGEN_PROJECT_ID = "project-docgen"
 DOCGEN_PROJECT_NAME = "Demo DocGen Project"
 ADMIN_USERNAME = "tenant-admin"
 ADMIN_PASSWORD = "dev-tenant"
+# tenant_manager super-root — owns the platform LLM registry.
+SUPERROOT_USERNAME = "superroot"
+SUPERROOT_PASSWORD = "dev-superroot"
+
+# LLM-governance demo seed (mirrors the canonical litellm-config.yaml model_list
+# so the registry/catalogue/picker surfaces render with the same 3 Claude tiers
+# the proxy actually serves). No API key is set — the dev c8-admin has no master
+# key (key writes 503), and resolution does not need one: the proxy authenticates
+# upstream with its own env key ; the registry only selects WHICH model runs.
+# One platform PROVIDER (endpoint + credential) the 3 demo models reference by id.
+GOVERNANCE_PROVIDER: dict[str, Any] = {
+    "name": "Anthropic",
+    "base_url": "https://api.anthropic.com",
+    "wire_format": "anthropic",
+}
+GOVERNANCE_MODELS: list[dict[str, Any]] = [
+    {
+        "alias": "claude-haiku-fast",
+        "upstream_model": "claude-haiku-4-5-20251001",
+        "capabilities": {"vision": True, "tool_calling": True, "context_window": 200000},
+        "provider_cost_in_per_1m": 0.80,
+        "provider_cost_out_per_1m": 4.00,
+        "default_model_quality": "low",
+        "enabled": True,
+    },
+    {
+        "alias": "claude-sonnet-midtier",
+        "upstream_model": "claude-sonnet-4-6",
+        "capabilities": {"vision": False, "tool_calling": True, "context_window": 200000},
+        "provider_cost_in_per_1m": 3.00,
+        "provider_cost_out_per_1m": 15.00,
+        "default_model_quality": "medium",
+        "enabled": True,
+    },
+    {
+        "alias": "claude-opus-flagship",
+        "upstream_model": "claude-opus-4-7",
+        "capabilities": {"vision": True, "tool_calling": True, "context_window": 200000},
+        "provider_cost_in_per_1m": 15.00,
+        "provider_cost_out_per_1m": 75.00,
+        "default_model_quality": "high",
+        "enabled": True,
+    },
+]
+# The project's chosen quality (drives ingestion model selection via resolution).
+DEMO_PROJECT_MODEL_QUALITY = "medium"
 
 # Sample source corpus — small text files so the parse → chunk → embed
 # pipeline runs in well under a second. Each entry yields one row in the
@@ -266,22 +323,102 @@ async def wait_stack_ready(
     raise SeedError(f"stack never became ready: {last_err!r}")
 
 
-async def obtain_token(client: httpx.AsyncClient, base_url: str) -> str:
-    """Login as the demo `tenant-admin` (has `admin` role, full r/w in
-    `tenant-test`). Credentials match `C2_DEMO_SEED_TENANT_ADMIN_*`."""
+async def obtain_token(
+    client: httpx.AsyncClient,
+    base_url: str,
+    username: str = ADMIN_USERNAME,
+    password: str = ADMIN_PASSWORD,
+) -> str:
+    """Login and return the access token. Defaults to the demo `tenant-admin`
+    (`admin` role, full r/w in `tenant-test`); pass `superroot` for the
+    tenant_manager-gated platform registry."""
     resp = await client.post(
         f"{base_url}/auth/login",
-        json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
+        json={"username": username, "password": password},
     )
     if resp.status_code != 200:
         raise SeedError(
-            f"/auth/login as {ADMIN_USERNAME} failed: "
-            f"{resp.status_code} {resp.text}"
+            f"/auth/login as {username} failed: {resp.status_code} {resp.text}"
         )
     token = resp.json().get("access_token")
     if not token:
         raise SeedError(f"no access_token in /auth/login response: {resp.text}")
     return str(token)
+
+
+async def ensure_provider(client: httpx.AsyncClient, base_url: str, token: str) -> str:
+    """Ensure the platform PROVIDER exists (tenant_manager). Idempotent by name.
+    Returns the stable provider_id."""
+    headers = {"Authorization": f"Bearer {token}"}
+    listing = await client.get(f"{base_url}/admin/v1/llm/providers", headers=headers)
+    if listing.status_code == 200:
+        for p in listing.json().get("providers", []):
+            if p.get("name") == GOVERNANCE_PROVIDER["name"]:
+                return str(p["provider_id"])
+    resp = await client.post(
+        f"{base_url}/admin/v1/llm/providers", headers=headers, json=GOVERNANCE_PROVIDER
+    )
+    if resp.status_code == 201:
+        return str(resp.json()["provider_id"])
+    raise SeedError(f"provider seed failed: {resp.status_code} {resp.text[:200]}")
+
+
+async def ensure_registry_model(
+    client: httpx.AsyncClient, base_url: str, token: str, provider_id: str, model: dict[str, Any]
+) -> str:
+    """Ensure a model exists in the PLATFORM registry (tenant_manager),
+    referencing `provider_id`. Idempotent by alias. Returns the model_id."""
+    headers = {"Authorization": f"Bearer {token}"}
+    listing = await client.get(f"{base_url}/admin/v1/llm/registry", headers=headers)
+    if listing.status_code == 200:
+        for m in listing.json().get("models", []):
+            if m.get("alias") == model["alias"]:
+                return str(m["model_id"])
+    resp = await client.post(
+        f"{base_url}/admin/v1/llm/registry",
+        headers=headers,
+        json={**model, "provider_id": provider_id},
+    )
+    if resp.status_code == 201:
+        return str(resp.json()["model_id"])
+    raise SeedError(
+        f"registry seed {model['alias']!r} failed: {resp.status_code} {resp.text[:200]}"
+    )
+
+
+async def ensure_catalog_model(
+    client: httpx.AsyncClient, base_url: str, token: str, model_id: str
+) -> str:
+    """Enable a registry model (by id) in the tenant CATALOGUE (admin)."""
+    resp = await client.put(
+        f"{base_url}/api/v1/llm/catalog/{model_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"enabled": True, "default_for_new_projects": True},
+    )
+    if resp.status_code == 200:
+        return "created"
+    raise SeedError(
+        f"catalogue seed {model_id!r} failed: {resp.status_code} {resp.text[:200]}"
+    )
+
+
+async def ensure_project_model_quality(
+    client: httpx.AsyncClient, base_url: str, token: str
+) -> str:
+    """Set `model_quality` on project-test's enrichment config (merging it into
+    the current config so other enrichment fields are preserved)."""
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{base_url}/api/v1/memory/projects/{PROJECT_ID}/enrichment-config"
+    get_resp = await client.get(url, headers=headers)
+    cfg: dict[str, Any] = get_resp.json() if get_resp.status_code == 200 else {}
+    cfg["model_quality"] = DEMO_PROJECT_MODEL_QUALITY
+    put_resp = await client.put(url, headers=headers, json=cfg)
+    if put_resp.status_code == 200:
+        return "created"
+    raise SeedError(
+        f"project model_quality seed failed: "
+        f"{put_resp.status_code} {put_resp.text[:200]}"
+    )
 
 
 async def ensure_demo_conversation(
@@ -430,6 +567,40 @@ async def ensure_demo_artifacts(
     )
 
 
+async def seed_governance(
+    client: httpx.AsyncClient, base_url: str, admin_token: str
+) -> list[str]:
+    """Seed the LLM-governance demo data: the platform registry (as
+    tenant_manager super-root) + the tenant catalogue + the project's
+    model_quality. Best-effort — a failure leaves the rest of the demo intact.
+    Returns the list of created descriptors for the run summary."""
+    created: list[str] = []
+    try:
+        su_token = await obtain_token(
+            client, base_url, SUPERROOT_USERNAME, SUPERROOT_PASSWORD
+        )
+        provider_id = await ensure_provider(client, base_url, su_token)
+        print(f"   [created] llm-provider: {GOVERNANCE_PROVIDER['name']}")
+        created.append("llm-provider/Anthropic")
+        model_ids: list[str] = []
+        for model in GOVERNANCE_MODELS:
+            model_ids.append(
+                await ensure_registry_model(client, base_url, su_token, provider_id, model)
+            )
+        print(f"   [created] llm-registry: {len(GOVERNANCE_MODELS)} models")
+        created.append(f"llm-registry/{len(GOVERNANCE_MODELS)}")
+        for model_id in model_ids:
+            await ensure_catalog_model(client, base_url, admin_token, model_id)
+        print(f"   [created] llm-catalogue: {len(GOVERNANCE_MODELS)} models")
+        created.append(f"llm-catalogue/{len(GOVERNANCE_MODELS)}")
+        await ensure_project_model_quality(client, base_url, admin_token)
+        print(f"   [created] project model_quality: {DEMO_PROJECT_MODEL_QUALITY}")
+        created.append(f"model-quality/{DEMO_PROJECT_MODEL_QUALITY}")
+    except SeedError as exc:
+        print(f"   [error] llm-governance: {exc}", file=sys.stderr)
+    return created
+
+
 async def run(args: argparse.Namespace) -> int:
     print(f"==> Waiting for stack at {args.base_url}…")
     await wait_stack_ready(args.base_url, timeout_s=args.timeout_s)
@@ -492,6 +663,11 @@ async def run(args: argparse.Namespace) -> int:
             print(f"   [created] docgen/{descriptor}")
         except SeedError as exc:
             print(f"   [error] artifacts (docgen): {exc}", file=sys.stderr)
+
+        # Phase Governance : registry + tenant catalogue + project model_quality.
+        results["created"].extend(
+            await seed_governance(client, args.base_url, token)
+        )
 
     summary: dict[str, Any] = {
         "base_url": args.base_url,

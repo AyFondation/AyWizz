@@ -172,13 +172,23 @@ class RemoteValidationService:
         *,
         requirements: list[dict[str, Any]],
         artifacts: list[CodeArtifact],
+        tenant_id: str = "",
+        user_id: str = "",
     ) -> RunTriggerResponse:
         body = payload.model_dump(mode="json")
         # requirements/artifacts already live inside payload; upstream C6 consumes them
         body["requirements"] = requirements
         body["artifacts"] = [a.model_dump(mode="json") for a in artifacts]
+        # Forward the MCP caller's identity so the upstream C6 run attributes its
+        # judge LLM usage for quota (only when set — else rely on the client's
+        # default forward-auth headers).
+        headers: dict[str, str] = {}
+        if user_id:
+            headers["X-User-Id"] = user_id
+        if tenant_id:
+            headers["X-Tenant-Id"] = tenant_id
         resp = await self._client.post(
-            f"{self._base}/api/v1/validation/runs", json=body
+            f"{self._base}/api/v1/validation/runs", json=body, headers=headers or None
         )
         if resp.status_code not in (200, 202):
             _raise_for_http(resp)

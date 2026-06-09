@@ -223,6 +223,7 @@ async def _invoke_llm(
             session_id=envelope.session_id,
             tenant_id=envelope.tenant_id,
             project_id=envelope.project_id,
+            user_id=envelope.user_id,
             phase=envelope.phase.value,
         )
     except Exception as exc:

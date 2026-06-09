@@ -768,3 +768,171 @@ register_contract(
         description="MCP tool declaration surfaced via tools/list and GET /api/v1/mcp/tools.",
     )
 )
+
+# ---------------------------------------------------------------------------
+# C8 Admin — platform LLM registry contracts (write-only API key)
+# ---------------------------------------------------------------------------
+
+from ay_platform_core.c8_llm.registry.models import (  # noqa: E402
+    LLMModelUpsert,
+    LLMRegistryListResponse,
+    LLMRegistryPublic,
+)
+from ay_platform_core.c8_llm.registry.provider_models import (  # noqa: E402
+    LLMProviderApiKeyUpdate,
+    LLMProviderListResponse,
+    LLMProviderPublic,
+    LLMProviderUpsert,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMRegistryPublic",
+        schema=LLMRegistryPublic,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "Read projection of a registry model. WRITE-ONLY KEY: exposes "
+            "key_status + masked hint only, never the ciphertext/plaintext."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMRegistryListResponse",
+        schema=LLMRegistryListResponse,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="GET /admin/v1/llm/registry — list of public model projections.",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMModelUpsert",
+        schema=LLMModelUpsert,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="POST/PUT registry model metadata (provider_id + alias; no key).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMProviderPublic",
+        schema=LLMProviderPublic,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "Read projection of a provider (endpoint + credential layer). "
+            "WRITE-ONLY KEY: key_status + masked hint only."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMProviderListResponse",
+        schema=LLMProviderListResponse,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="GET /admin/v1/llm/providers — list of public provider projections.",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMProviderUpsert",
+        schema=LLMProviderUpsert,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="POST/PUT provider metadata (name + base_url + wire_format; no key).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="LLMProviderApiKeyUpdate",
+        schema=LLMProviderApiKeyUpdate,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="PUT write-only provider API key (encrypted before persistence).",
+    )
+)
+
+from ay_platform_core.c8_llm.registry.catalog_models import (  # noqa: E402
+    ResolvedModel,
+    TenantCatalogListResponse,
+    TenantCatalogModelPublic,
+    TenantCatalogUpsert,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="TenantCatalogModelPublic",
+        schema=TenantCatalogModelPublic,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "One per-tenant catalogue entry joined with the registry public "
+            "view (enable flag + optional rate-card; no key)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="TenantCatalogListResponse",
+        schema=TenantCatalogListResponse,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="GET /api/v1/llm/catalog — the calling tenant's catalogue.",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="TenantCatalogUpsert",
+        schema=TenantCatalogUpsert,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description="PUT body to add/configure a registry model in a tenant catalogue.",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="ResolvedModel",
+        schema=ResolvedModel,
+        consumers=("C7_memory", "ay_platform_ui"),
+        transport="python-import",
+        description=(
+            "Result of (tenant, model_quality) → concrete model resolution; "
+            "consumed by ingestion/EnrichmentConfig and the project picker."
+        ),
+    )
+)
+
+# NOTE: only QuotaPolicy is registered (not QuotaStatus) — C7 has an unrelated
+# class also named `QuotaStatus`, and registering the LLM one would make the
+# canonical-import check reject C7's own import. Registering QuotaPolicy already
+# marks `c8_llm.quota.models` canonical, which is what the parallel-definition
+# check needs to skip the (legitimate) id-field overlap on QuotaStatus.
+from ay_platform_core.c8_llm.quota.models import QuotaPolicy  # noqa: E402
+
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="QuotaPolicy",
+        schema=QuotaPolicy,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description=(
+            "The single global LLM quota policy: rolling/anchored windows with "
+            "four-level caps (global/tenant/project/user), clamped child<=parent."
+        ),
+    )
+)

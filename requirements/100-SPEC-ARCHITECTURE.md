@@ -1,6 +1,6 @@
 ---
 document: 100-SPEC-ARCHITECTURE
-version: 15
+version: 16
 path: requirements/100-SPEC-ARCHITECTURE.md
 language: en
 status: draft
@@ -10,6 +10,8 @@ derives-from: [D-002, D-003, D-007, D-008, D-010, D-011, D-012, D-013, D-014, D-
 # Architecture Specification — Platform Components & Contracts
 
 > **Purpose of this document.** Define the macro-level component decomposition of the platform, where each type of requirement lives, the contracts between components, the scaling model, and the deployment targets. This spec defines the **what** and the **why** of each component — concrete technology choices and implementation details belong to component-specific engineering work.
+
+> **Version 16 changes.** **E-100-002 v2 → v3** — `tenant_manager` evolves from a tenant-lifecycle-only super-root into a **platform operator**. It now owns, IN ADDITION to its v2 powers: (a) the platform **LLM registry** (D-021 — models, encrypted keys, api_base, costs, capabilities); (b) tenant lifecycle **including deactivation** (`POST /admin/tenants/{id}/deactivate` + `/reactivate` ; a deactivated tenant's members are refused login at `issue_token`); (c) **cross-tenant user OVERSIGHT** (`GET /admin/users` [optionally `?tenant_id=`], `POST /admin/users/{id}/deactivate` + `/reactivate`) — list/filter/deactivate ONLY ; user **create/delete remains the tenant's own admin** (content); (d) global LLM **quotas** (Lot 3, forthcoming). The **content-blind invariant is UNCHANGED**: `tenant_manager` still has NO access to tenant CONTENT (projects, sources, conversations, requirements). The new powers are platform CONFIGURATION + account-status, never content. The auth-matrix catalog + `065-TEST-MATRIX.md` are extended accordingly.
 
 > **Version 15 changes.** **R-100-125 v1→v2** absorbs the D-020 v2 optimisations: (a) 2-tier LLM gating for the decontextualiser (cheap screener decides per-chunk if the expensive worker is needed); (b) mandatory intra-document image deduplication by sha256 (skip redundant Vision calls); (c) **embeddings now produced by C13** via C8 `/embeddings` and written alongside `chunks.jsonl` (was: produced by C7 — moves the embedding compute into the artifact set per R-400-207); (d) opt-in batch API mode via `urgency=background` on `POST /analyze` (Anthropic Batch API → -50% Phase 2 LLM cost, 1-24h latency). §10.9 HTTP surface §2 amended; §10.9 invariants §5 amended; §10.9 §6 storage isolation extended to embeddings.
 
@@ -1206,18 +1208,18 @@ The JWT issued by C2 SHALL contain the following claims, in JSON structure. Fiel
 
 ```yaml
 id: E-100-002
-version: 2
+version: 3
 status: approved
 category: security
 ```
 
-The platform's RBAC model comprises a **5-role hierarchy** (top to bottom). Higher roles SHALL NOT subsume lower-role permissions automatically — `tenant_manager` in particular is **content-blind** by design (separation of duties between platform operators and tenant operators).
+The platform's RBAC model comprises a **5-role hierarchy** (top to bottom). Higher roles SHALL NOT subsume lower-role permissions automatically — `tenant_manager` in particular remains **content-blind** by design (separation of duties between platform operators and tenant operators). v3 expands `tenant_manager` into a **platform operator** (platform configuration + account status), WITHOUT granting it any tenant CONTENT access.
 
 **Global roles** (stored in JWT `roles` claim):
 
 | Role | Scope | Permissions |
 |---|---|---|
-| `tenant_manager` | platform-wide | Cross-tenant operations: create / list / delete tenants, grant or revoke `admin` on a tenant. **SHALL NOT** read or write tenant content (conversations, projects, requirements, sources, runs). Strictly an operator role for tenant lifecycle. |
+| `tenant_manager` | platform-wide | **Platform operator** (v3). Owns: (a) tenant lifecycle — create / list / delete / **deactivate** & **reactivate** tenants (a deactivated tenant's members are refused login); grant or revoke `admin` on a tenant. (b) the platform **LLM registry** (D-021 — models, encrypted keys, api_base, cost, capabilities). (c) **cross-tenant user oversight** — `GET /admin/users` (optionally `?tenant_id=`) and **deactivate / reactivate** any user; user **create / delete remains the tenant's own `admin`** (that is tenant content). (d) global LLM **quotas** (forthcoming). **SHALL NOT** read or write tenant CONTENT (conversations, projects, requirements, sources, runs) — content-blindness is preserved; the new powers are platform configuration + account-status only. |
 | `admin` (= `tenant_admin`) | tenant-scoped | All actions within their `tenant_id`: create projects, grant `project_owner` on those projects, read/write every project's content in the tenant. **SHALL NOT** cross tenants. `admin` and `tenant_admin` are synonyms in v2 — `admin` is the canonical name; `tenant_admin` is retained for v1 code paths and SHALL be treated as identical. |
 | `user` | baseline | Authenticated user with no global grant. May hold per-project roles via `project_scopes`. |
 
@@ -1229,7 +1231,7 @@ The platform's RBAC model comprises a **5-role hierarchy** (top to bottom). High
 | `project_editor` | Create/edit requirements, run pipeline, upload sources, view reports. Cannot delete project, change ACL, or delete sources uploaded by others. |
 | `project_viewer` | Read-only access to requirements, reports, sources, conversation history. Cannot trigger pipeline or upload sources. |
 
-**Permission resolution.** A user's effective permission on a resource is the union of their global roles and their project-scoped roles for that resource's project — except for `tenant_manager`, whose grants apply ONLY to tenant-lifecycle endpoints, never to tenant content endpoints. Components SHALL enforce this by listing `tenant_manager` in the role gate of tenant-management endpoints only; content endpoints SHALL NOT include `tenant_manager` in their accept list.
+**Permission resolution.** A user's effective permission on a resource is the union of their global roles and their project-scoped roles for that resource's project — except for `tenant_manager`, whose grants apply ONLY to **platform-operator** endpoints (tenant lifecycle incl. (de)activation, the LLM registry, cross-tenant user oversight, global quotas), never to tenant content endpoints. Components SHALL enforce this by listing `tenant_manager` in the role gate of platform-operator endpoints only; content endpoints SHALL NOT include `tenant_manager` in their accept list.
 
 **Verification.** The auth × role × scope test matrix under `ay_platform_core/tests/e2e/auth_matrix/` verifies for every catalogued endpoint that:
 

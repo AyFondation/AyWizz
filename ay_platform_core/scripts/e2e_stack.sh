@@ -219,6 +219,39 @@ cmd_dev() {
   echo "      project-viewer  / dev-viewer      (viewer on project-test)"
 }
 
+cmd_restart_llm() {
+  # Recreate ONLY the LLM egress (c8 `litellm`) + `c13-extractor` to apply
+  # config / env changes (e.g. model routing, R-800-030) WITHOUT a full rebuild
+  # + demo reseed. Uses `up -d` (NOT `restart`) so changed `environment:` is
+  # re-applied — `docker compose restart` keeps the env baked at create time.
+  # litellm re-reads its mounted config on (re)start. Encapsulated here per §5.3.
+  _require_docker
+  local dev_override="$AY_CORE/tests/docker-compose.dev.override.yml"
+  local secret_env="$MONOREPO_ROOT/.env.secret"
+  local secret_arg=()
+  if [[ -f "$secret_env" ]]; then
+    secret_arg=(--env-file "$secret_env")
+  fi
+  export BUILD_VERSION="${BUILD_VERSION:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+  echo "==> Recreating c13-extractor to apply env changes (model routing)"
+  docker compose \
+    --env-file "$ENV_FILE" \
+    "${secret_arg[@]}" \
+    -f "$COMPOSE_FILE" \
+    -f "$dev_override" \
+    --profile litellm up -d --no-deps c13-extractor
+  # `up -d` does NOT recreate litellm on a mounted-config-file change (compose
+  # tracks the spec, not file content) — force a restart so it re-reads
+  # litellm-config.yaml (model features / agent_routes).
+  echo "==> Restarting litellm (C8) to reload its mounted config"
+  docker compose \
+    --env-file "$ENV_FILE" \
+    "${secret_arg[@]}" \
+    -f "$COMPOSE_FILE" \
+    -f "$dev_override" \
+    --profile litellm restart litellm
+}
+
 cmd_down() {
   _require_docker
   echo "==> Tearing down stack + volumes"
@@ -287,6 +320,7 @@ main() {
     build)  cmd_build ;;
     up)     cmd_up ;;
     dev)    cmd_dev ;;
+    restart-llm) cmd_restart_llm ;;
     down)   cmd_down ;;
     status) cmd_status ;;
     logs)   shift; cmd_logs "$@" ;;
@@ -294,7 +328,7 @@ main() {
     system) cmd_system ;;
     full)   cmd_full ;;
     "")
-      echo "usage: $0 {build|up|dev|down|status|logs <svc>|seed|system|full}" >&2
+      echo "usage: $0 {build|up|dev|restart-llm|down|status|logs <svc>|seed|system|full}" >&2
       exit 2
       ;;
     *)

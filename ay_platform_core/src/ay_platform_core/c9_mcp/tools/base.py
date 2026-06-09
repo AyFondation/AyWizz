@@ -14,10 +14,35 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
 from ay_platform_core.c9_mcp.models import ToolSpec
+
+
+@dataclass(frozen=True)
+class ActorContext:
+    """The forward-auth identity of the MCP caller. Propagated to tool handlers
+    via a contextvar (set by the router per request) so tools that act on the
+    user's behalf — e.g. triggering a C6 validation run — can attribute the work
+    for per-user/tenant quota."""
+
+    user_id: str = ""
+    tenant_id: str = ""
+
+
+_actor: ContextVar[ActorContext | None] = ContextVar("mcp_actor", default=None)
+
+
+def set_actor(user_id: str, tenant_id: str) -> None:
+    """Record the caller identity for the current request context (router)."""
+    _actor.set(ActorContext(user_id=user_id, tenant_id=tenant_id))
+
+
+def current_actor() -> ActorContext:
+    """The caller identity for the in-flight tool call (empty when unset)."""
+    return _actor.get() or ActorContext()
 
 
 class ToolDispatchError(RuntimeError):

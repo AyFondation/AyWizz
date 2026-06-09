@@ -58,7 +58,9 @@ class TestSampleConfigParses:
         )
         assert {"c3-rag", "c3-docgen", "c7-kg-extractor"}.issubset(cfg.agent_routes.keys())
         model_names = {m.model_name for m in cfg.model_list}
-        assert all(m.startswith("claude-") for m in model_names)
+        # "*" is the wildcard pass-through entry (provider-normalised routing);
+        # the named entries remain Claude tiers.
+        assert all(m == "*" or m.startswith("claude-") for m in model_names)
         assert all(target in model_names for target in cfg.agent_routes.values())
 
 

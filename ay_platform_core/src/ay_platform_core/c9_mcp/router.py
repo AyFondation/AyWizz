@@ -20,6 +20,7 @@ from ay_platform_core.c9_mcp.models import (
     ToolSpec,
 )
 from ay_platform_core.c9_mcp.server import MCPServer, get_server
+from ay_platform_core.c9_mcp.tools.base import set_actor
 
 router = APIRouter(tags=["mcp"])
 
@@ -41,6 +42,7 @@ def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
 async def jsonrpc(
     request: Request,
     _user: str = Depends(_require_actor),
+    x_tenant_id: str | None = Header(default=None),
     server: MCPServer = Depends(get_server),
 ) -> JSONRPCResponse:
     """JSON-RPC 2.0 endpoint for MCP clients.
@@ -49,6 +51,9 @@ async def jsonrpc(
     to produce a well-formed JSON-RPC error response on parse failures,
     which FastAPI's default 422 behaviour would prevent.
     """
+    # Record the caller identity in the request context so tools acting on the
+    # user's behalf (e.g. c6_trigger_validation) attribute their LLM usage.
+    set_actor(_user, x_tenant_id or "")
     body = await request.body()
     return await server.handle_raw(body)
 

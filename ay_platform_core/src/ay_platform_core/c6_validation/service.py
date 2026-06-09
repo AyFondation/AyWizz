@@ -166,6 +166,8 @@ class ValidationService:
         *,
         requirements: list[dict[str, Any]],
         artifacts: list[CodeArtifact],
+        tenant_id: str = "",
+        user_id: str = "",
     ) -> RunTriggerResponse:
         """Create a run row (status=pending) and kick off in-process execution.
 
@@ -201,6 +203,8 @@ class ValidationService:
                 requirements=requirements,
                 artifacts=artifacts,
                 started=started,
+                tenant_id=tenant_id,
+                user_id=user_id,
             )
         )
         self._background_tasks.add(task)
@@ -214,6 +218,8 @@ class ValidationService:
         *,
         requirements: list[dict[str, Any]],
         artifacts: list[CodeArtifact],
+        tenant_id: str = "",
+        user_id: str = "",
     ) -> ValidationRun:
         """Integration-test entrypoint: run synchronously and return the final row.
 
@@ -244,6 +250,8 @@ class ValidationService:
             requirements=requirements,
             artifacts=artifacts,
             started=started,
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
         row = await self._repo.get_run(run_id)
         if row is None:
@@ -305,6 +313,8 @@ class ValidationService:
         requirements: list[dict[str, Any]],
         artifacts: list[CodeArtifact],
         started: datetime,
+        tenant_id: str = "",
+        user_id: str = "",
     ) -> None:
         """Orchestrate check execution with global error containment.
 
@@ -319,6 +329,8 @@ class ValidationService:
                 requirements=requirements,
                 artifacts=artifacts,
                 started=started,
+                tenant_id=tenant_id,
+                user_id=user_id,
             )
         except Exception as exc:
             await self._repo.upsert_run(
@@ -358,6 +370,8 @@ class ValidationService:
         requirements: list[dict[str, Any]],
         artifacts: list[CodeArtifact],
         started: datetime,
+        tenant_id: str = "",
+        user_id: str = "",
     ) -> None:
         # Transition to RUNNING.
         await self._repo.upsert_run(
@@ -508,6 +522,8 @@ class ValidationService:
                 artifacts=artifacts,
                 agent_name=self._config.judge_agent,
                 project_id=payload.project_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
             )
         completed = _now()
         # R-700-014: if every check errored, transition to FAILED; otherwise

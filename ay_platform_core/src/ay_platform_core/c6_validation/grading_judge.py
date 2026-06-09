@@ -139,6 +139,7 @@ async def grade_judged(
     agent_name: str,
     project_id: str,
     tenant_id: str = "",
+    user_id: str = "",
     session_id: str | None = None,
 ) -> Verdict | None:
     """Build the T3 (`JUDGED`) verdict via an LLM-as-judge (R-700-032).
@@ -170,6 +171,7 @@ async def grade_judged(
             session_id=session_id or f"judge:{run_id}",
             tenant_id=tenant_id or None,
             project_id=project_id,
+            user_id=user_id or None,
         )
     except Exception:
         # Best-effort : a judge failure must never break the run (R-700-032).

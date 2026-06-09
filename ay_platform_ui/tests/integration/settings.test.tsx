@@ -57,6 +57,7 @@ function makeEnrichment(over: Partial<Record<string, unknown>> = {}) {
     densification_enabled: null,
     image_vision_enabled: null,
     chain_of_density_iterations: null,
+    model_quality: null,
     image_analyzer_model: null,
     ...over,
   };
@@ -96,8 +97,50 @@ afterEach(() => vi.restoreAllMocks());
 
 // The settings page now loads the enrichment config on mount; give every test
 // a default handler so the section renders (per-test `server.use` can override).
+const CAT_URL = "/api/v1/llm/catalog";
+const PM_URL = "/api/v1/llm/projects/p1/models";
+
+function catModel(over: Record<string, unknown> = {}) {
+  return {
+    tenant_id: "tenant-x",
+    model_id: "m1",
+    enabled: true,
+    rate_in_per_1m: null,
+    rate_out_per_1m: null,
+    markup_pct: null,
+    default_for_new_projects: true,
+    registry: {
+      model_id: "m1",
+      alias: "claude-haiku-fast",
+      provider_id: "p1",
+      upstream_model: "claude-haiku-4-5",
+      capabilities: { vision: true, tool_calling: true, context_window: 200000 },
+      provider_cost_in_per_1m: 0.8,
+      provider_cost_out_per_1m: 4.0,
+      default_model_quality: "low",
+      enabled: true,
+      effective_from: "2026-06-08T00:00:00+00:00",
+    },
+    ...over,
+  };
+}
+
 beforeEach(() => {
-  server.use(http.get(ENRICH_URL, () => HttpResponse.json(makeEnrichment())));
+  server.use(
+    http.get(ENRICH_URL, () => HttpResponse.json(makeEnrichment())),
+    // The tenant-admin Models section fetches these; benign defaults so the
+    // existing admin tests don't trip the unhandled-request guard.
+    http.get(CAT_URL, () => HttpResponse.json({ models: [] })),
+    http.get(PM_URL, () =>
+      HttpResponse.json({
+        tenant_id: "tenant-x",
+        project_id: "p1",
+        model_ids: [],
+        is_explicit: false,
+        models: [],
+      }),
+    ),
+  );
 });
 
 function renderSettings() {
@@ -216,6 +259,29 @@ describe("ProjectSettingsPage — enrichment config", () => {
     });
   });
 
+  it("loads + saves the model_quality picker (the project's LLM choice)", async () => {
+    seedToken(["admin"]);
+    let sentBody: Record<string, unknown> | null = null;
+    const put = vi.fn(async ({ request }: { request: Request }) => {
+      sentBody = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json(sentBody);
+    });
+    server.use(
+      http.get(PROJECT_URL, () => HttpResponse.json(makeProject())),
+      http.get(ENRICH_URL, () => HttpResponse.json(makeEnrichment({ model_quality: "low" }))),
+      http.put(ENRICH_URL, put),
+    );
+    renderSettings();
+
+    await waitFor(() => expect(screen.getByTestId("enrichment-model-quality")).toHaveValue("low"));
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByTestId("enrichment-model-quality"), "high");
+    await user.click(screen.getByTestId("enrichment-save"));
+
+    await waitFor(() => expect(screen.getByTestId("enrichment-saved")).toBeInTheDocument());
+    expect(sentBody).toMatchObject({ model_quality: "high" });
+  });
+
   it("renders the enrichment config read-only for a non-editor role", async () => {
     seedToken(["project_viewer"]);
     server.use(http.get(PROJECT_URL, () => HttpResponse.json(makeProject())));
@@ -223,6 +289,59 @@ describe("ProjectSettingsPage — enrichment config", () => {
 
     await waitFor(() => expect(screen.getByTestId("enrichment-tier")).toBeInTheDocument());
     expect(screen.getByTestId("enrichment-tier")).toBeDisabled();
+    expect(screen.getByTestId("enrichment-model-quality")).toBeDisabled();
     expect(screen.queryByTestId("enrichment-save")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectSettingsPage — project models (tenant-admin)", () => {
+  it("lists the catalogue, pre-checks the effective set, and saves an explicit list", async () => {
+    seedToken(["tenant_admin"]);
+    let sent: { model_ids: string[] } | null = null;
+    const put = vi.fn(async ({ request }) => {
+      sent = (await request.json()) as { model_ids: string[] };
+      return HttpResponse.json({
+        tenant_id: "tenant-x",
+        project_id: "p1",
+        model_ids: sent.model_ids,
+        is_explicit: true,
+        models: [],
+      });
+    });
+    server.use(
+      http.get(PROJECT_URL, () => HttpResponse.json(makeProject())),
+      http.get(CAT_URL, () => HttpResponse.json({ models: [catModel()] })),
+      http.get(PM_URL, () =>
+        HttpResponse.json({
+          tenant_id: "tenant-x",
+          project_id: "p1",
+          model_ids: ["m1"],
+          is_explicit: false,
+          models: [catModel()],
+        }),
+      ),
+      http.put(PM_URL, put),
+    );
+    renderSettings();
+    await waitFor(() =>
+      expect(screen.getByTestId("project-model-claude-haiku-fast")).toBeInTheDocument(),
+    );
+    // Lazy default → the "using defaults" hint shows, and m1 is pre-checked.
+    expect(screen.getByTestId("project-models-using-defaults")).toBeInTheDocument();
+    const cb = screen.getByTestId("project-model-claude-haiku-fast") as HTMLInputElement;
+    expect(cb.checked).toBe(true);
+    const user = userEvent.setup();
+    await user.click(cb); // unselect
+    await user.click(screen.getByTestId("project-models-save"));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(sent).toEqual({ model_ids: [] });
+  });
+
+  it("is hidden from a plain project_owner (not tenant-admin)", async () => {
+    seedToken(["project_viewer"], { p1: ["project_owner"] });
+    server.use(http.get(PROJECT_URL, () => HttpResponse.json(makeProject())));
+    renderSettings();
+    await waitFor(() => expect(screen.getByTestId("project-system-prompt")).toBeInTheDocument());
+    expect(screen.queryByTestId("project-models")).not.toBeInTheDocument();
   });
 });

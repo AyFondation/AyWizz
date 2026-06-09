@@ -26,11 +26,15 @@ from ay_platform_core.c7_memory.embedding.base import EmbeddingProvider
 from ay_platform_core.c7_memory.embedding.deterministic import DeterministicHashEmbedder
 from ay_platform_core.c7_memory.embedding.ollama import OllamaEmbedder
 from ay_platform_core.c7_memory.kg.repository import KGRepository
+from ay_platform_core.c7_memory.llm_resolver import LLMResolverClient
 from ay_platform_core.c7_memory.router import router
 from ay_platform_core.c7_memory.service import MemoryService
 from ay_platform_core.c7_memory.storage.minio_storage import MemorySourceStorage
 from ay_platform_core.c8_llm.client import LLMGatewayClient
 from ay_platform_core.c8_llm.config import ClientSettings as C8ClientSettings
+from ay_platform_core.c8_llm.quota.guard import build_quota_guard
+from ay_platform_core.c8_llm.quota.http import register_quota_handler
+from ay_platform_core.c8_llm.registry.key_provider import build_registry_key_provider
 from ay_platform_core.observability import (
     TraceContextMiddleware,
     configure_logging,
@@ -84,14 +88,25 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
     # Phase F.1 — C8 LLM gateway client for KG extraction. Reads its
     # config from env (`C8_GATEWAY_URL`, etc.) the same way every
     # other component talks to C8.
+    # LLM-governance #3 (option B) — per-call upstream-key injection from the
+    # platform registry (shared Arango `db`). None when no master key is set
+    # → proxy env key is used (non-breaking fallback).
     llm_client = LLMGatewayClient(
         C8ClientSettings(),
         bearer_token=None,
+        key_provider=build_registry_key_provider(db),
+        quota_guard=build_quota_guard(db),
     )
     # R-100-081 v3 — outbound trigger to the C12 (n8n) ingestion webhook.
     c12_client = C12WebhookClient(
         webhook_url=cfg.c12_webhook_url,
         timeout_s=cfg.c12_webhook_timeout_s,
+    )
+    # LLM-governance #5 — model_quality → alias resolver (C8 admin catalogue).
+    # Disabled (no-op) until `C7_C8_ADMIN_URL` is set to the deployed c8_admin.
+    llm_resolver = LLMResolverClient(
+        base_url=cfg.c8_admin_url,
+        timeout_s=cfg.c8_admin_timeout_s,
     )
     service = MemoryService(
         config=cfg,
@@ -101,6 +116,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         kg_repo=kg_repo,
         llm_client=llm_client,
         c12_client=c12_client,
+        llm_resolver=llm_resolver,
     )
 
     @asynccontextmanager
@@ -116,6 +132,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
             await aclose()
         await llm_client.aclose()
         await c12_client.aclose()
+        await llm_resolver.aclose()
 
     app = FastAPI(title="C7 Memory Service", lifespan=lifespan)
     app.add_middleware(
@@ -124,6 +141,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         exempt_prefixes=["/health", "/api/v1/memory/health"],
     )
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
+    register_quota_handler(app)  # QuotaExceededError → 429
     app.include_router(router)
     app.state.memory_service = service
 

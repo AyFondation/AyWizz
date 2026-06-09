@@ -19,7 +19,12 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { EnrichmentConfig, Project } from "@/lib/types";
+import type {
+  EnrichmentConfig,
+  ModelQuality,
+  Project,
+  TenantCatalogModelPublic,
+} from "@/lib/types";
 
 const EDITOR_ROLES = new Set(["admin", "tenant_admin"]);
 const PROJECT_EDITOR_ROLE = "project_owner";
@@ -74,6 +79,13 @@ export default function ProjectSettingsPage() {
     const projectRoles = projectScopes[projectId] ?? [];
     return projectRoles.includes(PROJECT_EDITOR_ROLE);
   }, [authState, projectId]);
+
+  // The project's associated LLM models are tenant-admin territory.
+  const isTenantAdmin = useMemo(() => {
+    if (authState.status !== "authenticated") return false;
+    const g = new Set(authState.claims.roles ?? []);
+    return g.has("admin") || g.has("tenant_admin");
+  }, [authState]);
 
   async function onSave(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
@@ -256,6 +268,8 @@ export default function ProjectSettingsPage() {
 
       <EnrichmentSection apiClient={apiClient} projectId={projectId} canEdit={canEdit} />
 
+      {isTenantAdmin && <ProjectModelsSection apiClient={apiClient} projectId={projectId} />}
+
       <section className="mt-6 rounded-lg border border-dashed border-neutral-300 p-5 text-sm text-neutral-500">
         <p>Coming later :</p>
         <ul className="mt-1 list-disc pl-5">
@@ -386,6 +400,31 @@ function EnrichmentSection({
             </select>
           </label>
 
+          <label className="block">
+            <span className="text-xs uppercase tracking-wide text-neutral-500">Model quality</span>
+            <select
+              value={config.model_quality ?? "inherit"}
+              onChange={(e) =>
+                patch({
+                  model_quality:
+                    e.target.value === "inherit" ? null : (e.target.value as ModelQuality),
+                })
+              }
+              disabled={!canEdit || busy}
+              className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:bg-neutral-50"
+              data-testid="enrichment-model-quality"
+            >
+              <option value="inherit">Inherit default</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+            <span className="mt-1 block text-xs text-neutral-500">
+              Which model runs (resolved against your tenant&apos;s catalogue) — distinct from the
+              enrichment depth above.
+            </span>
+          </label>
+
           <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {_TOGGLES.map(({ key, label }) => (
               <label key={key} className="block">
@@ -449,6 +488,123 @@ function EnrichmentSection({
             </div>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+// Per-project LLM model list (tenant-admin). Browse the tenant catalogue and
+// pick which models THIS project may use; `model_quality` then resolves within
+// this set. Unconfigured = the tenant's "default for new projects" set.
+function ProjectModelsSection({
+  apiClient,
+  projectId,
+}: {
+  apiClient: ApiClient;
+  projectId: string;
+}) {
+  const [catalogue, setCatalogue] = useState<TenantCatalogModelPublic[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isExplicit, setIsExplicit] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    Promise.all([apiClient.listLlmCatalog(), apiClient.getProjectModels(projectId)])
+      .then(([cat, pm]) => {
+        setCatalogue(cat.models);
+        setSelected(new Set(pm.model_ids));
+        setIsExplicit(pm.is_explicit);
+      })
+      .catch((err) =>
+        setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
+      );
+  }, [apiClient, projectId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const save = async () => {
+    setError(null);
+    setNotice(null);
+    try {
+      await apiClient.setProjectModels(projectId, [...selected]);
+      setNotice("Project models saved.");
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? `Save failed (${err.status})` : "Save failed.");
+    }
+  };
+
+  return (
+    <section className="mt-8 border-t border-neutral-200 pt-6" data-testid="project-models">
+      <h2 className="text-base font-semibold text-neutral-800">Models</h2>
+      <p className="mt-1 text-sm text-neutral-600">
+        The models this project may use. The project&apos;s quality band resolves within this set.{" "}
+        {!isExplicit && (
+          <span className="text-amber-700" data-testid="project-models-using-defaults">
+            Currently using the tenant defaults — saving creates an explicit list.
+          </span>
+        )}
+      </p>
+
+      {error && (
+        <p className="mt-2 text-sm text-red-700" role="alert" data-testid="project-models-error">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p
+          className="mt-2 text-sm text-emerald-700"
+          role="status"
+          data-testid="project-models-notice"
+        >
+          {notice}
+        </p>
+      )}
+
+      {catalogue === null ? (
+        <p className="mt-3 text-sm text-neutral-500">Loading…</p>
+      ) : catalogue.length === 0 ? (
+        <p className="mt-3 text-sm text-neutral-500" data-testid="project-models-empty">
+          The tenant catalogue is empty — add models under LLM catalogue first.
+        </p>
+      ) : (
+        <>
+          <ul className="mt-3 space-y-1.5">
+            {catalogue.map((m) => (
+              <li key={m.model_id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selected.has(m.model_id)}
+                  onChange={() => toggle(m.model_id)}
+                  data-testid={`project-model-${m.registry.alias}`}
+                />
+                <span className="font-medium text-neutral-800">{m.registry.alias}</span>
+                <span className="text-xs text-neutral-500">
+                  {m.registry.default_model_quality} · {m.registry.upstream_model}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={save}
+            className="mt-3 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            data-testid="project-models-save"
+          >
+            Save models
+          </button>
+        </>
       )}
     </section>
   );

@@ -26,7 +26,9 @@ import { ApiClient, ApiError } from "@/lib/apiClient";
 import {
   defaultTrigramFromClaims,
   fullNameForTooltip,
+  getQuotaFraming,
   isValidTrigram,
+  type QuotaFraming,
   writePreferences,
 } from "@/lib/preferences";
 import type { UserPreferencesResponse } from "@/lib/types";
@@ -44,6 +46,7 @@ export default function PreferencesPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [quotaFraming, setQuotaFramingState] = useState<QuotaFraming>("remaining");
 
   // Default fallback hex used by the chat when no override is set.
   // Mirrors the Tailwind blue-500 the legacy Avatar palette draws
@@ -59,6 +62,7 @@ export default function PreferencesPage() {
     if (state.status !== "authenticated") return;
     const dflt = defaultTrigramFromClaims(state.claims);
     setDefaultTrigram(dflt);
+    setQuotaFramingState(getQuotaFraming(state.claims.sub));
     const client = new ApiClient(cfg);
     let cancelled = false;
     client
@@ -424,6 +428,38 @@ export default function PreferencesPage() {
             </button>
           ) : null}
         </form>
+      </section>
+
+      <section
+        className="mt-6 rounded-lg border border-neutral-200 bg-white p-5"
+        data-testid="preferences-quota-framing"
+      >
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+          Quota indicator
+        </h2>
+        <p className="mt-2 text-sm text-neutral-600">
+          How the navbar quota pill frames your session usage.
+        </p>
+        <div className="mt-3 inline-flex rounded-md border border-neutral-300 p-0.5">
+          {(["remaining", "consumed"] as QuotaFraming[]).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => {
+                writePreferences(claims.sub, { quotaFraming: opt });
+                setQuotaFramingState(opt);
+              }}
+              className={`rounded px-3 py-1.5 text-sm font-medium ${
+                quotaFraming === opt
+                  ? "bg-blue-600 text-white"
+                  : "text-neutral-700 hover:bg-neutral-50"
+              }`}
+              data-testid={`quota-framing-${opt}`}
+            >
+              {opt === "remaining" ? "Show remaining (65% left)" : "Show consumed (35% used)"}
+            </button>
+          ))}
+        </div>
       </section>
 
       {saveError ? (

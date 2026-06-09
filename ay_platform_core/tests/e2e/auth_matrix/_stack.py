@@ -72,6 +72,15 @@ from ay_platform_core.c7_memory.service import get_service as c7_get_service
 from ay_platform_core.c7_memory.storage.minio_storage import MemorySourceStorage
 from ay_platform_core.c8_llm.client import LLMGatewayClient
 from ay_platform_core.c8_llm.config import ClientSettings
+from ay_platform_core.c8_llm.registry.catalog_repository import TenantCatalogRepository
+from ay_platform_core.c8_llm.registry.catalog_router import router as c8_catalog_router
+from ay_platform_core.c8_llm.registry.catalog_service import TenantCatalogService
+from ay_platform_core.c8_llm.registry.provider_repository import LLMProviderRepository
+from ay_platform_core.c8_llm.registry.provider_router import router as c8_provider_router
+from ay_platform_core.c8_llm.registry.provider_service import LLMProviderService
+from ay_platform_core.c8_llm.registry.repository import LLMRegistryRepository
+from ay_platform_core.c8_llm.registry.router import router as c8_admin_router
+from ay_platform_core.c8_llm.registry.service import LLMRegistryService
 from ay_platform_core.c9_mcp.config import MCPConfig
 from ay_platform_core.c9_mcp.remote import (
     RemoteRequirementsService,
@@ -80,6 +89,7 @@ from ay_platform_core.c9_mcp.remote import (
 from ay_platform_core.c9_mcp.router import router as c9_router
 from ay_platform_core.c9_mcp.server import MCPServer
 from ay_platform_core.c9_mcp.tools.base import build_default_toolset
+from ay_platform_core.crypto.secret_cipher import SecretCipher
 
 # ---------------------------------------------------------------------------
 # Scripted LLM (re-used pattern from existing e2e/conftest.py)
@@ -163,6 +173,7 @@ class PlatformStack:
     c6_app: FastAPI
     c7_app: FastAPI
     c9_app: FastAPI
+    c8_admin_app: FastAPI
     c2_service: AuthService
     c5_service: RequirementsService
     c7_service: MemoryService
@@ -184,6 +195,7 @@ class PlatformStack:
             "c6_validation": self.c6_app,
             "c7_memory": self.c7_app,
             "c9_mcp": self.c9_app,
+            "c8_admin": self.c8_admin_app,
         }[component]
 
     def db_for(self, component: str) -> Any:
@@ -340,6 +352,32 @@ def _build_c7(
     return app, service
 
 
+def _build_c8_admin(
+    client: ArangoClient,
+    db_name: str,
+    password: str,
+) -> FastAPI:
+    """C8 admin app — platform LLM registry, gated by `tenant_manager`. Uses a
+    SecretCipher built from the test env master key (set in the root conftest)
+    so the encrypt/decrypt path is real, not mocked."""
+    db = client.db(db_name, username="root", password=password)
+    repo = LLMRegistryRepository(db)
+    repo._ensure_collections_sync()
+    provider_repo = LLMProviderRepository(db)
+    provider_repo._ensure_collections_sync()
+    catalog_repo = TenantCatalogRepository(db)
+    catalog_repo._ensure_collections_sync()
+    service = LLMRegistryService(repo)
+    app = FastAPI()
+    app.include_router(c8_admin_router)
+    app.include_router(c8_provider_router)
+    app.include_router(c8_catalog_router)
+    app.state.registry_service = service
+    app.state.provider_service = LLMProviderService(provider_repo, SecretCipher.from_env())
+    app.state.catalog_service = TenantCatalogService(catalog_repo, service)
+    return app
+
+
 def _build_c9(
     c5_app: FastAPI,
     c6_app: FastAPI,
@@ -383,7 +421,7 @@ async def build_stack(
     sys_db = client.db("_system", username="root", password=arango_password)
 
     components = ["c2_auth", "c3_conversation", "c4_orchestrator",
-                  "c5_requirements", "c6_validation", "c7_memory"]
+                  "c5_requirements", "c6_validation", "c7_memory", "c8_admin"]
     db_names = {c: f"e2e_authmtx_{c}_{uuid.uuid4().hex[:6]}" for c in components}
     for db_name in db_names.values():
         sys_db.create_database(db_name)
@@ -450,6 +488,10 @@ async def build_stack(
         for c in c9_http_clients:
             cleanup.append(("http_client", c))
 
+        c8_admin_app = _build_c8_admin(
+            client, db_names["c8_admin"], arango_password
+        )
+
         stack = PlatformStack(
             c2_app=c2_app,
             c3_app=c3_app,
@@ -458,6 +500,7 @@ async def build_stack(
             c6_app=c6_app,
             c7_app=c7_app,
             c9_app=c9_app,
+            c8_admin_app=c8_admin_app,
             c2_service=c2_service,
             c5_service=c5_service,
             c7_service=c7_service,

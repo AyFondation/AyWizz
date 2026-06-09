@@ -214,6 +214,147 @@ async def test_c2_create_user_persists_in_arango(
     assert persisted.get("password_hash") != body["password"]
 
 
+# ---------------------------------------------------------------------------
+# C8 admin — LLM registry write observable in `llm_registry`
+# ---------------------------------------------------------------------------
+
+
+def _tenant_manager_headers(user_id: str = "u-bs-tmgr") -> dict[str, str]:
+    return build_forward_auth_headers(
+        RoleProfile(user_id=user_id, tenant_id=_TENANT, global_roles=("tenant_manager",))
+    )
+
+
+_PROVIDER_BODY = {
+    "name": "BS-Anthropic",
+    "base_url": "https://api.anthropic.com",
+    "wire_format": "anthropic",
+}
+
+
+def _model_body(provider_id: str, alias: str) -> dict[str, object]:
+    return {
+        "alias": alias,
+        "provider_id": provider_id,
+        "upstream_model": "claude-haiku-4-5-20251001",
+        "capabilities": {"vision": True, "tool_calling": True, "context_window": 200000},
+        "provider_cost_in_per_1m": 0.80,
+        "provider_cost_out_per_1m": 4.00,
+        "default_model_quality": "low",
+        "enabled": True,
+    }
+
+
+async def _create_provider(client: httpx.AsyncClient, name: str) -> str:
+    resp = await client.post(
+        "/admin/v1/llm/providers",
+        headers=_tenant_manager_headers(),
+        json={**_PROVIDER_BODY, "name": name},
+    )
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["provider_id"])
+
+
+async def test_c8_create_registry_model_persists_in_arango(
+    auth_matrix_stack: PlatformStack,
+) -> None:
+    """POST /admin/v1/llm/registry SHALL insert a row into `llm_registry` keyed
+    by the minted model_id, referencing the provider, with NO secret."""
+    alias = f"bs-model-{uuid.uuid4().hex[:8]}"
+    async with make_asgi_client(auth_matrix_stack.c8_admin_app) as client:
+        pid = await _create_provider(client, f"prov-{uuid.uuid4().hex[:8]}")
+        response = await client.post(
+            "/admin/v1/llm/registry",
+            headers=_tenant_manager_headers(),
+            json=_model_body(pid, alias),
+        )
+    assert response.status_code == 201, response.text
+    model_id = response.json()["model_id"]
+
+    db = auth_matrix_stack.db_for("c8_admin")
+    doc = await asyncio.to_thread(assert_arango_doc_exists, db, "llm_registry", model_id)
+    assert doc.get("alias") == alias
+    assert doc.get("provider_id") == pid
+    assert "api_key_ciphertext" not in doc  # key lives on the provider
+
+
+async def test_c8_provider_key_persists_ciphertext_not_plaintext(
+    auth_matrix_stack: PlatformStack,
+) -> None:
+    """PUT /admin/v1/llm/providers/{id}/api-key SHALL store an encrypted token in
+    `llm_providers`, NEVER the plaintext, and the response SHALL NOT echo it."""
+    plaintext = f"sk-ant-{uuid.uuid4().hex}"
+    async with make_asgi_client(auth_matrix_stack.c8_admin_app) as client:
+        pid = await _create_provider(client, f"prov-key-{uuid.uuid4().hex[:8]}")
+        keyed = await client.put(
+            f"/admin/v1/llm/providers/{pid}/api-key",
+            headers=_tenant_manager_headers(),
+            json={"api_key": plaintext},
+        )
+    assert keyed.status_code == 200, keyed.text
+    assert plaintext not in keyed.text
+    assert keyed.json()["key_status"] == "set"
+
+    db = auth_matrix_stack.db_for("c8_admin")
+    doc = await asyncio.to_thread(assert_arango_doc_exists, db, "llm_providers", pid)
+    ciphertext = doc.get("api_key_ciphertext")
+    assert ciphertext is not None and ciphertext.startswith("ay.1.")
+    assert plaintext not in str(doc)
+
+
+def _admin_headers(user_id: str = "u-bs-admin-cat") -> dict[str, str]:
+    return build_forward_auth_headers(
+        RoleProfile(user_id=user_id, tenant_id=_TENANT, global_roles=("admin",))
+    )
+
+
+async def test_c8_catalog_upsert_persists_in_arango(
+    auth_matrix_stack: PlatformStack,
+) -> None:
+    """PUT /api/v1/llm/catalog/{model_id} SHALL insert a row into
+    `tenant_llm_catalog` keyed `{tenant}:{model_id}` — only after the model_id
+    exists in the platform registry (the catalogue is a curated subset)."""
+    alias = f"bs-cat-{uuid.uuid4().hex[:8]}"
+    async with make_asgi_client(auth_matrix_stack.c8_admin_app) as client:
+        pid = await _create_provider(client, f"prov-cat-{uuid.uuid4().hex[:8]}")
+        reg = await client.post(
+            "/admin/v1/llm/registry",
+            headers=_tenant_manager_headers(),
+            json=_model_body(pid, alias),
+        )
+        assert reg.status_code == 201, reg.text
+        model_id = reg.json()["model_id"]
+        cat = await client.put(
+            f"/api/v1/llm/catalog/{model_id}",
+            headers=_admin_headers(),
+            json={"enabled": True, "markup_pct": 15.0},
+        )
+    assert cat.status_code == 200, cat.text
+    assert cat.json()["registry"]["alias"] == alias
+
+    db = auth_matrix_stack.db_for("c8_admin")
+    doc = await asyncio.to_thread(
+        assert_arango_doc_exists, db, "tenant_llm_catalog", f"{_TENANT}:{model_id}"
+    )
+    assert doc.get("tenant_id") == _TENANT
+    assert doc.get("model_id") == model_id
+    assert doc.get("markup_pct") == 15.0
+    assert "api_key_ciphertext" not in doc
+
+
+async def test_c8_catalog_upsert_unknown_model_is_404(
+    auth_matrix_stack: PlatformStack,
+) -> None:
+    """A catalogue PUT for a model_id absent from the registry SHALL 404."""
+    async with make_asgi_client(auth_matrix_stack.c8_admin_app) as client:
+        resp = await client.put(
+            f"/api/v1/llm/catalog/ghost-{uuid.uuid4().hex[:8]}",
+            headers=_admin_headers("u-bs-admin-ghost"),
+            json={"enabled": True},
+        )
+    assert resp.status_code == 404, resp.text
+
+
 # Suppress unused-import warning for httpx (kept in case future tests
 # use it directly rather than via make_asgi_client).
 _: type = httpx.AsyncClient

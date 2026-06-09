@@ -67,6 +67,17 @@ from ay_platform_core.c2_auth.modes.sso_mode import SSOMode
 _FORBIDDEN_ENVIRONMENTS = {"production", "staging"}
 
 
+def _tenant_doc_to_public(doc: dict[str, Any]) -> TenantPublic:
+    """Project an Arango tenant doc to TenantPublic. `active` defaults True for
+    tenants created before the flag existed."""
+    return TenantPublic(
+        tenant_id=doc["_key"],
+        name=doc["name"],
+        created_at=datetime.fromisoformat(doc["created_at"]),
+        active=doc.get("active", True),
+    )
+
+
 class AuthService:
     """Facade for C2 Auth Service operations.
 
@@ -241,6 +252,18 @@ class AuthService:
     async def issue_token(self, request: LoginRequest) -> TokenResponse:
         """Authenticate credentials and return a signed JWT. R-100-038."""
         user = await self._mode.authenticate(request)
+        # Platform-operator tenant deactivation (E-100-002 v3): refuse login to
+        # a member of a deactivated tenant (the user passed auth, but the tenant
+        # is suspended). tenant_manager itself is platform-scoped — its own
+        # tenant_id may not be a managed tenant, so a missing tenant doc is
+        # treated as active (no regression for the super-root login).
+        if self._repo is not None:
+            tdoc = await self._repo.get_tenant(user.tenant_id)
+            if tdoc is not None and not tdoc.get("active", True):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="tenant is deactivated",
+                )
         now = datetime.now(UTC)
         jti = str(uuid.uuid4())
         exp_ts = int(now.timestamp()) + self._config.token_ttl_seconds
@@ -390,14 +413,7 @@ class AuthService:
     async def list_tenants(self) -> list[TenantPublic]:
         repo = self._require_repo()
         rows = await repo.list_tenants()
-        return [
-            TenantPublic(
-                tenant_id=r["_key"],
-                name=r["name"],
-                created_at=datetime.fromisoformat(r["created_at"]),
-            )
-            for r in rows
-        ]
+        return [_tenant_doc_to_public(r) for r in rows]
 
     async def delete_tenant(self, tenant_id: str) -> None:
         repo = self._require_repo()
@@ -406,6 +422,43 @@ class AuthService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"tenant {tenant_id!r} not found",
             )
+
+    async def set_tenant_active(self, tenant_id: str, active: bool) -> TenantPublic:
+        """Deactivate / reactivate a tenant (tenant_manager). A deactivated
+        tenant's users are refused login (enforced in `issue_token`)."""
+        repo = self._require_repo()
+        if not await repo.update_tenant(tenant_id, {"active": active}):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"tenant {tenant_id!r} not found",
+            )
+        doc = await repo.get_tenant(tenant_id)
+        assert doc is not None
+        return _tenant_doc_to_public(doc)
+
+    # ---- Cross-tenant user oversight (tenant_manager, E-100-002 v3) ----------
+
+    async def list_users(self, tenant_id: str | None = None) -> list[UserPublic]:
+        """List users across ALL tenants (optionally filtered). The platform
+        operator's read-only oversight surface — create/delete stays with the
+        tenant's own admin."""
+        repo = self._require_repo()
+        rows = await repo.list_users(tenant_id)
+        # UserPublic ignores extra fields (hash, _key) — safe direct validation.
+        return [UserPublic.model_validate(r) for r in rows]
+
+    async def set_user_active(self, user_id: str, active: bool) -> UserPublic:
+        """Deactivate (status=disabled) / reactivate (status=active) a user,
+        cross-tenant (tenant_manager oversight)."""
+        repo = self._require_repo()
+        existing = await repo.get_user_by_id(user_id)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        new_status = UserStatus.ACTIVE if active else UserStatus.DISABLED
+        await repo.update_user(user_id, {"status": new_status.value})
+        updated = await repo.get_user_by_id(user_id)
+        assert updated is not None
+        return UserPublic.model_validate(updated.model_dump())
 
     # ---- Project lifecycle (admin / tenant_admin) ---------------------------
 

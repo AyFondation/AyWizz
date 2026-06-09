@@ -21,6 +21,7 @@ from ay_platform_core.c2_auth.models import (
     LoginRequest,
     RBACGlobalRole,
     ResetPasswordRequest,
+    TenantCreate,
     UserCreateRequest,
     UserStatus,
     UserUpdateRequest,
@@ -283,3 +284,137 @@ async def test_service_reset_password_idempotent(
         LoginRequest(username="repeater", password="new-pass-34!")
     )
     assert token.access_token
+
+
+# ---------------------------------------------------------------------------
+# Platform-operator surface (tenant_manager — E-100-002 v3, Lot 2)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_tenant_manager(service: AuthService) -> str:
+    await service.create_user(
+        UserCreateRequest(
+            username="root-operator",
+            password="operator-pass-12!",
+            tenant_id="t-platform",
+            roles=[RBACGlobalRole.TENANT_MANAGER],
+        )
+    )
+    token = await service.issue_token(
+        LoginRequest(username="root-operator", password="operator-pass-12!")
+    )
+    return token.access_token
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_deactivate_tenant_blocks_member_login(
+    local_app: httpx.ASGITransport, auth_service_local: AuthService
+) -> None:
+    tm_token = await _seed_tenant_manager(auth_service_local)
+    # A managed tenant + a member of it.
+    await auth_service_local.create_tenant(
+        TenantCreate(tenant_id="acme", name="Acme")
+    )
+    await auth_service_local.create_user(
+        UserCreateRequest(username="acme-user", password="acme-pass-12!", tenant_id="acme")
+    )
+    async with _client(local_app) as client:
+        # Login works while active.
+        ok = await client.post(
+            "/auth/login", json={"username": "acme-user", "password": "acme-pass-12!"}
+        )
+        assert ok.status_code == 200, ok.text
+
+        # tenant_manager deactivates the tenant.
+        deact = await client.post(
+            "/admin/tenants/acme/deactivate",
+            headers={"Authorization": f"Bearer {tm_token}"},
+        )
+        assert deact.status_code == 200, deact.text
+        assert deact.json()["active"] is False
+
+        # The member can no longer log in.
+        blocked = await client.post(
+            "/auth/login", json={"username": "acme-user", "password": "acme-pass-12!"}
+        )
+        assert blocked.status_code == 403, blocked.text
+
+        # Reactivation restores login.
+        react = await client.post(
+            "/admin/tenants/acme/reactivate",
+            headers={"Authorization": f"Bearer {tm_token}"},
+        )
+        assert react.status_code == 200 and react.json()["active"] is True
+        restored = await client.post(
+            "/auth/login", json={"username": "acme-user", "password": "acme-pass-12!"}
+        )
+    assert restored.status_code == 200, restored.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_tenant_lifecycle_requires_tenant_manager(
+    local_app: httpx.ASGITransport, auth_service_local: AuthService
+) -> None:
+    admin_token = await _seed_admin(auth_service_local)  # admin, NOT tenant_manager
+    async with _client(local_app) as client:
+        resp = await client.post(
+            "/admin/tenants/whatever/deactivate",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 403
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cross_tenant_user_list_and_deactivate(
+    local_app: httpx.ASGITransport, auth_service_local: AuthService
+) -> None:
+    tm_token = await _seed_tenant_manager(auth_service_local)
+    await auth_service_local.create_user(
+        UserCreateRequest(username="u-a", password="u-a-pass-12!", tenant_id="tenant-a")
+    )
+    await auth_service_local.create_user(
+        UserCreateRequest(username="u-b", password="u-b-pass-12!", tenant_id="tenant-b")
+    )
+    headers = {"Authorization": f"Bearer {tm_token}"}
+    async with _client(local_app) as client:
+        # Cross-tenant list sees users from BOTH tenants.
+        all_users = await client.get("/admin/users", headers=headers)
+        assert all_users.status_code == 200, all_users.text
+        tenants_seen = {u["tenant_id"] for u in all_users.json()["items"]}
+        assert {"tenant-a", "tenant-b"} <= tenants_seen
+
+        # Filter by tenant.
+        only_a = await client.get("/admin/users?tenant_id=tenant-a", headers=headers)
+        assert only_a.status_code == 200
+        assert all(u["tenant_id"] == "tenant-a" for u in only_a.json()["items"])
+        target = only_a.json()["items"][0]["user_id"]
+
+        # Deactivate cross-tenant → status disabled → login refused.
+        deact = await client.post(f"/admin/users/{target}/deactivate", headers=headers)
+        assert deact.status_code == 200 and deact.json()["status"] == "disabled"
+        blocked = await client.post(
+            "/auth/login", json={"username": "u-a", "password": "u-a-pass-12!"}
+        )
+        assert blocked.status_code == 403
+
+        # Reactivate → login works again.
+        react = await client.post(f"/admin/users/{target}/reactivate", headers=headers)
+        assert react.status_code == 200 and react.json()["status"] == "active"
+        ok = await client.post(
+            "/auth/login", json={"username": "u-a", "password": "u-a-pass-12!"}
+        )
+    assert ok.status_code == 200, ok.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_user_oversight_requires_tenant_manager(
+    local_app: httpx.ASGITransport, auth_service_local: AuthService
+) -> None:
+    admin_token = await _seed_admin(auth_service_local)
+    async with _client(local_app) as client:
+        resp = await client.get("/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    assert resp.status_code == 403

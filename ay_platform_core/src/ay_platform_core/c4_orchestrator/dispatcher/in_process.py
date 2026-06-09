@@ -176,6 +176,7 @@ class InProcessDispatcher:
                 session_id=request.session_id,
                 tenant_id=request.tenant_id,
                 project_id=request.project_id,
+                user_id=request.user_id,
                 phase=request.phase.value,
             )
         except Exception as exc:  # deliberately broad — any failure is BLOCKED

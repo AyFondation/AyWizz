@@ -1,6 +1,6 @@
 # =============================================================================
 # File: repository.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/db/repository.py
 # Description: ArangoDB repository for C7 — memory_chunks, memory_sources,
 #              memory_links (E-400-002, E-400-003). Reuses the lock pattern
@@ -90,17 +90,23 @@ class MemoryRepository:
         )
 
         # ArangoSearch view for the BM25 lexical arm (R-400-202). Indexes
-        # `content` with the built-in `text_en` analyzer ; identity/scope
-        # fields are read from the doc at query time (post-SEARCH FILTER).
-        # Low commit/consolidation intervals so a freshly-ingested chunk
-        # becomes searchable quickly (prod default 1s is also fine).
+        # `search_text` (contextual retrieval : section_path + content) AND
+        # `content` with the built-in `text_en` analyzer — making the lexical
+        # arm contextual too, while keeping pre-`search_text` rows matchable
+        # via `content`. Identity/scope fields are read from the doc at query
+        # time (post-SEARCH FILTER). Low commit/consolidation intervals so a
+        # freshly-ingested chunk becomes searchable quickly (prod default 1s
+        # is also fine).
         if VIEW_CHUNKS not in {v["name"] for v in self._db.views()}:
             self._db.create_arangosearch_view(
                 VIEW_CHUNKS,
                 properties={
                     "links": {
                         COLL_CHUNKS: {
-                            "fields": {"content": {"analyzers": ["text_en"]}},
+                            "fields": {
+                                "content": {"analyzers": ["text_en"]},
+                                "search_text": {"analyzers": ["text_en"]},
+                            },
                         },
                     },
                     "commitIntervalMsec": 200,
@@ -288,7 +294,10 @@ class MemoryRepository:
         # carries its BM25 `score` so the service can rank-fuse (RRF).
         aql = """
         FOR c IN memory_chunks_search
-            SEARCH ANALYZER(c.content IN TOKENS(@query, "text_en"), "text_en")
+            SEARCH ANALYZER(
+                c.search_text IN TOKENS(@query, "text_en")
+                OR c.content IN TOKENS(@query, "text_en"),
+                "text_en")
             FILTER c.tenant_id == @tenant_id
                 AND c.project_id == @project_id
                 AND c.index IN @indexes
@@ -503,6 +512,41 @@ class MemoryRepository:
     ) -> dict[str, Any] | None:
         return await self._run(
             self._get_source_sync, tenant_id, project_id, source_id
+        )
+
+    def _source_enrichment_cost_sync(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> dict[str, Any] | None:
+        """Sum the C8-recorded cost for a source's ingestion LLM calls
+        (`llm_calls.tags.source_id`). Returns None when the cost collection is
+        absent (e.g. no C8 receiver in this stack) — best-effort observability."""
+        if not self._db.has_collection("llm_calls"):
+            return None
+        aql = """
+        LET rows = (
+            FOR c IN llm_calls
+                FILTER c.tags.tenant_id == @tenant_id AND c.tags.source_id == @source_id
+                RETURN c.cost_usd
+        )
+        RETURN { cost_usd: SUM(rows), calls: LENGTH(rows) }
+        """
+        return cast(
+            dict[str, Any] | None,
+            next(
+                iter(
+                    self._db.aql.execute(
+                        aql, bind_vars={"tenant_id": tenant_id, "source_id": source_id}
+                    )
+                ),
+                None,
+            ),
+        )
+
+    async def source_enrichment_cost(
+        self, tenant_id: str, project_id: str, source_id: str
+    ) -> dict[str, Any] | None:
+        return await self._run(
+            self._source_enrichment_cost_sync, tenant_id, project_id, source_id
         )
 
     # ------------------------------------------------------------------

@@ -216,4 +216,38 @@ describe("ChatPage send", () => {
     // first-message auto-rename PATCH fired (placeholder title)
     await waitFor(() => expect(patch).toHaveBeenCalled());
   });
+
+  it("does NOT re-inject the just-sent prompt into the composer (draft race regression)", async () => {
+    // Faithfully mirror the real store : persisting a draft writes it
+    // back into `composerDrafts`, so the restore effect can read it.
+    // Without the onSend fix, the restore effect — which runs BEFORE the
+    // persist effect on the post-send re-render — reads the still-stale
+    // draft and re-injects the just-sent prompt into the cleared composer
+    // (the exact bug : "le prompt perdure dans le text du prompt suivant").
+    setDraftMock.mockImplementation((cid: string, value: string) => {
+      uiHolder.composerDrafts[cid] = value;
+    });
+    try {
+      // Non-placeholder title → no auto-rename PATCH to wire here.
+      server.use(...readHandlers({ conv: makeConv({ title: "Existing chat" }), messages: [] }));
+      renderWithProviders(<ChatPage />);
+      await waitFor(() => expect(screen.getByTestId("composer-input")).toBeInTheDocument());
+
+      const user = userEvent.setup();
+      await user.type(screen.getByTestId("composer-input"), "Quelle est la capitale ?");
+      // Draft persisted while typing (mirrors the real per-keystroke store).
+      expect(uiHolder.composerDrafts["conv-1"]).toBe("Quelle est la capitale ?");
+
+      await user.click(screen.getByTestId("composer-send"));
+
+      expect(sendMock).toHaveBeenCalled();
+      // Composer stays empty — the sent prompt is NOT re-injected …
+      expect(screen.getByTestId("composer-input")).toHaveValue("");
+      // … and the persisted draft was cleared on send (so a mid-turn
+      // remount can't restore it either).
+      expect(uiHolder.composerDrafts["conv-1"]).toBe("");
+    } finally {
+      setDraftMock.mockReset();
+    }
+  });
 });

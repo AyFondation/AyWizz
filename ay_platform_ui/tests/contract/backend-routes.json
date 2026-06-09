@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 111,
+  "route_count": 135,
   "routes": [
     {
       "method": "GET",
@@ -18,6 +18,108 @@
       "method": "DELETE",
       "path": "/admin/tenants/{tenant_id}",
       "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/deactivate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/reactivate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{user_id}/deactivate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{user_id}/reactivate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/llm/providers",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/llm/providers",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/v1/llm/providers/{provider_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/providers/{provider_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/providers/{provider_id}/api-key",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/llm/registry",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/llm/registry",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/v1/llm/registry/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/registry/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/quota/policy",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/quota/policy",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/quota/status",
+      "component": "c8_admin",
       "auth": "role_gated"
     },
     {
@@ -73,6 +175,42 @@
       "path": "/api/v1/conversations/{conversation_id}/messages",
       "component": "c3_conversation",
       "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/catalog",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/catalog/resolve",
+      "component": "c8_admin",
+      "auth": "authenticated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/llm/catalog/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/llm/catalog/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/projects/{project_id}/models",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/llm/projects/{project_id}/models",
+      "component": "c8_admin",
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -534,6 +672,12 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/source/tree",
       "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/quota/me",
+      "component": "c8_admin",
       "auth": "authenticated"
     },
     {

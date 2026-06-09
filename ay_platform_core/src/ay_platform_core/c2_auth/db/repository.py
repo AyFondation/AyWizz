@@ -116,6 +116,25 @@ class AuthRepository:
     async def update_user(self, user_id: str, patch: dict[str, Any]) -> None:
         await asyncio.to_thread(self._update_user_sync, user_id, patch)
 
+    def _list_users_sync(self, tenant_id: str | None) -> list[dict[str, Any]]:
+        if tenant_id is None:
+            cursor = self._db.aql.execute(
+                "FOR u IN @@col SORT u.tenant_id ASC, u.username ASC RETURN u",
+                bind_vars={"@col": COLL_USERS},
+            )
+        else:
+            cursor = self._db.aql.execute(
+                "FOR u IN @@col FILTER u.tenant_id == @tid "
+                "SORT u.username ASC RETURN u",
+                bind_vars={"@col": COLL_USERS, "tid": tenant_id},
+            )
+        return list(cursor)  # type: ignore[arg-type]
+
+    async def list_users(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        """List users across ALL tenants (optionally filtered by `tenant_id`).
+        Cross-tenant — the platform-operator (tenant_manager) oversight surface."""
+        return await asyncio.to_thread(self._list_users_sync, tenant_id)
+
     def _increment_failed_attempts_sync(self, user_id: str) -> int:
         """Atomic AQL increment — avoids TOCTOU under concurrent login attempts."""
         result = self._db.aql.execute(
@@ -267,6 +286,7 @@ class AuthRepository:
                 "_key": tenant_id,
                 "name": name,
                 "created_at": created_at.isoformat(),
+                "active": True,
             }
         )
 
@@ -274,6 +294,17 @@ class AuthRepository:
         self, tenant_id: str, name: str, created_at: datetime
     ) -> None:
         await asyncio.to_thread(self._insert_tenant_sync, tenant_id, name, created_at)
+
+    def _update_tenant_sync(self, tenant_id: str, patch: dict[str, Any]) -> bool:
+        coll = self._db.collection(COLL_TENANTS)
+        if not coll.has(tenant_id):
+            return False
+        coll.update({"_key": tenant_id, **patch})
+        return True
+
+    async def update_tenant(self, tenant_id: str, patch: dict[str, Any]) -> bool:
+        """Patch a tenant doc (e.g. `{'active': False}`). False if absent."""
+        return await asyncio.to_thread(self._update_tenant_sync, tenant_id, patch)
 
     def _get_tenant_sync(self, tenant_id: str) -> dict[str, Any] | None:
         doc: dict[str, Any] | None = self._db.collection(COLL_TENANTS).get(tenant_id)  # type: ignore[assignment]

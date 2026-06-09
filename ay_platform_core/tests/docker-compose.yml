@@ -1,8 +1,14 @@
 # =============================================================================
 # File: docker-compose.yml
-# Version: 9
+# Version: 10
 # Path: ay_platform_core/tests/docker-compose.yml
 # Description: End-to-end local stack for system tests. Brings up:
+#              v10 (LLM governance): adds the `c8` service (C8 admin app,
+#              COMPONENT_MODULE=c8_admin) hosting the platform LLM registry +
+#              tenant catalogue + quality resolver behind forward-auth.
+#              Arango-only; boots without a master key (key mgmt 503s until
+#              AY_SECRET_MASTER_KEY is provided via .env.secret). Distinct from
+#              `c8-cost-receiver`.
 #              v9 (D-020 ingestion, R-100-081 v3): adds the `c13-extractor`
 #              service (profiles `test` + `litellm` so it runs in both the
 #              mock CI/full stack and the dev/litellm stack). `minio_init`
@@ -845,6 +851,25 @@ services:
         condition: service_started
       c6:
         condition: service_started
+
+  # C8 admin — platform LLM registry + tenant catalogue (LLM-governance).
+  # User-facing app of the C8 domain (COMPONENT_MODULE=c8_admin), distinct from
+  # the internal cost receiver. Arango-only. Boots WITHOUT a master key (key
+  # management then 503s) ; `AY_SECRET_MASTER_KEY` (Tier-2 `.env.secret` / dev)
+  # enables the encrypted-key write + per-call injection paths.
+  c8-admin:
+    <<: *api-service
+    container_name: ay-c8-admin
+    env_file:
+      - .env.test
+    environment:
+      <<: *common-env
+      COMPONENT_MODULE: c8_admin
+    depends_on:
+      arangodb:
+        condition: service_healthy
+      arangodb_init:
+        condition: service_completed_successfully
 
   # ---------------------------------------------------------------------------
   # C12 — Workflow Engine (n8n) for external source ingestion.

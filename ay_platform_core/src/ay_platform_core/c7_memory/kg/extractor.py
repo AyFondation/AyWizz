@@ -117,6 +117,7 @@ async def extract_entities_and_relations(
     tenant_id: str,
     project_id: str,
     source_id: str,
+    user_id: str = "",
 ) -> tuple[list[KGEntity], list[KGRelation]]:
     """Call the LLM gateway and parse the structured response.
 
@@ -143,6 +144,7 @@ async def extract_entities_and_relations(
         session_id=f"kg:{source_id}",
         tenant_id=tenant_id,
         project_id=project_id,
+        user_id=user_id or None,
     )
     if not response.choices:
         raise KGExtractionError("LLM response had no choices")

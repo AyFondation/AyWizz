@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_service.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/unit/c3_conversation/test_service.py
 # Description: Unit tests for ConversationService — mocked repository.
 #              Covers CRUD access control, soft-delete, SSE generation,
@@ -28,7 +28,10 @@ from ay_platform_core.c3_conversation.models import (
     ConversationCreate,
     ConversationUpdate,
 )
-from ay_platform_core.c3_conversation.service import ConversationService
+from ay_platform_core.c3_conversation.service import (
+    ConversationService,
+    _format_retrieved_chunks,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -434,3 +437,54 @@ def test_tool_result_path_malformed_result_returns_none() -> None:
     assert _tool_result_path("create_document", {"created": {}}) is None
     assert _tool_result_path("update_document", {}) is None
     assert _tool_result_path("delete_document", {"deleted": 123}) is None
+
+
+# ---------------------------------------------------------------------------
+# RAG context formatting — self-contained chunks fed WHOLE (no truncation)
+# ---------------------------------------------------------------------------
+
+
+class _Hit:
+    """Minimal RetrievalHit stand-in (`_format_retrieved_chunks` reads by
+    attribute)."""
+
+    def __init__(
+        self,
+        *,
+        content: str,
+        score: float = 0.9,
+        source_id: str = "src-1",
+        section_path: list[str] | None = None,
+    ) -> None:
+        self.content = content
+        self.score = score
+        self.source_id = source_id
+        self.metadata = {"section_path": section_path or []}
+
+
+@pytest.mark.unit
+def test_format_retrieved_chunks_not_truncated() -> None:
+    """A self-contained chunk is fed WHOLE — no 800-char truncation that would
+    sever the context making it self-sufficient."""
+    long_body = "x" * 2000
+    out = _format_retrieved_chunks([_Hit(content=long_body)])
+    assert long_body in out  # full body present
+    assert "…" not in out  # no truncation ellipsis
+
+
+@pytest.mark.unit
+def test_format_retrieved_chunks_prefixes_section_path() -> None:
+    """The section path is surfaced so the LLM can situate the excerpt."""
+    out = _format_retrieved_chunks(
+        [_Hit(content="The valve opens at 5 bar.", section_path=["Ch 2", "2.3 Hydraulics"])]
+    )
+    assert "section: Ch 2 > 2.3 Hydraulics" in out
+    assert "The valve opens at 5 bar." in out
+
+
+@pytest.mark.unit
+def test_format_retrieved_chunks_omits_section_line_when_absent() -> None:
+    """No section path → no dangling 'section:' line."""
+    out = _format_retrieved_chunks([_Hit(content="Body without sections.")])
+    assert "section:" not in out
+    assert "Body without sections." in out

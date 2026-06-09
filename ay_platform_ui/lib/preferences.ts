@@ -33,6 +33,16 @@ export interface UserPreferences {
    *  (file tree) and right (chat) panes ; the middle viewer flexes to
    *  fill the rest (#6). */
   workingAreaPaneWidths?: { left: number; right: number };
+  /** How the quota indicator frames usage: "remaining" → "65% left",
+   *  "consumed" → "35% used". Default "remaining". */
+  quotaFraming?: QuotaFraming;
+}
+
+export type QuotaFraming = "remaining" | "consumed";
+
+/** Effective quota framing for a user — the stored choice, else "remaining". */
+export function getQuotaFraming(sub: string): QuotaFraming {
+  return readPreferences(sub).quotaFraming ?? "remaining";
 }
 
 /** Default trigram from JWT claims. Always returns a 3-4 char ASCII

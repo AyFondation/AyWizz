@@ -44,6 +44,9 @@ from ay_platform_core.c3_conversation.service import ConversationService
 from ay_platform_core.c7_memory.remote import RemoteMemoryService
 from ay_platform_core.c8_llm.client import LLMGatewayClient
 from ay_platform_core.c8_llm.config import ClientSettings
+from ay_platform_core.c8_llm.quota.guard import build_quota_guard
+from ay_platform_core.c8_llm.quota.http import register_quota_handler
+from ay_platform_core.c8_llm.registry.key_provider import build_registry_key_provider
 from ay_platform_core.observability import (
     TraceContextMiddleware,
     configure_logging,
@@ -116,7 +119,12 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
         # ClientSettings), with the "no-auth" placeholder for the
         # mock/Ollama-direct paths — no per-component token.
         llm_client = LLMGatewayClient(
-            c8_settings, bearer_token=c8_settings.effective_bearer,
+            c8_settings,
+            bearer_token=c8_settings.effective_bearer,
+            # LLM-governance #3 (option B) — per-call registry key injection
+            # over the shared Arango `db`; None → proxy env fallback.
+            key_provider=build_registry_key_provider(db),
+            quota_guard=build_quota_guard(db),
         )
 
     # Chat-direct DocGen tool loop (D-015 / Phase 2.C.2). Wired only
@@ -153,6 +161,7 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
     # trace_id), so AuthGuard is added FIRST (innermost).
     app.add_middleware(AuthGuardMiddleware, component="c3_conversation")
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
+    register_quota_handler(app)  # QuotaExceededError → 429
     app.include_router(router)
     app.state.conversation_service = service
 

@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**111 endpoints** across 7 components. Order: by component, method, path.
+**135 endpoints** across 8 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -62,6 +62,11 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/admin/tenants` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 201 |
 | `GET` | `/admin/tenants` | role_gated | — | `tenant_manager` | — | — | 200 |
 | `DELETE` | `/admin/tenants/{tenant_id}` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 204 |
+| `POST` | `/admin/tenants/{tenant_id}/deactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 200 |
+| `POST` | `/admin/tenants/{tenant_id}/reactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 200 |
+| `GET` | `/admin/users` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `POST` | `/admin/users/{user_id}/deactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_users` | 200 |
+| `POST` | `/admin/users/{user_id}/reactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_users` | 200 |
 | `POST` | `/api/v1/projects` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_projects` | 201 |
 | `GET` | `/api/v1/projects` | authenticated | tenant | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}` | authenticated | tenant | any authenticated | `tenant_manager` | — | 200 |
@@ -174,6 +179,29 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `admin` | `tenant_manager` | — | 501 |
 | `GET` | `/api/v1/memory/refresh/{job_id}` | authenticated | — | any authenticated | — | — | 501 |
 | `GET` | `/api/v1/memory/health` | open | — | *(open)* | — | — | 200 |
+### c8_admin
+
+| Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
+|---|---|---|---|---|---|---|---|
+| `GET` | `/admin/v1/llm/registry` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/registry` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 201 |
+| `PUT` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 200 |
+| `DELETE` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 204 |
+| `GET` | `/admin/v1/llm/providers` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/providers` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 201 |
+| `PUT` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 200 |
+| `PUT` | `/admin/v1/llm/providers/{provider_id}/api-key` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 200 |
+| `DELETE` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 204 |
+| `GET` | `/admin/v1/quota/policy` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `PUT` | `/admin/v1/quota/policy` | role_gated | — | `tenant_manager` | — | arango · `llm_quota_policy` | 200 |
+| `GET` | `/admin/v1/quota/status` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `GET` | `/api/v1/quota/me` | authenticated | — | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/llm/catalog` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 200 |
+| `GET` | `/api/v1/llm/catalog/resolve` | authenticated | tenant | any authenticated | — | — | 200 |
+| `PUT` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `tenant_llm_catalog` | 200 |
+| `DELETE` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `tenant_llm_catalog` | 204 |
+| `GET` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 200 |
+| `PUT` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `project_llm_models` | 200 |
 ### c9_mcp
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |

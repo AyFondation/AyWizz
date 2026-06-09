@@ -35,6 +35,11 @@ class _FakeRepo:
     async def list_chunks_for_source(self, t: str, p: str, s: str) -> list[dict[str, Any]]:
         return self._chunks
 
+    async def source_enrichment_cost(
+        self, t: str, p: str, s: str
+    ) -> dict[str, Any] | None:
+        return None  # no C8 cost collection in the unit fake
+
     async def delete_chunks_for_source(self, t: str, p: str, s: str) -> int:
         self.deleted_chunks = True
         return len(self._chunks)

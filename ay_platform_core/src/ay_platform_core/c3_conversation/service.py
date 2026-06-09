@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 14
+# Version: 15
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/service.py
 # Description: C3 Conversation Service facade.
 #              Orchestrates CRUD and the SSE message-send flow.
@@ -430,6 +430,11 @@ class ConversationService:
             and project_id
             and tenant_id
         ):
+            # Eager quota gate BEFORE the SSE stream starts, so a hard block
+            # surfaces as a clean 429 (a block raised inside the stream can't).
+            await self._llm.check_quota(
+                tenant_id=tenant_id, project_id=project_id, user_id=user_id
+            )
             return self._rag_stream(
                 conversation_id=conversation_id,
                 project_id=project_id,
@@ -735,6 +740,11 @@ class ConversationService:
                     session_id=str(conversation_id),
                     tenant_id=tenant_id,
                     project_id=project_id,
+                    user_id=user_id,
+                    # Stable prefix (system + RAG instructions + history) recurs
+                    # every turn → cache it (provider-aware, safe no-op below the
+                    # min cacheable size or on non-marker providers).
+                    cache_hint="static",
                 ) as chunks:
                     async for chunk in chunks:
                         delta = _extract_delta_content(chunk)
@@ -843,6 +853,8 @@ class ConversationService:
                     session_id=str(conversation_id),
                     tenant_id=tenant_id,
                     project_id=project_id,
+                    user_id=user_id,
+                    cache_hint="static",
                 )
             except Exception as exc:  # transport / gateway failure
                 msg = f"(LLM gateway error during tool loop: {exc})"
@@ -1179,14 +1191,20 @@ def _format_retrieved_chunks(hits: list[Any]) -> str:
     lines: list[str] = []
     for i, hit in enumerate(relevant, start=1):
         # Hits are RetrievalHit Pydantic instances; access by attribute.
-        snippet = getattr(hit, "content", "") or ""
-        # Trim long chunks so the prompt stays within model context.
-        snippet = snippet.strip()
-        if len(snippet) > 800:
-            snippet = snippet[:800] + "…"
+        # The chunk is self-contained (decontextualised at ingest), so it is
+        # passed WHOLE — no 800-char truncation that would sever the very
+        # context that makes it self-sufficient. Chunk size is already bounded
+        # upstream by `chunk_token_size`.
+        body = (getattr(hit, "content", "") or "").strip()
         source = getattr(hit, "source_id", None) or "unknown"
         score = getattr(hit, "score", 0.0)
-        lines.append(f"[{i}] (source={source}, score={score:.3f})\n{snippet}")
+        # Surface the section path so the LLM can situate the excerpt.
+        meta = getattr(hit, "metadata", None) or {}
+        section_path = meta.get("section_path") or []
+        header = f"[{i}] (source={source}, score={score:.3f})"
+        if section_path:
+            header += f"\nsection: {' > '.join(section_path)}"
+        lines.append(f"{header}\n{body}")
     return "\n\n".join(lines)
 
 

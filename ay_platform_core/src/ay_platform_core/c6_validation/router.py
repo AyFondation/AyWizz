@@ -88,6 +88,7 @@ async def trigger_run(
     payload: RunTriggerRequest,
     _user: str = Depends(_require_actor),
     x_user_roles: str | None = Header(default=None),
+    x_tenant_id: str | None = Header(default=None),
     service: ValidationService = Depends(get_service),
 ) -> RunTriggerResponse:
     # Triggering a validation run is a project-level action — allowed for
@@ -97,6 +98,8 @@ async def trigger_run(
         payload,
         requirements=payload.requirements,
         artifacts=payload.artifacts,
+        tenant_id=x_tenant_id or "",
+        user_id=_user,
     )
 
 

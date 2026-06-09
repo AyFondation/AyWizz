@@ -137,3 +137,37 @@ describe("Navbar logout", () => {
     expect(mockRouter.push).toHaveBeenCalledWith("/login");
   });
 });
+
+describe("Navbar LLM-governance links (role-gated)", () => {
+  it("shows the registry + tenants + users links to tenant_manager", async () => {
+    seedAuthenticated({ roles: ["tenant_manager"] });
+    renderNavbar();
+    await waitFor(() => expect(screen.getByTestId("navbar-link-llm-registry")).toBeInTheDocument());
+    expect(screen.getByTestId("navbar-link-llm-providers")).toBeInTheDocument();
+    expect(screen.getByTestId("navbar-link-tenants")).toBeInTheDocument();
+    expect(screen.getByTestId("navbar-link-users")).toBeInTheDocument();
+    expect(screen.getByTestId("navbar-link-quotas")).toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-llm-catalogue")).not.toBeInTheDocument();
+  });
+
+  it("shows the catalogue link to admin / tenant_admin", async () => {
+    seedAuthenticated({ roles: ["tenant_admin"] });
+    renderNavbar();
+    await waitFor(() =>
+      expect(screen.getByTestId("navbar-link-llm-catalogue")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("navbar-link-llm-registry")).not.toBeInTheDocument();
+  });
+
+  it("shows neither to a plain project member", async () => {
+    seedAuthenticated({ roles: ["project_editor"] });
+    renderNavbar();
+    await waitFor(() => expect(screen.getByTestId("navbar-link-projects")).toBeInTheDocument());
+    expect(screen.queryByTestId("navbar-link-llm-registry")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-llm-providers")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-llm-catalogue")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-tenants")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-users")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-quotas")).not.toBeInTheDocument();
+  });
+});

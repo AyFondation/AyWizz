@@ -18,3 +18,5 @@ resources:
   - litellm-service.yaml
   - receiver-deployment.yaml
   - receiver-service.yaml
+  - admin-deployment.yaml
+  - admin-service.yaml

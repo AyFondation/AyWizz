@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_ingest_chunks.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/unit/c7_memory/test_ingest_chunks.py
 # Description: Unit tests for the C7 endpoint `ingest_chunks_from_extractor`
 #              — R-400-223 **v3**: the request carries only the RUN
@@ -214,12 +214,15 @@ async def test_ingest_chunks_artifacts_missing_404() -> None:
 @pytest.mark.asyncio
 async def test_ingest_chunks_persists_rich_metadata() -> None:
     """Section path, char offsets, references, images, tables, and
-    extraction_run_id SHALL be preserved in row metadata."""
+    extraction_run_id SHALL be preserved in row metadata. `search_text` is a
+    TOP-LEVEL field (so the ArangoSearch view indexes it). `global_summary` is
+    NOT duplicated per chunk — it is stored ONCE on the source row."""
     repo = _FakeRepo()
     chunk = ChunkRich(
         chunk_id="c:0042",
         seq=42,
         text="Chunk with rich metadata.",
+        search_text="Chapter 2 > 2.3 Architecture\n\nChunk with rich metadata.",
         original_text="Chunk with rich metadata.",
         context_summary="Cumulative summary so far.",
         global_summary="Document-level dense summary.",
@@ -243,12 +246,18 @@ async def test_ingest_chunks_persists_rich_metadata() -> None:
         tenant_id="t1", project_id="p1", source_id="src-5", payload=_payload(),
     )
 
-    meta = repo.chunks[0]["metadata"]
+    row = repo.chunks[0]
+    meta = row["metadata"]
     assert meta["section_path"] == ["Chapter 2", "2.3 Architecture"]
     assert meta["char_start"] == 1024
     assert meta["extraction_run_id"] == "20260528_1200_xyz"
-    assert meta["global_summary"] == "Document-level dense summary."
     assert meta["images"] == ["img_abc12345"]
+    # `search_text` is top-level (BM25-indexed), = exactly what C13 embedded.
+    assert row["search_text"] == "Chapter 2 > 2.3 Architecture\n\nChunk with rich metadata."
+    # NO per-chunk duplication of the document summary …
+    assert "global_summary" not in meta
+    # … it lives ONCE on the source row instead.
+    assert repo.sources["t1:p1:src-5"]["document_summary"] == "Document-level dense summary."
 
 
 @pytest.mark.asyncio

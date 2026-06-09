@@ -1,7 +1,28 @@
 # =============================================================================
 # File: litellm-config.yaml
-# Version: 2
+# Version: 5
 # Path: infra/c8_gateway/config/litellm-config.yaml
+#
+#              v5 (2026-06-07): LLM-governance Lot 1 — `api_base` added to each
+#              model's `configurable_clientside_auth_params` (per-request URL
+#              override for self-hosted / custom endpoints) bounded by an
+#              allowlist REGEX (anti-SSRF: https-any or internal http only). The
+#              registry stores api_base per-model ; the C8 client injects it.
+#
+#              v4 (2026-06-04): LLM-governance #3 — each model gains
+#              `configurable_clientside_auth_params: ["api_key"]` so a caller
+#              MAY override the upstream api_key per request with a
+#              registry-managed key (decrypted client-side). ONLY api_key is
+#              configurable (NOT api_base) → upstream stays pinned, no SSRF
+#              seam. The `os.environ/ANTHROPIC_API_KEY` above stays the
+#              FALLBACK for callers that do not inject.
+#
+#              v3 (2026-06-03): cost optimisation. Routes the C13 ingestion
+#              enrichment agents (summarizer / decontextualizer / densifier /
+#              image_analyzer) to Haiku (descriptive leaf work, ~4x cheaper
+#              than Sonnet). Marks Haiku `vision` + `prompt_caching` capable
+#              (both supported by Claude Haiku 4.5) so image captioning and the
+#              shared cache_control primitive can target it.
 # Description: Canonical (prod-shaped) LiteLLM configuration. The shape
 #              mirrors Appendix 8.1 of 800-SPEC-LLM-ABSTRACTION and validates
 #              against ay_platform_core.c8_llm.config.LiteLLMConfig.
@@ -25,10 +46,41 @@
 # =============================================================================
 
 model_list:
+  # Wildcard pass-through (provider normalisation, LLM-governance): the platform
+  # now sends `<wire_format>/<upstream_model>` (e.g. anthropic/claude-haiku-4-5)
+  # resolved from the registry, and injects the provider's `api_base` + `api_key`
+  # per call. LiteLLM routes by the provider prefix; the named entries below stay
+  # as a fallback for any direct caller. api_base bounded by the anti-SSRF
+  # allowlist (any https, or internal http for self-hosted).
+  - model_name: "*"
+    litellm_params:
+      model: "*"
+      configurable_clientside_auth_params:
+        - "api_key"
+        - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
+    model_info:
+      # Placeholder metadata so the AyWizz LiteLLMConfig validator accepts the
+      # wildcard. The registry SEED skips `model_name == "*"` (it is a routing
+      # pass-through, not a seedable model).
+      display_name: "Wildcard pass-through"
+      features: []
+      context_window: 200000
+      cost_per_million_input: 0.0
+      cost_per_million_output: 0.0
   - model_name: claude-opus-flagship
     litellm_params:
       model: anthropic/claude-opus-4-7
       api_key: os.environ/ANTHROPIC_API_KEY
+      # LLM-governance #3 : allow a per-request `api_key` override (and ONLY
+      # api_key — NOT api_base, so the upstream stays pinned to Anthropic and
+      # no SSRF/exfil seam is opened). The env key above remains the FALLBACK
+      # for callers that do not inject a registry-managed key.
+      configurable_clientside_auth_params:
+        - "api_key"
+        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
+        # (anti-SSRF): any https endpoint, or internal http for self-hosted
+        # (ollama / localhost / host.docker.internal). Tighten per environment.
+        - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
       display_name: "Claude Opus 4.7"
       features:
@@ -50,6 +102,13 @@ model_list:
     litellm_params:
       model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
+      # Per-request api_key override (LLM-governance #3) ; env key = fallback.
+      configurable_clientside_auth_params:
+        - "api_key"
+        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
+        # (anti-SSRF): any https endpoint, or internal http for self-hosted
+        # (ollama / localhost / host.docker.internal). Tighten per environment.
+        - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
       display_name: "Claude Sonnet 4.6"
       features:
@@ -67,12 +126,21 @@ model_list:
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
+      # Per-request api_key override (LLM-governance #3) ; env key = fallback.
+      configurable_clientside_auth_params:
+        - "api_key"
+        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
+        # (anti-SSRF): any https endpoint, or internal http for self-hosted
+        # (ollama / localhost / host.docker.internal). Tighten per environment.
+        - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
       display_name: "Claude Haiku 4.5"
       features:
         - chat_completion
         - streaming
         - tool_calling
+        - vision
+        - prompt_caching
       context_window: 200000
       cost_per_million_input: 0.80
       cost_per_million_output: 4.00
@@ -95,6 +163,14 @@ agent_routes:
   c3-docgen: claude-haiku-fast
   c7-kg-extractor: claude-haiku-fast
   c7-contextualizer: claude-haiku-fast
+  # C13 (AyExtractor) ingestion enrichment — descriptive leaf work (per-chunk
+  # summarisation, decontextualisation, image captioning) → Haiku at lowest
+  # cost. The densifier (premium document summary, high tier, one call) MAY be
+  # promoted to Sonnet if top quality is wanted there.
+  summarizer: claude-haiku-fast
+  decontextualizer: claude-haiku-fast
+  densifier: claude-haiku-fast
+  image_analyzer: claude-haiku-fast
   # T3 LLM-as-judge (R-700-032). D-011 wants a DIFFERENT family than the
   # generator ; with Anthropic-only routing this is the strongest available
   # tier (different-tier, NOT cross-family). Re-point at a non-Anthropic

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/models.py
 # Description: Pydantic v2 models for the C7 Memory Service. Mirrors the
 #              contract-critical entities E-400-001..005 from
@@ -163,6 +163,11 @@ class SourceDiagnostics(BaseModel):
     extraction_run_id: str | None = None
     storage: SourceStorageInfo
     chunks: list[ChunkDiagnostic]
+    # Authoritative enrichment cost (R-400-226) — summed from the C8 cost
+    # receiver's `llm_calls` (snapshot-priced), joined by `tags.source_id`.
+    # None when the cost collection is absent / no calls were attributed.
+    enrichment_cost_usd: float | None = None
+    enrichment_llm_calls: int | None = None
 
 
 class ExtractionRunInfo(BaseModel):
@@ -216,7 +221,14 @@ class RunArtifactListing(BaseModel):
 
 
 class ChunkContent(BaseModel):
-    """Full content of one indexed chunk (lazy-loaded on expand)."""
+    """Full content of one indexed chunk (lazy-loaded on expand).
+
+    Surfaces the THREE retrieval layers so the operator sees exactly what the
+    RAG uses : `content` (the self-contained text fed to the LLM at answer
+    time), `search_text` (what was embedded + BM25-indexed — how the data is
+    structured for retrieval), and the extra metadata that situates the chunk
+    but is not fed to the LLM. `document_summary` is referenced ONCE from the
+    source (never duplicated per chunk)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -229,6 +241,18 @@ class ChunkContent(BaseModel):
     char_end: int
     token_count: int
     section_path: list[str]
+    # --- Retrieval structure : exactly what feeds the dense + lexical arms ---
+    search_text: str | None = None
+    # --- Extra metadata (situates the chunk ; not fed to the LLM) ---
+    content_hash: str | None = None
+    embedding_model: str | None = None
+    embedding_dim: int | None = None
+    extraction_run_id: str | None = None
+    references: list[str] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
+    tables: list[str] = Field(default_factory=list)
+    # --- Document-level summary, referenced ONCE from the source (no dup) ---
+    document_summary: str | None = None
 
 
 class EnrichmentConfig(BaseModel):
@@ -250,6 +274,17 @@ class EnrichmentConfig(BaseModel):
     densification_enabled: bool | None = None
     image_vision_enabled: bool | None = None
     chain_of_density_iterations: int | None = Field(default=None, ge=1, le=10)
+    # `model_quality` is the NEW orthogonal axis (LLM-governance feature):
+    # WHICH model does the work, resolved against the tenant catalogue
+    # (C8 admin `/api/v1/llm/catalog/resolve`). DISTINCT from `quality_tier`
+    # above, which is the enrichment DEPTH (which steps run). None = inherit a
+    # platform/tenant default at resolve time. The resolved concrete alias is
+    # injected by C7 into the C13 `llm_assignments` at upload (see service).
+    model_quality: Literal["low", "medium", "high"] | None = None
+    # DEPRECATED override (LLM-governance #5): an explicit image-analyzer model
+    # alias. When set it still wins; otherwise the image model is resolved from
+    # `model_quality` + the vision capability. Removal is a coordinated
+    # contract change (C12/C13/UI) tracked separately.
     image_analyzer_model: str | None = None
 
     def to_config_overrides(self) -> dict[str, Any]:
@@ -375,6 +410,10 @@ class ChunkRich(BaseModel):
     text: str = Field(min_length=1)
     """The text C7 SHALL embed (= decontextualised variant if
     quality_tier=high AND screener returned YES, else == original_text)."""
+    search_text: str | None = None
+    """The exact text C13 embedded AND indexed for BM25 (contextual retrieval:
+    section_path + content). When absent, C7 falls back to `text` for the
+    lexical arm. Display surfaces it so the operator sees what feeds retrieval."""
     original_text: str | None = None
     """Pre-decontextualisation text — present only when `text != original`."""
     context_summary: str | None = None

@@ -67,6 +67,12 @@ export const defaultHandlers = [
   http.get("/runtime-config.json", () => HttpResponse.json(RUNTIME_CONFIG_DEFAULT)),
   // Stage 2 : /ux/config — served by C2.
   http.get("/ux/config", () => HttpResponse.json(UX_CONFIG_DEFAULT)),
+  // The navbar's QuotaIndicator polls this on every protected page. Default to
+  // a benign no-limit status so tests that mount the navbar don't trip the
+  // unhandled-request guard ; tests targeting the pill override via server.use.
+  http.get("/api/v1/quota/me", () =>
+    HttpResponse.json({ tenant_id: "t-test", windows: [], warned: false, blocked: false }),
+  ),
   // Login : accept "alice" with any password ; 401 otherwise. Tests
   // can override via server.use() to script other scenarios.
   http.post("/auth/login", async ({ request }) => {

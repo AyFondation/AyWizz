@@ -22,6 +22,8 @@ from ay_platform_core.c2_auth.models import (
     TenantCreate,
     TenantList,
     TenantPublic,
+    UserList,
+    UserPublic,
 )
 from ay_platform_core.c2_auth.service import AuthService, get_service
 
@@ -88,3 +90,59 @@ async def delete_tenant(
     """Delete a tenant. tenant_manager only. NOT cascade — tenant content
     deletion (users, projects, sources) is handled by separate flows."""
     await service.delete_tenant(tenant_id)
+
+
+@router.post("/tenants/{tenant_id}/deactivate", response_model=TenantPublic)
+async def deactivate_tenant(
+    tenant_id: str,
+    _claims: JWTClaims = Depends(_require_tenant_manager),
+    service: AuthService = Depends(get_service),
+) -> TenantPublic:
+    """Deactivate a tenant — its members are refused login. tenant_manager only."""
+    return await service.set_tenant_active(tenant_id, active=False)
+
+
+@router.post("/tenants/{tenant_id}/reactivate", response_model=TenantPublic)
+async def reactivate_tenant(
+    tenant_id: str,
+    _claims: JWTClaims = Depends(_require_tenant_manager),
+    service: AuthService = Depends(get_service),
+) -> TenantPublic:
+    """Reactivate a previously deactivated tenant. tenant_manager only."""
+    return await service.set_tenant_active(tenant_id, active=True)
+
+
+# ---------------------------------------------------------------------------
+# Cross-tenant user oversight (tenant_manager — E-100-002 v3 platform operator)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users", response_model=UserList)
+async def list_users(
+    tenant_id: str | None = None,
+    _claims: JWTClaims = Depends(_require_tenant_manager),
+    service: AuthService = Depends(get_service),
+) -> UserList:
+    """List users across ALL tenants (optionally filtered by `tenant_id`).
+    Read-only oversight — user create/delete stays with the tenant's own admin."""
+    return UserList(items=await service.list_users(tenant_id))
+
+
+@router.post("/users/{user_id}/deactivate", response_model=UserPublic)
+async def deactivate_user(
+    user_id: str,
+    _claims: JWTClaims = Depends(_require_tenant_manager),
+    service: AuthService = Depends(get_service),
+) -> UserPublic:
+    """Deactivate a user (cross-tenant). tenant_manager only."""
+    return await service.set_user_active(user_id, active=False)
+
+
+@router.post("/users/{user_id}/reactivate", response_model=UserPublic)
+async def reactivate_user(
+    user_id: str,
+    _claims: JWTClaims = Depends(_require_tenant_manager),
+    service: AuthService = Depends(get_service),
+) -> UserPublic:
+    """Reactivate a user (cross-tenant). tenant_manager only."""
+    return await service.set_user_active(user_id, active=True)

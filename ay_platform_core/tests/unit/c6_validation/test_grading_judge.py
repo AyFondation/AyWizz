@@ -127,6 +127,26 @@ async def test_routes_through_the_configured_judge_agent() -> None:
     assert llm.calls[0]["agent_name"] == "c6-judge-test"
 
 
+@pytest.mark.asyncio
+async def test_judge_call_is_attributed_to_tenant_and_user() -> None:
+    # The judge call carries the run's actor so per-user/tenant quota counts it.
+    llm: Any = _FakeLLM(reply=_resp('{"score": 1.0, "confidence": 0.5, "rationale": "ok"}'))
+    await grade_judged(
+        llm_client=llm,
+        run_id="run-1",
+        domain="code",
+        requirements=_REQS,
+        artifacts=_ARTS,
+        agent_name="c6-judge-test",
+        project_id="demo",
+        tenant_id="t1",
+        user_id="u1",
+    )
+    assert llm.calls[0]["tenant_id"] == "t1"
+    assert llm.calls[0]["user_id"] == "u1"
+    assert llm.calls[0]["project_id"] == "demo"
+
+
 # ---------------------------------------------------------------------------
 # grade_judged — robustness (clamping, lenient parse, best-effort)
 # ---------------------------------------------------------------------------

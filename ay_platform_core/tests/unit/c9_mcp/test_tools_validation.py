@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ay_platform_core.c9_mcp.tools import c5_tools, c6_tools
-from ay_platform_core.c9_mcp.tools.base import ToolDispatchError
+from ay_platform_core.c9_mcp.tools.base import ToolDispatchError, set_actor
 
 
 def _c5_mock() -> MagicMock:
@@ -128,6 +128,35 @@ class TestC6ToolValidation:
             await tool.handler(
                 {"domain": "code", "project_id": "p", "artifacts": [{"bogus": 1}]}
             )
+
+    async def test_trigger_attributes_caller_identity(self) -> None:
+        # The MCP caller's forward-auth identity (set by the router) reaches
+        # c6.trigger_run so the validation's judge LLM call is quota-attributed.
+        from ay_platform_core.c6_validation.models import (  # noqa: PLC0415
+            RunStatus,
+            RunTriggerResponse,
+        )
+
+        c6 = _c6_mock()
+        c6.trigger_run = AsyncMock(
+            return_value=RunTriggerResponse(run_id="r1", status=RunStatus.PENDING)
+        )
+        tool = next(
+            t for t in c6_tools.build_tools(c6) if t.name == "c6_trigger_validation"
+        )
+        set_actor("u-mcp", "t-mcp")
+        await tool.handler(
+            {
+                "domain": "code",
+                "project_id": "demo",
+                "check_ids": [],
+                "requirements": [],
+                "artifacts": [],
+            }
+        )
+        kwargs = c6.trigger_run.call_args.kwargs
+        assert kwargs["tenant_id"] == "t-mcp"
+        assert kwargs["user_id"] == "u-mcp"
 
     async def test_list_findings_requires_run_id(self) -> None:
         tool = next(

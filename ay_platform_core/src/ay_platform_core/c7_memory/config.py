@@ -78,6 +78,11 @@ class MemoryConfig(BaseSettings):
     # a webhook failure marks the source `failed` but does not 500 the upload.
     c12_webhook_url: str = "http://c12:5678/uploads/extract-and-ingest"
     c12_webhook_timeout_s: float = Field(default=10.0, ge=1.0)
+    # C8 admin model-quality resolver (LLM-governance #5). Empty → resolver
+    # DISABLED (no model_quality→alias lookup; C13 keeps its default models).
+    # Set to the c8_admin ClusterIP service URL once it is deployed.
+    c8_admin_url: str = ""
+    c8_admin_timeout_s: float = Field(default=5.0, ge=1.0)
     # Bucket C13 (AyExtractor) writes its run artifacts to (R-400-220). C7
     # reads `chunks.jsonl` + `run_manifest.json` from here on /ingest-chunks
     # (R-400-223 v3). Distinct from C7's own `minio_bucket` (sources + C7

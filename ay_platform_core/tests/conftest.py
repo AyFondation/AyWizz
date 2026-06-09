@@ -31,6 +31,16 @@ import os
 if os.environ.get("REMOTE_CONTAINERS") == "true":
     os.environ.setdefault("TESTCONTAINERS_HOST_OVERRIDE", "host.docker.internal")
 
+# Deterministic SecretCipher master key for the test process. The C8 admin app
+# (`ay_platform_core.c8_admin.main`) builds a SecretCipher from the environment
+# at import time; without a key, importing the module (and thus collecting any
+# test that touches it) would fail. A fixed NON-SECRET test key keeps both
+# `python -m pytest` and `run_tests.sh ci` working. Real keys live in Tier-2
+# `.env.secret`, never here. `setdefault` lets a caller override it.
+os.environ.setdefault(
+    "AY_SECRET_MASTER_KEY", "YXl3aXp6LXRlc3QtbWFzdGVyLWtleS0zMmJ5dGVzISE"
+)
+
 # The fixture plugins below import python-arango / minio / testcontainers at
 # module load. Only register them when those deps are present (the testcontainers
 # package is the representative gate — the extras install it alongside the rest).

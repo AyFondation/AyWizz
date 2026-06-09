@@ -191,8 +191,12 @@ services:
       OPENAI_BASE_URL: http://litellm:4000/v1
       OPENAI_API_KEY: "${C8_GATEWAY_API_KEY:-}"
       LLM_DEFAULT_PROVIDER: openai
-      LLM_DEFAULT_MODEL: claude-sonnet-midtier
-      LLM_IMAGE_ANALYZER: "openai:claude-sonnet-midtier"
+      # Cost optimisation (2026-06-03): enrichment is descriptive leaf work →
+      # Haiku 4.5 ($0.80/$4 per M, ~4x cheaper than Sonnet), quality-equivalent
+      # for summarisation / decontextualisation / image captioning. Promote the
+      # densifier (premium high-tier document summary) to Sonnet here if wanted.
+      LLM_DEFAULT_MODEL: claude-haiku-fast
+      LLM_IMAGE_ANALYZER: "openai:claude-haiku-fast"
       # Embeddings have NO model on LiteLLM, so they keep routing to the LOCAL,
       # FREE Ollama endpoint (all-minilm) — independent of the chat egress.
       EMBEDDING_BASE_URL: http://ollama:11434/v1

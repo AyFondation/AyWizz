@@ -269,7 +269,7 @@ describe("SourceDetailPage — runs, artifacts & chunk content", () => {
     expect(screen.getByText(/ayextractor_version/)).toBeInTheDocument();
   });
 
-  it("expands a chunk to load and show its content", async () => {
+  it("expands a chunk to load and show its content + retrieval structure + metadata", async () => {
     wireBaseStack();
     server.use(
       http.get(`${SRC_URL}/chunks/c0`, () =>
@@ -283,6 +283,17 @@ describe("SourceDetailPage — runs, artifacts & chunk content", () => {
           char_end: 27,
           token_count: 8,
           section_path: ["Intro"],
+          // Retrieval text (embedded + BM25-indexed) differs from content.
+          search_text: "Intro\n\nVoyager 1 launched in 1977.",
+          content_hash: "sha256:abc123",
+          embedding_model: "all-minilm",
+          embedding_dim: 384,
+          extraction_run_id: "20260603_1000_xyz",
+          references: ["ref:nasa-1977"],
+          images: ["img_aabbccdd"],
+          tables: [],
+          // Document summary referenced ONCE from the source (not per chunk).
+          document_summary: "A document about the Voyager program.",
         }),
       ),
     );
@@ -294,7 +305,15 @@ describe("SourceDetailPage — runs, artifacts & chunk content", () => {
 
     await waitFor(() => expect(screen.getByTestId("chunk-content")).toBeInTheDocument());
     expect(screen.getByText("Voyager 1 launched in 1977.")).toBeInTheDocument();
-    expect(screen.getByText(/Intro/)).toBeInTheDocument();
+    expect(screen.getByText(/Section: Intro/)).toBeInTheDocument();
+    // Retrieval-structure + document-summary + metadata blocks render.
+    expect(screen.getByTestId("chunk-search-text")).toBeInTheDocument();
+    expect(screen.getByTestId("chunk-doc-summary")).toBeInTheDocument();
+    expect(screen.getByText("A document about the Voyager program.")).toBeInTheDocument();
+    const meta = screen.getByTestId("chunk-metadata");
+    expect(meta).toHaveTextContent("all-minilm (384d)");
+    expect(meta).toHaveTextContent("sha256:abc123");
+    expect(meta).toHaveTextContent("ref:nasa-1977");
   });
 
   it("shows the decontextualization before/after when the chunk was disambiguated", async () => {

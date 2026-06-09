@@ -234,6 +234,8 @@ def _extract_tags(request_data: dict[str, Any]) -> CallTags:
         agent_name=_pick("X-Agent-Name", "agent_name") or "unknown",
         phase=_pick("X-Phase", "phase"),
         sub_agent_id=_pick("X-Sub-Agent-Id", "sub_agent_id"),
+        source_id=_pick("X-Source-Id", "source_id"),
+        run_id=_pick("X-Run-Id", "run_id"),
     )
 
 

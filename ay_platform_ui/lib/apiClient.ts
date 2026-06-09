@@ -65,6 +65,12 @@ import type {
   Finding,
   FindingPage,
   InlineEvent,
+  LLMModelUpsert,
+  LLMProviderListResponse,
+  LLMProviderPublic,
+  LLMProviderUpsert,
+  LLMRegistryListResponse,
+  LLMRegistryPublic,
   MessageList,
   OrchestratorRun,
   OrchestratorRunCreate,
@@ -74,8 +80,12 @@ import type {
   PlatformConfig,
   Project,
   ProjectList,
+  ProjectModelsResponse,
   ProjectUpdate,
   PromptReference,
+  QuotaPolicy,
+  QuotaStatus,
+  QuotaWindow,
   RequirementDocumentDetail,
   RequirementDocumentList,
   RequirementEntityList,
@@ -87,7 +97,14 @@ import type {
   SourceRunListing,
   SourceStructuralOpResult,
   SourceTreeResponse,
+  TenantCatalogListResponse,
+  TenantCatalogModelPublic,
+  TenantCatalogUpsert,
+  TenantList,
+  TenantPublic,
   TraceEvent,
+  UserAdminList,
+  UserAdminView,
   UserPreferencesResponse,
   UserPreferencesUpdate,
   ValidationPlugin,
@@ -418,6 +435,219 @@ export class ApiClient {
       `/api/v1/memory/projects/${encodeURIComponent(projectId)}/enrichment-config`,
       { method: "PUT", body: JSON.stringify(config) },
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // LLM governance — platform registry (tenant_manager)
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/v1/llm/registry — list every platform model. The API key is
+   *  never returned (only key_status + masked hint). tenant_manager only. */
+  async listLlmRegistry(): Promise<LLMRegistryListResponse> {
+    return this.request<LLMRegistryListResponse>("/admin/v1/llm/registry", {
+      method: "GET",
+    });
+  }
+
+  /** POST /admin/v1/llm/registry — create a model (mints model_id). */
+  async createLlmRegistryModel(body: LLMModelUpsert): Promise<LLMRegistryPublic> {
+    return this.request<LLMRegistryPublic>("/admin/v1/llm/registry", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** PUT /admin/v1/llm/registry/{model_id} — update a model (alias + attrs). */
+  async updateLlmRegistryModel(modelId: string, body: LLMModelUpsert): Promise<LLMRegistryPublic> {
+    return this.request<LLMRegistryPublic>(
+      `/admin/v1/llm/registry/${encodeURIComponent(modelId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** DELETE /admin/v1/llm/registry/{model_id} — remove a model by id. */
+  async deleteLlmRegistryModel(modelId: string): Promise<void> {
+    await this.request<void>(`/admin/v1/llm/registry/${encodeURIComponent(modelId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // LLM governance — providers (endpoint + write-only credential, tenant_manager)
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/v1/llm/providers — list every provider (key write-only). */
+  async listLlmProviders(): Promise<LLMProviderListResponse> {
+    return this.request<LLMProviderListResponse>("/admin/v1/llm/providers", {
+      method: "GET",
+    });
+  }
+
+  /** POST /admin/v1/llm/providers — create a provider (mints provider_id). */
+  async createLlmProvider(body: LLMProviderUpsert): Promise<LLMProviderPublic> {
+    return this.request<LLMProviderPublic>("/admin/v1/llm/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** PUT /admin/v1/llm/providers/{id} — update name / base_url / wire_format. */
+  async updateLlmProvider(providerId: string, body: LLMProviderUpsert): Promise<LLMProviderPublic> {
+    return this.request<LLMProviderPublic>(
+      `/admin/v1/llm/providers/${encodeURIComponent(providerId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** PUT /admin/v1/llm/providers/{id}/api-key — set the write-only key (503 if
+   *  no master key on the deployment). */
+  async putLlmProviderApiKey(providerId: string, apiKey: string): Promise<LLMProviderPublic> {
+    return this.request<LLMProviderPublic>(
+      `/admin/v1/llm/providers/${encodeURIComponent(providerId)}/api-key`,
+      { method: "PUT", body: JSON.stringify({ api_key: apiKey }) },
+    );
+  }
+
+  /** DELETE /admin/v1/llm/providers/{id} — remove a provider by id. */
+  async deleteLlmProvider(providerId: string): Promise<void> {
+    await this.request<void>(`/admin/v1/llm/providers/${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // LLM governance — tenant catalogue (admin / tenant_admin)
+  // -------------------------------------------------------------------------
+
+  /** GET /api/v1/llm/catalog — the calling tenant's catalogue. */
+  async listLlmCatalog(): Promise<TenantCatalogListResponse> {
+    return this.request<TenantCatalogListResponse>("/api/v1/llm/catalog", {
+      method: "GET",
+    });
+  }
+
+  /** PUT /api/v1/llm/catalog/{model_id} — enable/configure a registry model for
+   *  the tenant (404 if the model_id is unknown to the platform registry). */
+  async putLlmCatalogModel(
+    modelId: string,
+    body: TenantCatalogUpsert,
+  ): Promise<TenantCatalogModelPublic> {
+    return this.request<TenantCatalogModelPublic>(
+      `/api/v1/llm/catalog/${encodeURIComponent(modelId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** DELETE /api/v1/llm/catalog/{model_id} — remove a model from the catalogue. */
+  async deleteLlmCatalogModel(modelId: string): Promise<void> {
+    await this.request<void>(`/api/v1/llm/catalog/${encodeURIComponent(modelId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** GET /api/v1/llm/projects/{id}/models — the project's effective model list
+   *  (explicit, else the tenant's defaults). */
+  async getProjectModels(projectId: string): Promise<ProjectModelsResponse> {
+    return this.request<ProjectModelsResponse>(
+      `/api/v1/llm/projects/${encodeURIComponent(projectId)}/models`,
+      { method: "GET" },
+    );
+  }
+
+  /** PUT /api/v1/llm/projects/{id}/models — set the project's explicit list. */
+  async setProjectModels(projectId: string, modelIds: string[]): Promise<ProjectModelsResponse> {
+    return this.request<ProjectModelsResponse>(
+      `/api/v1/llm/projects/${encodeURIComponent(projectId)}/models`,
+      { method: "PUT", body: JSON.stringify({ model_ids: modelIds }) },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Platform operator — tenants (tenant_manager, E-100-002 v3)
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/tenants — list every tenant on the platform. */
+  async listTenants(): Promise<TenantList> {
+    return this.request<TenantList>("/admin/tenants", { method: "GET" });
+  }
+
+  /** POST /admin/tenants — create a tenant. */
+  async createTenant(tenantId: string, name: string): Promise<TenantPublic> {
+    return this.request<TenantPublic>("/admin/tenants", {
+      method: "POST",
+      body: JSON.stringify({ tenant_id: tenantId, name }),
+    });
+  }
+
+  /** DELETE /admin/tenants/{id} — delete a tenant (not cascade). */
+  async deleteTenant(tenantId: string): Promise<void> {
+    await this.request<void>(`/admin/tenants/${encodeURIComponent(tenantId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** POST /admin/tenants/{id}/deactivate — suspend a tenant (members can't log in). */
+  async deactivateTenant(tenantId: string): Promise<TenantPublic> {
+    return this.request<TenantPublic>(`/admin/tenants/${encodeURIComponent(tenantId)}/deactivate`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /admin/tenants/{id}/reactivate — restore a suspended tenant. */
+  async reactivateTenant(tenantId: string): Promise<TenantPublic> {
+    return this.request<TenantPublic>(`/admin/tenants/${encodeURIComponent(tenantId)}/reactivate`, {
+      method: "POST",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Platform operator — cross-tenant user oversight (tenant_manager)
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/users — list users across all tenants (optionally filtered). */
+  async listUsersAdmin(tenantId?: string): Promise<UserAdminList> {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<UserAdminList>(`/admin/users${q}`, { method: "GET" });
+  }
+
+  /** POST /admin/users/{id}/deactivate — disable a user (cross-tenant). */
+  async deactivateUser(userId: string): Promise<UserAdminView> {
+    return this.request<UserAdminView>(`/admin/users/${encodeURIComponent(userId)}/deactivate`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /admin/users/{id}/reactivate — re-enable a user (cross-tenant). */
+  async reactivateUser(userId: string): Promise<UserAdminView> {
+    return this.request<UserAdminView>(`/admin/users/${encodeURIComponent(userId)}/reactivate`, {
+      method: "POST",
+    });
+  }
+
+  /** GET /admin/v1/quota/policy — the single global quota policy. */
+  async getQuotaPolicy(): Promise<QuotaPolicy> {
+    return this.request<QuotaPolicy>("/admin/v1/quota/policy", { method: "GET" });
+  }
+
+  /** PUT /admin/v1/quota/policy — replace the policy window set. */
+  async putQuotaPolicy(windows: QuotaWindow[]): Promise<QuotaPolicy> {
+    return this.request<QuotaPolicy>("/admin/v1/quota/policy", {
+      method: "PUT",
+      body: JSON.stringify({ windows }),
+    });
+  }
+
+  /** GET /admin/v1/quota/status?tenant_id=… — evaluate a tenant vs the policy. */
+  async getQuotaStatus(tenantId: string): Promise<QuotaStatus> {
+    return this.request<QuotaStatus>(
+      `/admin/v1/quota/status?tenant_id=${encodeURIComponent(tenantId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/quota/me — the caller's OWN tenant quota status (any user). */
+  async getMyQuota(): Promise<QuotaStatus> {
+    return this.request<QuotaStatus>("/api/v1/quota/me", { method: "GET" });
   }
 
   /** GET /sources/{sid}/runs/{run_id}/artifacts — browse one run's tree. */

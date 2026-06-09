@@ -18,6 +18,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "@/app/auth-provider";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import { resolveProfile } from "@/lib/profiles/registry";
 import type { Project } from "@/lib/types";
@@ -27,11 +28,19 @@ import { useConfigState } from "../../providers";
 type ListState =
   | { status: "loading" }
   | { status: "ready"; items: Project[] }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; httpStatus?: number };
 
 export default function ProjectsPage() {
   const configState = useConfigState();
+  const { state: authState } = useAuth();
   const [state, setState] = useState<ListState>({ status: "loading" });
+
+  // tenant_manager is content-blind (E-100-002): it cannot list project
+  // content and gets a 403 here. Rather than a raw error, route it to its
+  // admin home (the platform LLM registry).
+  const isTenantManager =
+    authState.status === "authenticated" &&
+    (authState.claims.roles ?? []).includes("tenant_manager");
 
   const apiClient = useMemo(() => {
     if (configState.status !== "ready") return null;
@@ -49,7 +58,8 @@ export default function ProjectsPage() {
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof ApiError ? `HTTP ${err.status}` : String(err);
-        setState({ status: "error", message });
+        const httpStatus = err instanceof ApiError ? err.status : undefined;
+        setState({ status: "error", message, httpStatus });
       });
     return () => {
       cancelled = true;
@@ -65,6 +75,24 @@ export default function ProjectsPage() {
   }
 
   if (state.status === "error") {
+    if (state.httpStatus === 403 && isTenantManager) {
+      return (
+        <main className="mx-auto max-w-7xl px-6 py-10" data-testid="projects-admin-home">
+          <h1 className="text-2xl font-semibold">Platform administration</h1>
+          <p className="mt-4 text-sm text-neutral-600">
+            As a platform administrator (tenant_manager) you manage platform configuration, not
+            project content. Start with the LLM registry.
+          </p>
+          <Link
+            href="/admin/llm-registry"
+            className="mt-4 inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            data-testid="projects-admin-registry-link"
+          >
+            Open LLM registry
+          </Link>
+        </main>
+      );
+    }
     return (
       <main className="mx-auto max-w-7xl px-6 py-10">
         <h1 className="text-2xl font-semibold">Projects</h1>

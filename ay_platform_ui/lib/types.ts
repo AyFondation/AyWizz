@@ -1,6 +1,6 @@
 // =============================================================================
 // File: types.ts
-// Version: 11
+// Version: 12
 // Path: ay_platform_ui/lib/types.ts
 // Description: Wire-format type definitions for the platform's public
 //              bootstrap surface — `/runtime-config.json` (static, served
@@ -291,6 +291,9 @@ export interface SourceDiagnostics {
   extraction_run_id: string | null;
   storage: SourceStorageInfo;
   chunks: ChunkDiagnostic[];
+  // Authoritative enrichment cost from C8 (snapshot-priced); null when absent.
+  enrichment_cost_usd: number | null;
+  enrichment_llm_calls: number | null;
 }
 
 /** One C13 extraction run of a source, summarised from its manifest
@@ -342,6 +345,18 @@ export interface ChunkContent {
   char_end: number;
   token_count: number;
   section_path: string[];
+  // Retrieval structure : exactly what was embedded + BM25-indexed.
+  search_text: string | null;
+  // Extra metadata (situates the chunk ; not fed to the LLM).
+  content_hash: string | null;
+  embedding_model: string | null;
+  embedding_dim: number | null;
+  extraction_run_id: string | null;
+  references: string[];
+  images: string[];
+  tables: string[];
+  // Document-level summary, referenced ONCE from the source (no per-chunk dup).
+  document_summary: string | null;
 }
 
 /** Per-project ingestion enrichment config (R-400-224). `quality_tier` is the
@@ -355,7 +370,225 @@ export interface EnrichmentConfig {
   densification_enabled: boolean | null;
   image_vision_enabled: boolean | null;
   chain_of_density_iterations: number | null;
+  // LLM-governance: WHICH model does the work (resolved against the tenant
+  // catalogue). Orthogonal to `quality_tier` (enrichment DEPTH). null = inherit
+  // a platform/tenant default at resolve time.
+  model_quality: ModelQuality | null;
   image_analyzer_model: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// LLM governance (platform registry + tenant catalogue + quality resolution)
+// ---------------------------------------------------------------------------
+
+export type ModelQuality = "low" | "medium" | "high";
+
+export interface ModelCapabilities {
+  vision: boolean;
+  tool_calling: boolean;
+  context_window: number;
+}
+
+/** A provider = an endpoint + a wire-format + a write-only credential. Models
+ *  reference it by the stable `provider_id`. */
+export interface LLMProviderPublic {
+  provider_id: string;
+  name: string;
+  base_url: string;
+  wire_format: string;
+  effective_from: string;
+  key_status: "set" | "not_set";
+  api_key_hint: string;
+}
+
+export interface LLMProviderListResponse {
+  providers: LLMProviderPublic[];
+}
+
+/** POST/PUT body for provider metadata (no key). */
+export interface LLMProviderUpsert {
+  name: string;
+  base_url: string;
+  wire_format: string;
+}
+
+/** Platform MODEL registry READ projection. Keyed by the stable `model_id`;
+ *  `alias` and every attribute are mutable. Carries NO secret (the key lives on
+ *  the referenced provider). */
+export interface LLMRegistryPublic {
+  model_id: string;
+  alias: string;
+  provider_id: string;
+  upstream_model: string;
+  capabilities: ModelCapabilities;
+  provider_cost_in_per_1m: number;
+  provider_cost_out_per_1m: number;
+  default_model_quality: ModelQuality;
+  enabled: boolean;
+  effective_from: string;
+}
+
+export interface LLMRegistryListResponse {
+  models: LLMRegistryPublic[];
+}
+
+/** POST (create) / PUT (update by model_id) body for a model (no key). */
+export interface LLMModelUpsert {
+  alias: string;
+  provider_id: string;
+  upstream_model: string;
+  capabilities: ModelCapabilities;
+  provider_cost_in_per_1m: number;
+  provider_cost_out_per_1m: number;
+  default_model_quality: ModelQuality;
+  enabled: boolean;
+}
+
+/** One per-tenant catalogue entry joined with the registry public view. */
+export interface TenantCatalogModelPublic {
+  tenant_id: string;
+  model_id: string;
+  enabled: boolean;
+  rate_in_per_1m: number | null;
+  rate_out_per_1m: number | null;
+  markup_pct: number | null;
+  default_for_new_projects: boolean;
+  registry: LLMRegistryPublic;
+}
+
+export interface TenantCatalogListResponse {
+  models: TenantCatalogModelPublic[];
+}
+
+/** PUT body to add/configure a registry model in a tenant catalogue. */
+export interface TenantCatalogUpsert {
+  enabled?: boolean;
+  rate_in_per_1m?: number | null;
+  rate_out_per_1m?: number | null;
+  markup_pct?: number | null;
+  default_for_new_projects?: boolean;
+}
+
+/** A project's effective model list (explicit, or the tenant defaults). */
+export interface ProjectModelsResponse {
+  tenant_id: string;
+  project_id: string;
+  model_ids: string[];
+  is_explicit: boolean;
+  models: TenantCatalogModelPublic[];
+}
+
+export interface ProjectModelsUpdate {
+  model_ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Platform operator — tenants + cross-tenant user oversight (E-100-002 v3)
+// ---------------------------------------------------------------------------
+
+export interface TenantPublic {
+  tenant_id: string;
+  name: string;
+  created_at: string;
+  active: boolean;
+}
+
+export interface TenantList {
+  items: TenantPublic[];
+}
+
+export type UserStatus = "active" | "disabled";
+
+export interface UserAdminView {
+  user_id: string;
+  username: string;
+  tenant_id: string;
+  roles: string[];
+  status: UserStatus;
+  created_at: string;
+  name: string | null;
+  email: string | null;
+}
+
+export interface UserAdminList {
+  items: UserAdminView[];
+}
+
+// ---------------------------------------------------------------------------
+// Global LLM quota policy (Lot 3) — tenant_manager
+// ---------------------------------------------------------------------------
+
+/** The four nested scopes a call is attributed to (widest → narrowest). */
+export type QuotaLevel = "global" | "tenant" | "project" | "user";
+
+/** How a window's start (and reset) is anchored. */
+export type QuotaAnchor = "first_use" | "calendar_week" | "calendar_month";
+
+export interface QuotaLimits {
+  max_cost_usd: number | null;
+  max_tokens: number | null;
+}
+
+export interface QuotaWindow {
+  key: string;
+  label: string;
+  duration_seconds: number;
+  anchor: QuotaAnchor;
+  warn_threshold_pct: number;
+  /** Per-level caps; absent levels are no-ops. Clamped child <= parent. */
+  limits: Partial<Record<QuotaLevel, QuotaLimits>>;
+}
+
+export interface QuotaPolicy {
+  windows: QuotaWindow[];
+  updated_at: string | null;
+}
+
+export interface QuotaPolicyUpdate {
+  windows: QuotaWindow[];
+}
+
+export type QuotaState = "ok" | "warn" | "exceeded";
+
+export interface QuotaLevelStatus {
+  level: QuotaLevel;
+  usage_cost_usd: number;
+  usage_tokens: number;
+  max_cost_usd: number | null;
+  max_tokens: number | null;
+  cost_pct: number | null;
+  tokens_pct: number | null;
+  state: QuotaState;
+}
+
+export interface QuotaWindowStatus {
+  key: string;
+  label: string;
+  duration_seconds: number;
+  anchor: QuotaAnchor;
+  state: QuotaState;
+  /** Per-level breakdown (global/tenant/project/user) for the evaluated subject. */
+  levels: QuotaLevelStatus[];
+  /** Flat mirror of the most-constraining level — lets a simple consumer render
+   *  one bar without walking `levels`. */
+  usage_cost_usd: number;
+  usage_tokens: number;
+  max_cost_usd: number | null;
+  max_tokens: number | null;
+  cost_pct: number | null;
+  tokens_pct: number | null;
+  /** Seconds until the window refreshes (calendar boundary, or oldest call ages
+   *  out for first-use), or null when empty. Drives the "resets in 1h35" pill. */
+  seconds_until_reset: number | null;
+}
+
+export interface QuotaStatus {
+  tenant_id: string;
+  project_id: string | null;
+  user_id: string | null;
+  windows: QuotaWindowStatus[];
+  warned: boolean;
+  blocked: boolean;
 }
 
 // ===========================================================================

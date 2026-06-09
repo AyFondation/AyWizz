@@ -22,6 +22,7 @@ import pytest
 from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 
+from ay_platform_core.c2_auth.admin_router import router as admin_router
 from ay_platform_core.c2_auth.config import AuthConfig
 from ay_platform_core.c2_auth.db.repository import AuthRepository
 from ay_platform_core.c2_auth.router import router
@@ -89,5 +90,6 @@ def local_app(auth_service_local: AuthService) -> httpx.ASGITransport:
     """FastAPI app with local-mode service wired in."""
     app = FastAPI()
     app.include_router(router, prefix="/auth")
+    app.include_router(admin_router, prefix="/admin")
     app.dependency_overrides[get_service] = lambda: auth_service_local
     return app  # type: ignore[return-value]

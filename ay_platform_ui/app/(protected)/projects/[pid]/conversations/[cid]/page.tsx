@@ -1,7 +1,16 @@
 // =============================================================================
 // File: page.tsx
-// Version: 16
+// Version: 17
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/conversations/[cid]/page.tsx
+//
+// v17 (2026-06-03): two chat display fixes. (1) The just-sent prompt
+// no longer re-appears in the composer : onSend now marks the draft
+// "handled" (composerRestoredRef) and clears the persisted draft, so
+// the restore effect — which runs before the persist effect on the
+// post-send re-render — can't re-inject the stale draft. (2) Chat
+// `<main>` is constrained to `mx-auto max-w-5xl` (matching the page's
+// other states) so the composer's Send button no longer overflows the
+// viewport.
 //
 // v16 (2026-05-19): Increment 3b.2 — SSE loop delegated to the
 // provider's `send`. A generation now survives navigating AWAY from
@@ -375,6 +384,13 @@ export default function ChatPage() {
 
     const userText = composer.trim();
     setComposer("");
+    // Sending counts as "draft handled". The restore effect runs BEFORE
+    // the persist effect on this same re-render, so it would otherwise
+    // read the still-stale draft and re-inject the just-sent text into
+    // the empty composer. Mark restored + clear the persisted draft now
+    // (also prevents a mid-turn remount from restoring it).
+    composerRestoredRef.current = true;
+    setDraft(conversationId, "");
     setError(null);
     // Snapshot the message count BEFORE the optimistic add — used by
     // the render path to know when the server-persisted (user +
@@ -508,7 +524,7 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="flex w-full flex-col px-6 py-6" data-testid="chat-view">
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-6 py-6" data-testid="chat-view">
       <header className="flex items-baseline justify-between gap-3">
         <div>
           <nav className="text-xs text-neutral-500" aria-label="Breadcrumb">

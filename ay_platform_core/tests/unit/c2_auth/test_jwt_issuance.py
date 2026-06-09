@@ -54,6 +54,10 @@ def _make_local_repo(password: str = "correct") -> AsyncMock:
     repo.reset_failed_attempts.return_value = None
     repo.insert_session.return_value = None
     repo.get_project_scopes.return_value = {}
+    # E-100-002 v3: issue_token checks the user's tenant is active. No tenant
+    # doc → treated as active (the platform super-root's own tenant isn't a
+    # managed tenant).
+    repo.get_tenant.return_value = None
     return repo
 
 

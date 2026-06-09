@@ -18,6 +18,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 
 import ProjectsPage from "@/app/(protected)/projects/page";
+import { fakeJWT } from "../helpers/msw-handlers";
 import { server } from "../helpers/msw-server";
 import { renderWithProviders } from "../helpers/render";
 
@@ -112,5 +113,31 @@ describe("ProjectsPage", () => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
     expect(screen.getByText(/Failed to load projects: HTTP 500/)).toBeInTheDocument();
+  });
+
+  it("routes a content-blind tenant_manager (403) to the admin home", async () => {
+    window.localStorage.setItem(
+      "aywizz.token",
+      fakeJWT({
+        sub: "u-root",
+        username: "root",
+        tenant_id: "t1",
+        roles: ["tenant_manager"],
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+      }),
+    );
+    server.use(
+      http.get("/api/v1/projects", () =>
+        HttpResponse.json({ detail: "forbidden" }, { status: 403 }),
+      ),
+    );
+    renderWithProviders(<ProjectsPage />);
+    await waitFor(() => expect(screen.getByTestId("projects-admin-home")).toBeInTheDocument());
+    expect(screen.getByTestId("projects-admin-registry-link")).toHaveAttribute(
+      "href",
+      "/admin/llm-registry",
+    );
+    window.localStorage.clear();
   });
 });

@@ -307,10 +307,20 @@ class TenantPublic(BaseModel):
     tenant_id: str
     name: str
     created_at: datetime
+    # Platform-operator deactivation flag (LLM-governance Lot 2, E-100-002 v3).
+    # An inactive tenant's users are refused login. Defaults True for tenants
+    # created before the flag existed.
+    active: bool = True
 
 
 class TenantList(BaseModel):
     items: list[TenantPublic]
+
+
+class UserList(BaseModel):
+    """Cross-tenant user list for the platform operator (tenant_manager)."""
+
+    items: list[UserPublic]
 
 
 # ---------------------------------------------------------------------------

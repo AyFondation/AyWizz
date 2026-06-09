@@ -49,6 +49,7 @@ import { useAuth } from "@/app/auth-provider";
 import { useConfigState } from "@/app/providers";
 import { Avatar } from "@/components/avatar";
 import { BuildStamp } from "@/components/build-stamp";
+import { QuotaIndicator } from "@/components/quota-indicator";
 import { fullNameForTooltip, getEffectiveTrigram } from "@/lib/preferences";
 
 export function Navbar() {
@@ -72,6 +73,18 @@ export function Navbar() {
   const accent = config.ux.brand.accent_color_hex;
   const trigram = getEffectiveTrigram(state.claims);
   const fullName = fullNameForTooltip(state.claims);
+
+  // LLM-governance nav (role-gated): the platform registry is tenant_manager
+  // only; the tenant catalogue is admin / tenant_admin.
+  const roles = new Set(state.claims.roles ?? []);
+  const showRegistry = roles.has("tenant_manager");
+  const showCatalogue = roles.has("admin") || roles.has("tenant_admin");
+
+  const navLinkClass = (active: boolean | undefined): string =>
+    [
+      "rounded-md px-3 py-1.5 transition-colors",
+      active ? "bg-neutral-100 text-neutral-900" : "text-neutral-600 hover:bg-neutral-50",
+    ].join(" ");
 
   return (
     <header
@@ -103,6 +116,72 @@ export function Navbar() {
                   Projects
                 </Link>
               </li>
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/admin/llm-providers"
+                    className={navLinkClass(pathname?.startsWith("/admin/llm-providers"))}
+                    data-testid="navbar-link-llm-providers"
+                  >
+                    Providers
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/admin/llm-registry"
+                    className={navLinkClass(pathname?.startsWith("/admin/llm-registry"))}
+                    data-testid="navbar-link-llm-registry"
+                  >
+                    LLM registry
+                  </Link>
+                </li>
+              )}
+              {showCatalogue && (
+                <li>
+                  <Link
+                    href="/admin/llm-catalogue"
+                    className={navLinkClass(pathname?.startsWith("/admin/llm-catalogue"))}
+                    data-testid="navbar-link-llm-catalogue"
+                  >
+                    LLM catalogue
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/operator/tenants"
+                    className={navLinkClass(pathname?.startsWith("/operator/tenants"))}
+                    data-testid="navbar-link-tenants"
+                  >
+                    Tenants
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/operator/users"
+                    className={navLinkClass(pathname?.startsWith("/operator/users"))}
+                    data-testid="navbar-link-users"
+                  >
+                    Users
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/operator/quotas"
+                    className={navLinkClass(pathname?.startsWith("/operator/quotas"))}
+                    data-testid="navbar-link-quotas"
+                  >
+                    Quotas
+                  </Link>
+                </li>
+              )}
             </ul>
           </nav>
         </div>
@@ -115,6 +194,7 @@ export function Navbar() {
           <div className="hidden sm:block">
             <BuildStamp />
           </div>
+          <QuotaIndicator />
           <Link
             href="/preferences"
             className={[

@@ -1,8 +1,9 @@
 # =============================================================================
 # File: services.yml
-# Version: 3
+# Version: 4
 # Path: infra/c1_gateway/dynamic/services.yml
 # Description: Traefik backend service definitions (local dev URLs).
+#              v4: added `c8-admin` (LLM governance HMI surface).
 #              Service names match Docker Compose service names.
 #              v3: added `ui` (Next.js standalone, port 3000). Only
 #              instantiated by the dev override (`docker-compose.dev.
@@ -50,6 +51,14 @@ http:
       loadBalancer:
         servers:
           - url: "http://c9:8000"
+
+    # C8 admin — platform LLM registry + tenant catalogue + quality resolver
+    # (LLM-governance HMI). User-facing app of the C8 domain ; distinct from
+    # the internal LLM proxy (`c8`, not Traefik-routed) and cost receiver.
+    c8-admin:
+      loadBalancer:
+        servers:
+          - url: "http://c8-admin:8000"
 
     c12:
       loadBalancer:

@@ -1,7 +1,15 @@
 // =============================================================================
 // File: page.tsx
-// Version: 5
+// Version: 7
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/sources/[sid]/page.tsx
+// v7 (2026-06-03): EnrichmentDigest renders per-run processing stats
+//   (`00_metadata/run_stats.json`) — per-phase duration + LLM calls + tokens +
+//   totals (R-400-226 observability). Dollar cost is sourced from C8 (note).
+// v6 (2026-06-03): full chunk transparency. The expanded chunk now shows
+//   the THREE retrieval layers — content (fed to the LLM), `search_text`
+//   (embedded + BM25-indexed retrieval text), the shared document summary
+//   (referenced once, not duplicated), and a metadata grid (offsets, tokens,
+//   content_hash, embedding model/dim, run_id, references/images/tables).
 // Description: Per-source detail view. Surfaces every metadata field
 //              C7 exposes + (v2) an "Ingestion & storage" diagnostics
 //              panel: MinIO storage locations (raw + C13 run artifacts),
@@ -378,6 +386,12 @@ function DiagnosticsPanel({
           <Field label="Chunks indexed" value={String(diag.chunk_count)} />
           <Field label="Extraction run" value={diag.extraction_run_id ?? "(not started)"} mono />
           <Field label="Embedding model" value={diag.model_id ?? "(none)"} mono />
+          {diag.enrichment_cost_usd != null ? (
+            <Field
+              label="Enrichment cost (C8)"
+              value={`$${diag.enrichment_cost_usd.toFixed(4)} · ${diag.enrichment_llm_calls ?? 0} calls`}
+            />
+          ) : null}
         </dl>
 
         {/* MinIO storage locations */}
@@ -516,6 +530,66 @@ function DiagnosticsPanel({
                                       </pre>
                                     </details>
                                   ) : null}
+                                  {content.search_text &&
+                                  content.search_text !== content.content ? (
+                                    <details data-testid="chunk-search-text">
+                                      <summary className="cursor-pointer text-neutral-500">
+                                        Retrieval text (embedded + BM25-indexed)
+                                      </summary>
+                                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-neutral-200 bg-white p-2 font-mono text-[11px] text-neutral-600">
+                                        {content.search_text}
+                                      </pre>
+                                    </details>
+                                  ) : null}
+                                  {content.document_summary ? (
+                                    <details data-testid="chunk-doc-summary">
+                                      <summary className="cursor-pointer text-neutral-500">
+                                        Document summary (shared — stored once)
+                                      </summary>
+                                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded border border-neutral-200 bg-white p-2 font-mono text-[11px] text-neutral-600">
+                                        {content.document_summary}
+                                      </pre>
+                                    </details>
+                                  ) : null}
+                                  <dl
+                                    className="grid grid-cols-2 gap-x-4 gap-y-1 rounded border border-neutral-200 bg-white p-2 text-[11px] text-neutral-600"
+                                    data-testid="chunk-metadata"
+                                  >
+                                    <MetaRow label="chunk_id" value={content.chunk_id} />
+                                    <MetaRow
+                                      label="chars"
+                                      value={`${content.char_start}–${content.char_end}`}
+                                    />
+                                    <MetaRow label="tokens" value={String(content.token_count)} />
+                                    <MetaRow
+                                      label="embedding"
+                                      value={
+                                        content.embedding_model
+                                          ? `${content.embedding_model} (${content.embedding_dim ?? "?"}d)`
+                                          : "—"
+                                      }
+                                    />
+                                    <MetaRow
+                                      label="content_hash"
+                                      value={content.content_hash ?? "—"}
+                                    />
+                                    <MetaRow
+                                      label="run_id"
+                                      value={content.extraction_run_id ?? "—"}
+                                    />
+                                    <MetaRow
+                                      label="references"
+                                      value={(content.references ?? []).join(", ") || "—"}
+                                    />
+                                    <MetaRow
+                                      label="images"
+                                      value={(content.images ?? []).join(", ") || "—"}
+                                    />
+                                    <MetaRow
+                                      label="tables"
+                                      value={(content.tables ?? []).join(", ") || "—"}
+                                    />
+                                  </dl>
                                   <button
                                     type="button"
                                     onClick={() => downloadChunk(content)}
@@ -832,9 +906,28 @@ function ArtifactBrowser({
   );
 }
 
-/** First-class render of a run's enrichment outputs: the document summary
- *  (dense → refine fallback) rendered inline, and the per-image vision captions
- *  (the heavy artifacts stay downloadable via the file list above). */
+/** One key/value row of the chunk metadata grid (situates the chunk ; not fed
+ *  to the LLM). Long monospace values wrap rather than overflow. */
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <dt className="font-semibold uppercase tracking-wide text-neutral-400">{label}</dt>
+      <dd className="break-all font-mono text-neutral-700">{value}</dd>
+    </div>
+  );
+}
+
+interface RunStats {
+  totals?: { duration_ms?: number; llm_calls?: number; tokens?: number };
+  phases?: { phase: string; duration_ms?: number; llm_calls?: number; tokens?: number }[];
+  images_captioned?: number;
+  cost_note?: string;
+}
+
+/** First-class render of a run's enrichment outputs: per-phase processing stats
+ *  (duration + LLM calls + tokens, from `run_stats.json`), the document summary
+ *  (dense → refine fallback), and the per-image vision captions (heavy artifacts
+ *  stay downloadable via the file list above). */
 function EnrichmentDigest({
   apiClient,
   projectId,
@@ -850,6 +943,7 @@ function EnrichmentDigest({
 }) {
   const [summary, setSummary] = useState<string | null>(null);
   const [images, setImages] = useState<{ path: string; type: string; description: string }[]>([]);
+  const [stats, setStats] = useState<RunStats | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -859,8 +953,24 @@ function EnrichmentDigest({
     const imgEntries = entries.filter(
       (e) => e.path.startsWith("01_extraction/images/") && e.path.endsWith(".json"),
     );
+    const statsEntry = entries.find((e) => e.path.endsWith("run_stats.json"));
 
     async function load(): Promise<void> {
+      if (statsEntry) {
+        try {
+          const { blob } = await apiClient.getRunArtifact(
+            projectId,
+            sourceId,
+            runId,
+            statsEntry.path,
+          );
+          if (!cancelled) setStats(JSON.parse(await blob.text()) as RunStats);
+        } catch {
+          if (!cancelled) setStats(null);
+        }
+      } else if (!cancelled) {
+        setStats(null);
+      }
       if (sumEntry) {
         try {
           const { blob } = await apiClient.getRunArtifact(
@@ -898,9 +1008,45 @@ function EnrichmentDigest({
     };
   }, [apiClient, projectId, sourceId, runId, entries]);
 
-  if (!summary && images.length === 0) return null;
+  if (!summary && images.length === 0 && !stats) return null;
   return (
     <div className="mt-3 space-y-3" data-testid="enrichment-digest">
+      {stats ? (
+        <div data-testid="run-stats">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            Processing stats — {Math.round((stats.totals?.duration_ms ?? 0) / 100) / 10}s ·{" "}
+            {stats.totals?.llm_calls ?? 0} LLM calls ·{" "}
+            {(stats.totals?.tokens ?? 0).toLocaleString()} tokens
+          </p>
+          <table className="mt-1 w-full rounded border border-neutral-200 bg-white text-[11px]">
+            <thead className="text-neutral-500">
+              <tr className="border-b border-neutral-200 text-left">
+                <th className="px-2 py-1 font-medium">Phase</th>
+                <th className="px-2 py-1 text-right font-medium">Duration</th>
+                <th className="px-2 py-1 text-right font-medium">LLM calls</th>
+                <th className="px-2 py-1 text-right font-medium">Tokens</th>
+              </tr>
+            </thead>
+            <tbody className="text-neutral-700">
+              {(stats.phases ?? []).map((p) => (
+                <tr key={p.phase} className="border-b border-neutral-100 last:border-0">
+                  <td className="px-2 py-1 font-mono">{p.phase}</td>
+                  <td className="px-2 py-1 text-right">
+                    {Math.round((p.duration_ms ?? 0) / 100) / 10}s
+                  </td>
+                  <td className="px-2 py-1 text-right">{p.llm_calls || "—"}</td>
+                  <td className="px-2 py-1 text-right">
+                    {p.tokens ? p.tokens.toLocaleString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-[10px] text-neutral-400">
+            {stats.images_captioned ?? 0} image(s) captioned · {stats.cost_note}
+          </p>
+        </div>
+      ) : null}
       {summary ? (
         <div data-testid="run-summary">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">

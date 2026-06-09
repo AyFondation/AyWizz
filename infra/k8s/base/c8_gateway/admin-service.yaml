@@ -1,0 +1,28 @@
+# =============================================================================
+# File: admin-service.yaml
+# Version: 1
+# Path: infra/k8s/base/c8_gateway/admin-service.yaml
+# Description: ClusterIP Service for the C8 admin app. Reachable in-cluster at
+#              `c8-admin:8000` — consumed by C7 (model-quality resolution) and,
+#              once the HMI lands (#6), exposed publicly via a C1 Traefik route.
+#              Components set `C7_C8_ADMIN_URL=http://c8-admin:8000`.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c8-admin
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c8-admin
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c8-admin
+    app.kubernetes.io/component: c8
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

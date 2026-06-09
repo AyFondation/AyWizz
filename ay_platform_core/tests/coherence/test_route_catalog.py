@@ -35,6 +35,10 @@ from ay_platform_core.c4_orchestrator.source_router import (
 from ay_platform_core.c5_requirements.router import router as c5_router
 from ay_platform_core.c6_validation.router import router as c6_router
 from ay_platform_core.c7_memory.router import router as c7_router
+from ay_platform_core.c8_llm.quota.router import router as c8_quota_router
+from ay_platform_core.c8_llm.registry.catalog_router import router as c8_catalog_router
+from ay_platform_core.c8_llm.registry.provider_router import router as c8_provider_router
+from ay_platform_core.c8_llm.registry.router import router as c8_admin_router
 from ay_platform_core.c9_mcp.router import router as c9_router
 from tests.e2e.auth_matrix._catalog import ENDPOINTS, Auth, EndpointSpec
 
@@ -58,6 +62,10 @@ _ROUTERS: list[tuple[str, object, str]] = [
     ("c5_requirements", c5_router, ""),
     ("c6_validation", c6_router, ""),
     ("c7_memory", c7_router, ""),
+    ("c8_admin", c8_admin_router, ""),
+    ("c8_admin", c8_provider_router, ""),
+    ("c8_admin", c8_catalog_router, ""),
+    ("c8_admin", c8_quota_router, ""),
     ("c9_mcp", c9_router, ""),
 ]
 

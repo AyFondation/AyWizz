@@ -17,7 +17,7 @@ from typing import Any
 
 from ay_platform_core.c6_validation.models import CodeArtifact, RunTriggerRequest
 from ay_platform_core.c6_validation.service import ValidationService
-from ay_platform_core.c9_mcp.tools.base import Tool, ToolDispatchError
+from ay_platform_core.c9_mcp.tools.base import Tool, ToolDispatchError, current_actor
 
 
 def build_tools(c6: ValidationService) -> list[Tool]:
@@ -91,10 +91,13 @@ def _trigger_validation_tool(c6: ValidationService) -> Tool:
             requirements=requirements_raw,
             artifacts=artifacts,
         )
+        actor = current_actor()
         response = await c6.trigger_run(
             payload,
             requirements=requirements_raw,
             artifacts=artifacts,
+            tenant_id=actor.tenant_id,
+            user_id=actor.user_id,
         )
         return response.model_dump(mode="json")
 

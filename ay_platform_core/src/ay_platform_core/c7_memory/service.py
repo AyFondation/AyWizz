@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/service.py
 # Description: Facade for the C7 Memory Service. Wires ingestion (parse +
 #              chunk + embed + index), federated retrieval, entity-event
@@ -74,6 +74,7 @@ from ay_platform_core.c7_memory.kg.ontology import (
 )
 from ay_platform_core.c7_memory.kg.repository import KGRepository
 from ay_platform_core.c7_memory.kg.structural_extractor import extract_structural
+from ay_platform_core.c7_memory.llm_resolver import LLMResolverClient
 from ay_platform_core.c7_memory.models import (
     ArtifactEntry,
     ChunkContent,
@@ -132,6 +133,7 @@ class MemoryService:
         kg_repo: KGRepository | None = None,
         llm_client: LLMGatewayClient | None = None,
         c12_client: C12WebhookClient | None = None,
+        llm_resolver: LLMResolverClient | None = None,
     ) -> None:
         self._config = config
         self._repo = repo
@@ -147,6 +149,10 @@ class MemoryService:
         # R-100-081 v3 — C12 ingestion-webhook trigger (metadata only) after
         # C7 stores the raw upload. Required by /sources/upload; absent → 503.
         self._c12 = c12_client
+        # LLM-governance #5 — best-effort resolver mapping a project's
+        # `model_quality` to a concrete model alias (C8 admin catalogue).
+        # None / disabled → C13 keeps its default models (graceful).
+        self._llm_resolver = llm_resolver
 
     # ------------------------------------------------------------------
     # Ingestion (admin/test direct path — C12 upload still goes via NATS
@@ -304,6 +310,13 @@ class MemoryService:
         cfg = await self.get_project_enrichment_config(tenant_id, project_id)
         meta["quality_tier"] = cfg.quality_tier
         overrides = cfg.to_config_overrides()
+        # LLM-governance #5 — resolve the project's `model_quality` to concrete
+        # model aliases and inject them as C13 `llm_assignments`. Best-effort:
+        # a disabled/unreachable resolver or an unmatched quality leaves the
+        # assignments untouched (C13 keeps its defaults).
+        await self._apply_model_quality_resolution(
+            overrides, cfg, tenant_id=tenant_id, project_id=project_id, user_id=uploaded_by
+        )
         if overrides:
             meta["config_overrides"] = overrides
         if document_type:
@@ -320,6 +333,50 @@ class MemoryService:
             ) from exc
 
         return _source_public(row, current_version=None)
+
+    # C13 text-enrichment agents that share the project's resolved text model.
+    _TEXT_ENRICHMENT_AGENTS = ("summarizer", "decontextualizer", "densifier")
+
+    async def _apply_model_quality_resolution(
+        self,
+        overrides: dict[str, Any],
+        cfg: EnrichmentConfig,
+        *,
+        tenant_id: str,
+        project_id: str,
+        user_id: str,
+    ) -> None:
+        """Resolve `cfg.model_quality` to concrete C13 `llm_assignments`.
+        Mutates `overrides` in place. Best-effort: no resolver / disabled /
+        unmatched quality leaves the assignments untouched."""
+        resolver = self._llm_resolver
+        if resolver is None or not resolver.enabled or cfg.model_quality is None:
+            return
+        assignments: dict[str, str] = dict(overrides.get("llm_assignments", {}))
+        text_alias = await resolver.resolve(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            model_quality=cfg.model_quality,
+            project_id=project_id,
+        )
+        if text_alias:
+            for agent in self._TEXT_ENRICHMENT_AGENTS:
+                assignments[agent] = text_alias
+        # An explicit `image_analyzer_model` (already in assignments via
+        # to_config_overrides) WINS; otherwise resolve a vision-capable model
+        # of the same quality for image captioning.
+        if "image_analyzer" not in assignments:
+            image_alias = await resolver.resolve(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model_quality=cfg.model_quality,
+                project_id=project_id,
+                require_vision=True,
+            )
+            if image_alias:
+                assignments["image_analyzer"] = image_alias
+        if assignments:
+            overrides["llm_assignments"] = assignments
 
     # D-020 session 7 — `ingest_uploaded_source` (Phase B legacy upload path)
     # physically removed. The C12 → C13 → C7 chain now owns parsing +
@@ -531,6 +588,10 @@ class MemoryService:
                 "entity_version": None,
                 "chunk_index": chunk.seq,
                 "content": chunk.text,
+                # Contextual-retrieval text (section_path + content) that C13
+                # embedded ; top-level so the ArangoSearch view indexes it for
+                # the BM25 arm (contextual hybrid). Falls back to content.
+                "search_text": chunk.search_text or chunk.text,
                 # R-400-222 v2 rich fields preserved through the row metadata.
                 "context": chunk.context_summary or "",
                 "content_hash": content_hash,
@@ -547,7 +608,9 @@ class MemoryService:
                     "char_end": chunk.char_end,
                     "token_count": chunk.token_count,
                     "original_text": chunk.original_text,
-                    "global_summary": chunk.global_summary,
+                    # `global_summary` is NOT duplicated per chunk : it is a
+                    # document-level value stored ONCE on the source row
+                    # (`document_summary`) and referenced at display time.
                     "references": chunk.references,
                     "images": chunk.images,
                     "tables": chunk.tables,
@@ -567,6 +630,11 @@ class MemoryService:
                 data=serialize_chunks(source_id, embedding_model, chunk_rows),
             )
 
+        # Lift the document summary ONCE onto the source row (it is identical
+        # across chunks ; storing it per chunk would duplicate it N times).
+        document_summary = next(
+            (c.global_summary for c in chunks if c.global_summary), None
+        )
         source_row = _source_row(
             payload=synth_payload,
             tenant_id=tenant_id,
@@ -574,6 +642,7 @@ class MemoryService:
             chunk_count=len(chunks),
             parse_status=ParseStatus.INDEXED,
             processing_version=version,
+            document_summary=document_summary,
         )
         await self._repo.upsert_source(source_row)
         public = _source_public(source_row, current_version=version)
@@ -666,6 +735,7 @@ class MemoryService:
                 tenant_id=tenant_id,
                 project_id=project_id,
                 source_id=source_id,
+                user_id=uploaded_by,
             )
         embed_texts = [
             f"{ctx}\n\n{chunk.text}" if ctx else chunk.text
@@ -795,6 +865,7 @@ class MemoryService:
                 tenant_id=tenant_id,
                 project_id=project_id,
                 source_id=source_id,
+                user_id=str(existing.get("uploaded_by") or ""),
             )
         except KGExtractionError as exc:
             raise HTTPException(
@@ -1165,6 +1236,22 @@ class MemoryService:
             chunks_jsonl_key=f"{prefix}02_chunks/chunks.jsonl" if prefix else None,
             manifest_key=f"{prefix}00_metadata/run_manifest.json" if prefix else None,
         )
+        # Authoritative enrichment cost from C8 (best-effort — never blocks the
+        # diagnostics view if the cost collection is absent or the query fails).
+        cost_usd: float | None = None
+        cost_calls: int | None = None
+        try:
+            cost_row = await self._repo.source_enrichment_cost(
+                tenant_id, project_id, source_id
+            )
+            if cost_row is not None:
+                cost_usd = round(float(cost_row.get("cost_usd") or 0.0), 4)
+                cost_calls = int(cost_row.get("calls") or 0)
+        except Exception:
+            # Best-effort observability — a cost-query failure must never break
+            # the diagnostics view (e.g. no C8 receiver / collection in this stack).
+            cost_usd, cost_calls = None, None
+
         return SourceDiagnostics(
             source_id=source_id,
             project_id=project_id,
@@ -1180,6 +1267,8 @@ class MemoryService:
             extraction_run_id=run_id,
             storage=storage,
             chunks=chunks,
+            enrichment_cost_usd=cost_usd,
+            enrichment_llm_calls=cost_calls,
         )
 
     # ------------------------------------------------------------------
@@ -1383,7 +1472,9 @@ class MemoryService:
         return buf.getvalue()
 
     @staticmethod
-    def _chunk_row_to_content(row: dict[str, Any]) -> ChunkContent:
+    def _chunk_row_to_content(
+        row: dict[str, Any], *, document_summary: str | None = None
+    ) -> ChunkContent:
         meta = row.get("metadata") or {}
         return ChunkContent(
             chunk_id=row.get("chunk_id", ""),
@@ -1395,18 +1486,34 @@ class MemoryService:
             char_end=meta.get("char_end", 0),
             token_count=meta.get("token_count", 0),
             section_path=meta.get("section_path", []),
+            # Retrieval structure : exactly what was embedded + BM25-indexed.
+            search_text=(row.get("search_text") or None),
+            # Extra metadata (situates the chunk ; not fed to the LLM).
+            content_hash=(row.get("content_hash") or None),
+            embedding_model=(row.get("model_id") or None),
+            embedding_dim=row.get("model_dim"),
+            extraction_run_id=meta.get("extraction_run_id"),
+            references=meta.get("references", []) or [],
+            images=meta.get("images", []) or [],
+            tables=meta.get("tables", []) or [],
+            # Document summary, referenced ONCE from the source (no per-chunk dup).
+            document_summary=document_summary,
         )
 
     async def get_chunk_content(
         self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
     ) -> ChunkContent:
-        """Full content of one indexed chunk (lazy-loaded on expand)."""
+        """Full content of one indexed chunk (lazy-loaded on expand). The
+        document-level summary is read ONCE from the source row (it is not
+        duplicated across chunks)."""
         row = await self._repo.get_chunk(tenant_id, project_id, source_id, chunk_id)
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="chunk not found"
             )
-        return self._chunk_row_to_content(row)
+        source = await self._repo.get_source(tenant_id, project_id, source_id)
+        document_summary = source.get("document_summary") if source else None
+        return self._chunk_row_to_content(row, document_summary=document_summary)
 
     async def build_chunks_zip(
         self, tenant_id: str, project_id: str, source_id: str
@@ -1792,6 +1899,7 @@ def _source_row(
     chunk_count: int,
     parse_status: ParseStatus,
     processing_version: str | None,
+    document_summary: str | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     return {
@@ -1811,6 +1919,9 @@ def _source_row(
         "chunk_count": chunk_count,
         "model_id": model_id,
         "processing_version": processing_version,
+        # Document-level enrichment summary, stored ONCE here (not duplicated
+        # across the chunk rows). Referenced by the chunk-content view.
+        "document_summary": document_summary,
     }
 
 

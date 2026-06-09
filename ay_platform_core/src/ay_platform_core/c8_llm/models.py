@@ -134,6 +134,10 @@ class CallTags(BaseModel):
     agent_name: str
     phase: str | None = None
     sub_agent_id: str | None = None
+    # Ingestion attribution (R-400-226) — set by C13 on enrichment LLM calls so
+    # the per-source / per-run cost can be aggregated from `llm_calls`.
+    source_id: str | None = None
+    run_id: str | None = None
 
 
 class CallRecord(BaseModel):

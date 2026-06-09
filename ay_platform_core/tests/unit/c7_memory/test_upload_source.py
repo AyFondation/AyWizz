@@ -78,8 +78,43 @@ class _FakeC12:
             raise C12WebhookError("boom")
 
 
+class _FakeResolver:
+    """Stand-in for the C7→c8_admin resolver: returns a fixed text alias, and
+    a distinct alias when vision is required."""
+
+    def __init__(
+        self,
+        *,
+        text: str | None = "resolved-text",
+        image: str | None = "resolved-vision",
+        enabled: bool = True,
+    ) -> None:
+        self.enabled = enabled
+        self._text = text
+        self._image = image
+        self.calls: list[dict[str, Any]] = []
+
+    async def resolve(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        model_quality: str,
+        project_id: str | None = None,
+        require_vision: bool = False,
+        require_tool_calling: bool = False,
+    ) -> str | None:
+        self.calls.append(
+            {"quality": model_quality, "vision": require_vision, "project_id": project_id}
+        )
+        return self._image if require_vision else self._text
+
+
 def _make_service(
-    repo: _FakeRepo, storage: _FakeStorage, c12: _FakeC12
+    repo: _FakeRepo,
+    storage: _FakeStorage,
+    c12: _FakeC12,
+    resolver: _FakeResolver | None = None,
 ) -> MemoryService:
     embedder = DeterministicHashEmbedder(dimension=128)
     config = MemoryConfig(default_quota_bytes=10 * 1024 * 1024)
@@ -89,7 +124,88 @@ def _make_service(
         embedder=embedder,
         storage=storage,  # type: ignore[arg-type]
         c12_client=c12,  # type: ignore[arg-type]
+        llm_resolver=resolver,  # type: ignore[arg-type]
     )
+
+
+async def _set_project_config(repo: _FakeRepo, cfg: EnrichmentConfig) -> None:
+    await repo.upsert_project_config(
+        "t1", "p1", cfg.model_dump(exclude_none=True)
+    )
+
+
+@pytest.mark.asyncio
+async def test_model_quality_resolves_into_llm_assignments() -> None:
+    repo, storage, c12 = _FakeRepo(), _FakeStorage(), _FakeC12()
+    resolver = _FakeResolver()
+    service = _make_service(repo, storage, c12, resolver)
+    await _set_project_config(repo, EnrichmentConfig(model_quality="high"))
+
+    await service.store_raw_upload_and_trigger(
+        tenant_id="t1", project_id="p1", source_id="s1", filename="f.pdf",
+        mime_type="application/pdf", source_format="pdf",
+        data=b"%PDF-1.7", uploaded_by="u1",
+    )
+    assignments = c12.calls[0]["config_overrides"]["llm_assignments"]
+    assert assignments == {
+        "summarizer": "resolved-text",
+        "decontextualizer": "resolved-text",
+        "densifier": "resolved-text",
+        "image_analyzer": "resolved-vision",
+    }
+
+
+@pytest.mark.asyncio
+async def test_explicit_image_model_wins_over_resolution() -> None:
+    repo, storage, c12 = _FakeRepo(), _FakeStorage(), _FakeC12()
+    resolver = _FakeResolver()
+    service = _make_service(repo, storage, c12, resolver)
+    await _set_project_config(
+        repo,
+        EnrichmentConfig(model_quality="low", image_analyzer_model="ollama:llava"),
+    )
+
+    await service.store_raw_upload_and_trigger(
+        tenant_id="t1", project_id="p1", source_id="s1", filename="f.pdf",
+        mime_type="application/pdf", source_format="pdf",
+        data=b"%PDF-1.7", uploaded_by="u1",
+    )
+    assignments = c12.calls[0]["config_overrides"]["llm_assignments"]
+    # Explicit image model preserved; vision resolution NOT consulted.
+    assert assignments["image_analyzer"] == "ollama:llava"
+    assert all(not c["vision"] for c in resolver.calls)
+
+
+@pytest.mark.asyncio
+async def test_no_model_quality_skips_resolution() -> None:
+    repo, storage, c12 = _FakeRepo(), _FakeStorage(), _FakeC12()
+    resolver = _FakeResolver()
+    service = _make_service(repo, storage, c12, resolver)
+    await _set_project_config(repo, EnrichmentConfig(quality_tier="standard"))
+
+    await service.store_raw_upload_and_trigger(
+        tenant_id="t1", project_id="p1", source_id="s1", filename="f.pdf",
+        mime_type="application/pdf", source_format="pdf",
+        data=b"%PDF-1.7", uploaded_by="u1",
+    )
+    assert resolver.calls == []  # model_quality is None → no lookup
+    assert "llm_assignments" not in c12.calls[0].get("config_overrides", {})
+
+
+@pytest.mark.asyncio
+async def test_disabled_resolver_skips_injection() -> None:
+    repo, storage, c12 = _FakeRepo(), _FakeStorage(), _FakeC12()
+    resolver = _FakeResolver(enabled=False)
+    service = _make_service(repo, storage, c12, resolver)
+    await _set_project_config(repo, EnrichmentConfig(model_quality="high"))
+
+    await service.store_raw_upload_and_trigger(
+        tenant_id="t1", project_id="p1", source_id="s1", filename="f.pdf",
+        mime_type="application/pdf", source_format="pdf",
+        data=b"%PDF-1.7", uploaded_by="u1",
+    )
+    assert resolver.calls == []  # disabled → never called
+    assert "config_overrides" not in c12.calls[0]
 
 
 @pytest.mark.asyncio
@@ -181,6 +297,17 @@ def test_enrichment_config_to_overrides_only_set_fields() -> None:
         "decontextualization_enabled": True,
         "llm_assignments": {"image_analyzer": "ollama:llava"},
     }
+
+
+def test_enrichment_config_model_quality_is_data_not_a_c13_override() -> None:
+    # `model_quality` is the LLM-governance axis resolved against the tenant
+    # catalogue by C7; C13 only understands concrete `llm_assignments`, so the
+    # quality token itself is NOT emitted into the C13 config_overrides.
+    cfg = EnrichmentConfig(model_quality="high")
+    assert cfg.model_quality == "high"
+    assert "model_quality" not in cfg.to_config_overrides()
+    # Distinct axis from the enrichment-depth preset.
+    assert cfg.quality_tier == "minimal"
 
 
 @pytest.mark.asyncio
