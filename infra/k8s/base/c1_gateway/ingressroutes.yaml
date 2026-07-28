@@ -1,12 +1,20 @@
 # =============================================================================
 # File: ingressroutes.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c1_gateway/ingressroutes.yaml
 # Description: Traefik IngressRoute CRDs — K8s mirror of
 #              `infra/c1_gateway/dynamic/routers.yml` (v7). Same path
 #              prefixes/regexps, same priorities, same middlewares, same
 #              backend services as the compose dev stack (resolved through
 #              K8s DNS rather than Docker DNS).
+#
+#              v3 (2026-07-27): add the 4 c8-admin API routes (LLM registry /
+#              catalogue / quota) that the v2 mirror omitted — /admin/v1/llm
+#              + /admin/v1/quota (priority 100, beat /admin→c2), /api/v1/llm
+#              + /api/v1/quota (priority 50) — PLUS the UI governance PAGE
+#              route /admin/llm (priority 60 → ay-platform-ui, no forward-auth;
+#              compose router `ui-admin-llm`). Without the PAGE route a hard
+#              refresh on /admin/llm-providers hit /admin→c2 → 401.
 #
 #              v2 (2026-05-27): full re-sync with routers.yml v7. The v1
 #              mirror routed ALL `/api/v1/projects/*` to C5 — WRONG. The
@@ -137,6 +145,59 @@ spec:
       middlewares:
         - name: forward-auth-c2
         - name: secure-headers
+    # ---- C8 Admin (LLM governance HMI: registry / catalogue / quota) ----
+    # `/admin/v1/llm` + `/admin/v1/quota` MUST win over the generic
+    # `/admin` → c2 route (priority 50) → priority 100. `/api/v1/llm` +
+    # `/api/v1/quota` are distinct strings (priority 50). Mirrors the compose
+    # Traefik routers c8-admin-{registry,catalog,quota,quota-self}.
+    - match: PathPrefix(`/admin/v1/llm`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c8-admin
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathPrefix(`/admin/v1/quota`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c8-admin
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathPrefix(`/api/v1/llm`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c8-admin
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    - match: PathPrefix(`/api/v1/quota`)
+      kind: Rule
+      priority: 50
+      services:
+        - name: c8-admin
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- UI governance PAGE paths (Next.js `/admin/llm-*`) ----
+    # `/admin/llm-providers` + `/admin/llm-registry` + `/admin/llm-catalogue`
+    # are UI pages that collide with the C2 `/admin` API prefix. Priority 60
+    # (> 50 c2, < 100 the `/admin/v1/llm` API) sends the PAGE document to the
+    # UI. NO forward-auth: the browser fetches the page; the UI's apiClient
+    # carries the JWT on the API calls. Mirrors compose router `ui-admin-llm`.
+    - match: PathPrefix(`/admin/llm`)
+      kind: Rule
+      priority: 60
+      services:
+        - name: ay-platform-ui
+          port: 3000
     # ---- C2 Admin (tenants lifecycle) ----
     - match: PathPrefix(`/admin`)
       kind: Rule

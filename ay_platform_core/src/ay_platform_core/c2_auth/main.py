@@ -12,7 +12,7 @@
 #
 #              v5: mounts the preferences_router at
 #              `/api/v1/users/me/preferences` (any authenticated user,
-#              minus tenant_manager). Hosts the per-user trigram + LLM
+#              minus platform_manager). Hosts the per-user trigram + LLM
 #              `user_prompt` override.
 #
 #              v4: adds `_ensure_demo_seed()` for the manual-test stack
@@ -20,12 +20,12 @@
 #              complete scenario : 1 tenant (`tenant-test`), 4 users
 #              (super-root / tenant-admin / project-editor /
 #              project-viewer), 1 project (`project-test`), 2 project
-#              grants. Idempotent ; runs after admin/tenant_manager
+#              grants. Idempotent ; runs after admin/platform_manager
 #              bootstraps so the seeded users coexist with them.
 #              Production overlays leave the flag False.
 #
 #              v3: mounts admin_router at `/admin` (tenant lifecycle,
-#              tenant_manager only) and projects_router at
+#              platform_manager only) and projects_router at
 #              `/api/v1/projects` (project lifecycle, admin / project_owner).
 #
 # @relation implements:R-100-030
@@ -94,14 +94,14 @@ async def _ensure_local_admin(repo: AuthRepository, cfg: AuthConfig) -> None:
     _log.info("bootstrapped local admin %r", cfg.local_admin_username)
 
 
-async def _ensure_local_tenant_manager(
+async def _ensure_local_platform_manager(
     repo: AuthRepository, cfg: AuthConfig,
 ) -> None:
-    """Create the bootstrap tenant_manager (super-root) if
-    `auth_mode == "local"` AND both `local_tenant_manager_*` config
+    """Create the bootstrap platform_manager (super-root) if
+    `auth_mode == "local"` AND both `local_platform_manager_*` config
     fields are non-empty. Idempotent.
 
-    Per E-100-002 v2 the tenant_manager is **content-blind** —
+    Per E-100-002 v2 the platform_manager is **content-blind** —
     tenant lifecycle ops only (create/list/delete tenants), no
     access to projects / sources / conversations. Single-tenant
     deployments leave both fields empty and rely on admin alone.
@@ -109,37 +109,37 @@ async def _ensure_local_tenant_manager(
     if cfg.auth_mode != "local":
         return
     if not (
-        cfg.local_tenant_manager_username
-        and cfg.local_tenant_manager_password
+        cfg.local_platform_manager_username
+        and cfg.local_platform_manager_password
     ):
         return
     existing = await repo.get_user_by_username(
-        cfg.local_tenant_manager_username,
+        cfg.local_platform_manager_username,
     )
     if existing is not None:
         _log.info(
-            "local tenant_manager %r already present, skipping",
-            cfg.local_tenant_manager_username,
+            "local platform_manager %r already present, skipping",
+            cfg.local_platform_manager_username,
         )
         return
     user = UserInternal(
-        user_id=f"tenant-manager-{cfg.local_tenant_manager_username}",
-        username=cfg.local_tenant_manager_username,
-        # tenant_manager is cross-tenant by design — `tenant_id` is
+        user_id=f"tenant-manager-{cfg.local_platform_manager_username}",
+        username=cfg.local_platform_manager_username,
+        # platform_manager is cross-tenant by design — `tenant_id` is
         # decorative here. Same "default" tag the admin gets, for
         # symmetry.
         tenant_id="default",
-        roles=[RBACGlobalRole.TENANT_MANAGER],
+        roles=[RBACGlobalRole.PLATFORM_MANAGER],
         status=UserStatus.ACTIVE,
         created_at=datetime.now(UTC),
         argon2id_hash=LocalMode.hash_password(
-            cfg.local_tenant_manager_password,
+            cfg.local_platform_manager_password,
         ),
     )
     await repo.insert_user(user)
     _log.info(
-        "bootstrapped local tenant_manager %r",
-        cfg.local_tenant_manager_username,
+        "bootstrapped local platform_manager %r",
+        cfg.local_platform_manager_username,
     )
 
 
@@ -181,13 +181,13 @@ async def _ensure_demo_seed(
     users_to_seed: list[tuple[str, str, str, str, RBACGlobalRole]] = [
         # (username, password, user_id, user_tenant_id, role)
         # Super-root is cross-tenant by design — `tenant_id` is a
-        # decorative tag, mirror admin/tenant_manager bootstrap.
+        # decorative tag, mirror admin/platform_manager bootstrap.
         (
             cfg.demo_seed_superroot_username,
             cfg.demo_seed_superroot_password,
             "demo-superroot",
             "default",
-            RBACGlobalRole.TENANT_MANAGER,
+            RBACGlobalRole.PLATFORM_MANAGER,
         ),
         (
             cfg.demo_seed_tenant_admin_username,
@@ -410,7 +410,7 @@ def create_app(config: AuthConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await repo.ensure_collections()
         await _ensure_local_admin(repo, cfg)
-        await _ensure_local_tenant_manager(repo, cfg)
+        await _ensure_local_platform_manager(repo, cfg)
         await _ensure_demo_seed(repo, cfg, gitea=gitea)
         yield
         if gitea is not None:

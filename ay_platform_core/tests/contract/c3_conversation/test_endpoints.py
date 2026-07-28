@@ -16,6 +16,7 @@ from fastapi.routing import APIRoute
 
 from ay_platform_core.c3_conversation.models import ConversationListResponse
 from ay_platform_core.c3_conversation.router import router
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -27,7 +28,7 @@ def _app() -> FastAPI:
 def _routes() -> dict[str, set[str]]:
     """Return {path: {methods}} for all APIRoutes — accumulates multiple routes per path."""
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())
@@ -57,7 +58,7 @@ class TestEndpointRoster:
             )
 
     def test_no_untyped_dict_response_models(self) -> None:
-        for route in _app().routes:
+        for route in iter_api_routes(_app()):
             if not isinstance(route, APIRoute):
                 continue
             rm = route.response_model
@@ -68,7 +69,7 @@ class TestEndpointRoster:
     def test_list_endpoint_returns_list_response(self) -> None:
         list_route = next(
             (
-                r for r in _app().routes
+                r for r in iter_api_routes(_app())
                 if isinstance(r, APIRoute)
                 and r.path == "/api/v1/conversations"
                 and "GET" in (r.methods or set())
@@ -79,7 +80,7 @@ class TestEndpointRoster:
         assert list_route.response_model is ConversationListResponse
 
     def test_create_endpoint_is_201(self) -> None:
-        routes = {r.path: r for r in _app().routes if isinstance(r, APIRoute)}
+        routes = {r.path: r for r in iter_api_routes(_app()) if isinstance(r, APIRoute)}
         matching = [
             r for r in routes.values()
             if r.path == "/api/v1/conversations" and "POST" in (r.methods or set())
@@ -88,7 +89,7 @@ class TestEndpointRoster:
         assert matching[0].status_code == 201
 
     def test_delete_endpoint_is_204(self) -> None:
-        for route in _app().routes:
+        for route in iter_api_routes(_app()):
             if (
                 isinstance(route, APIRoute)
                 and route.path.endswith("/{conversation_id}")

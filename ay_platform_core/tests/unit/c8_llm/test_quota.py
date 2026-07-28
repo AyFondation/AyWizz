@@ -65,6 +65,11 @@ class _FakeStore:
         cost, tokens = self.usage.get(key, (0.0, 0))
         return (cost, tokens, self.oldest.get(key))
 
+    async def consumption_by_tenant(
+        self, since_iso: str
+    ) -> list[tuple[str, float, int]]:
+        return []
+
 
 def _svc(store: _FakeStore) -> QuotaService:
     return QuotaService(store, clock=lambda: _NOW)
@@ -110,6 +115,45 @@ async def test_clamping_allows_child_below_parent() -> None:
 async def test_default_policy_is_inert() -> None:
     status = await _svc(_FakeStore()).evaluate("t1", user_id="u1")
     assert not status.blocked and not status.warned
+
+
+async def test_get_policy_migrates_legacy_flat_format() -> None:
+    # A pre-four-level doc (flat max_cost_usd/max_tokens, no limits/anchor) must
+    # NOT 500 — it migrates: flat caps → the tenant level, anchor from the key.
+    store = _FakeStore()
+    store.policy_doc = {
+        "windows": [
+            {
+                "key": "session",
+                "label": "Session (5h)",
+                "duration_seconds": 18000,
+                "max_cost_usd": 25,
+                "max_tokens": 5000000,
+                "warn_threshold_pct": 80.0,
+            },
+            {
+                "key": "month",
+                "label": "Month",
+                "duration_seconds": 2592000,
+                "max_cost_usd": 160,
+                "max_tokens": None,
+                "warn_threshold_pct": 80.0,
+            },
+        ]
+    }
+    policy = await _svc(store).get_policy()
+    assert policy.windows[0].anchor == "first_use"
+    assert policy.windows[0].level_limits("tenant").max_cost_usd == 25
+    assert policy.windows[0].level_limits("tenant").max_tokens == 5000000
+    assert policy.windows[1].anchor == "calendar_month"
+    assert policy.windows[1].level_limits("tenant").max_cost_usd == 160
+
+
+async def test_get_policy_falls_back_to_defaults_when_unparseable() -> None:
+    store = _FakeStore()
+    store.policy_doc = {"windows": "garbage"}
+    policy = await _svc(store).get_policy()
+    assert {w.key for w in policy.windows} == {"session", "week", "month"}
 
 
 async def test_blocks_when_any_level_exceeds() -> None:
@@ -295,6 +339,11 @@ async def test_guard_is_best_effort_on_eval_error() -> None:
             self, since_iso: str, **kw: Any
         ) -> tuple[float, int, str | None]:
             return (0.0, 0, None)
+
+        async def consumption_by_tenant(
+            self, since_iso: str
+        ) -> list[tuple[str, float, int]]:
+            return []
 
     guard = QuotaGuard(QuotaService(_Boom(), clock=lambda: _NOW))
     await guard("t1", user_id="u1")  # swallowed — never breaks an LLM call

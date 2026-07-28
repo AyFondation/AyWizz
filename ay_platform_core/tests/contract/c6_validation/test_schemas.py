@@ -26,6 +26,7 @@ from ay_platform_core.c6_validation.models import (
 from ay_platform_core.c6_validation.plugin.registry import get_registry
 from ay_platform_core.c6_validation.router import router
 from tests.fixtures.contract_registry import find_by_producer
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -36,7 +37,7 @@ def _app() -> FastAPI:
 
 def _routes() -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())
@@ -112,7 +113,7 @@ class TestEndpointRoster:
 
     def test_trigger_is_202(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/validation/runs"
             and "POST" in (r.methods or set())
@@ -121,7 +122,7 @@ class TestEndpointRoster:
 
     def test_findings_returns_page(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/validation/runs/{run_id}/findings"
         )

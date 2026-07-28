@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 
 from ay_platform_core._mock_llm.main import create_app as make_mock_llm
 from ay_platform_core.c2_auth.main import create_app as make_c2
@@ -24,10 +23,11 @@ from ay_platform_core.c5_requirements.main import create_app as make_c5
 from ay_platform_core.c6_validation.main import create_app as make_c6
 from ay_platform_core.c7_memory.main import create_app as make_c7
 from ay_platform_core.c9_mcp.main import create_app as make_c9
+from tests.fixtures.routes import iter_api_routes
 
 
 def _routes(app: FastAPI) -> set[str]:
-    return {r.path for r in app.routes if isinstance(r, APIRoute)}
+    return {r.path for r in iter_api_routes(app)}
 
 
 @pytest.mark.unit

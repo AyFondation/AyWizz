@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ay_platform_core.c4_orchestrator.artifacts_router import (
     _get_service,
-    _reject_tenant_manager,
+    _reject_platform_manager,
     _require_actor,
     _require_tenant,
 )
@@ -40,14 +40,15 @@ router = APIRouter(tags=["source"])
 
 
 def _require_editor_role(x_user_roles: str | None) -> None:
-    """Editor+ role gate per R-200-171. `project_owner`, `project_editor`,
-    or `admin` accepted ; everything else (incl. project_viewer) → 403."""
+    """Editor+ role gate per R-200-171. `project_owner` or `project_editor`
+    accepted ; everything else (incl. project_viewer + the content-blind
+    `admin`/`tenant_admin`, E-100-002 v7) → 403."""
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
-    accepted = {"project_owner", "project_editor", "admin"}
+    accepted = {"project_owner", "project_editor"}
     if not roles.intersection(accepted):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="requires one of: project_owner, project_editor, admin",
+            detail="requires one of: project_owner, project_editor",
         )
 
 
@@ -138,7 +139,7 @@ async def read_source_tree(
     """Return the source-files tree for one run as a recursive node
     list (R-200-170). The 5 MB truncation marker is not exercised in
     v1 — practical project trees stay well below that ceiling."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     raw = await service.get_source_tree(
         project_id=project_id, tenant_id=tenant_id, run_id=run_id,
     )
@@ -164,7 +165,7 @@ async def mkdir_source(
 ) -> SourceStructuralOpResult:
     """Create an empty directory by writing a `.keep` marker. 409 if
     the path already exists. Editor+ RBAC (R-200-171)."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     result: dict[str, Any] = await service.mkdir_source(
         project_id=project_id, tenant_id=tenant_id, run_id=run_id, path=body.path,
@@ -185,7 +186,7 @@ async def rename_source(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> SourceStructuralOpResult:
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     result: dict[str, Any] = await service.rename_source(
         project_id=project_id,
@@ -210,7 +211,7 @@ async def move_source(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> SourceStructuralOpResult:
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     result: dict[str, Any] = await service.move_source(
         project_id=project_id,
@@ -236,7 +237,7 @@ async def delete_source_file(
     service: ArtifactsService = Depends(_get_service),
 ) -> Response:
     """Delete one source file (R-200-175). Editor+ RBAC."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     if not path:
         raise HTTPException(
@@ -263,8 +264,8 @@ async def read_source_file_meta(
     service: ArtifactsService = Depends(_get_service),
 ) -> SourceFileMeta:
     """Return metadata for one source-files entry (R-200-173). Reader
-    RBAC (any project member, tenant_manager rejected)."""
-    _reject_tenant_manager(x_user_roles)
+    RBAC (any project member, platform_manager rejected)."""
+    _reject_platform_manager(x_user_roles)
     if not path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

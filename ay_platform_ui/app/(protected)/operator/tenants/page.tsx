@@ -2,7 +2,7 @@
 // File: page.tsx
 // Version: 1
 // Path: ay_platform_ui/app/(protected)/admin/tenants/page.tsx
-// Description: Tenant management console (platform operator, tenant_manager —
+// Description: Tenant management console (platform operator, platform_manager —
 //              E-100-002 v3). List / create / delete tenants and
 //              deactivate / reactivate them (a deactivated tenant's members
 //              are refused login). No tenant CONTENT is exposed here.
@@ -29,7 +29,7 @@ export default function TenantsAdminPage() {
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
-    return (authState.claims.roles ?? []).includes("tenant_manager");
+    return (authState.claims.roles ?? []).includes("platform_manager");
   }, [authState]);
 
   const reload = useCallback(() => {
@@ -71,7 +71,7 @@ export default function TenantsAdminPage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="tenants-forbidden"
         >
-          Tenant management is restricted to platform administrators (tenant_manager).
+          Tenant management is restricted to platform administrators (platform_manager).
         </p>
       </main>
     );

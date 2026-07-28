@@ -1,7 +1,49 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 135,
+  "route_count": 144,
   "routes": [
+    {
+      "method": "GET",
+      "path": "/admin/projects",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/projects/{project_id}/activate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/projects/{project_id}/archive",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/projects/{project_id}/deactivate",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/projects/{project_id}/members",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/projects/{project_id}/members/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/projects/{project_id}/members/{user_id}",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
     {
       "method": "GET",
       "path": "/admin/tenants",
@@ -106,6 +148,12 @@
     },
     {
       "method": "GET",
+      "path": "/admin/v1/quota/consumption",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
       "path": "/admin/v1/quota/policy",
       "component": "c8_admin",
       "auth": "role_gated"
@@ -179,6 +227,12 @@
     {
       "method": "GET",
       "path": "/api/v1/llm/catalog",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/catalog/available",
       "component": "c8_admin",
       "auth": "role_gated"
     },

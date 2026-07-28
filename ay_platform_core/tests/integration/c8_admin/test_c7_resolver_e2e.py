@@ -36,7 +36,7 @@ from tests.fixtures.containers import ArangoEndpoint, cleanup_arango_database
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="function")]
 
 _TENANT = "tenant-res"
-_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager"}
+_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager"}
 _ADMIN = {"X-User-Id": "u-adm", "X-User-Roles": "admin", "X-Tenant-Id": _TENANT}
 _PROVIDER = {
     "name": "Anthropic",
@@ -102,17 +102,19 @@ def _c7_resolver(app: FastAPI) -> LLMResolverClient:
     )
 
 
-async def _seed(admin: httpx.AsyncClient, alias: str) -> None:
+async def _seed(admin: httpx.AsyncClient, alias: str) -> str:
     prov = await admin.post("/admin/v1/llm/providers", headers=_TMGR, json=_PROVIDER)
     assert prov.status_code == 201, prov.text
     reg = await admin.post(
         "/admin/v1/llm/registry", headers=_TMGR, json=_model_body(prov.json()["provider_id"], alias)
     )
     assert reg.status_code == 201, reg.text
+    model_id = str(reg.json()["model_id"])
     cat = await admin.put(
-        f"/api/v1/llm/catalog/{reg.json()['model_id']}", headers=_ADMIN, json={"enabled": True}
+        f"/api/v1/llm/catalog/{model_id}", headers=_ADMIN, json={"enabled": True}
     )
     assert cat.status_code == 200, cat.text
+    return model_id
 
 
 async def test_c7_resolves_quality_through_real_c8_admin(c8_admin_app: FastAPI) -> None:
@@ -136,10 +138,18 @@ async def test_c7_resolves_quality_through_real_c8_admin(c8_admin_app: FastAPI) 
 async def test_c7_resolver_isolated_per_tenant_through_real_c8_admin(
     c8_admin_app: FastAPI,
 ) -> None:
+    # 800 v10 opt-out: both tenants inherit the shared registry baseline, but one
+    # tenant's CUSTOMISATION (disabling the model) does not leak to the other.
     async with _admin_http(c8_admin_app) as admin:
-        await _seed(admin, "claude-haiku-fast")
+        mid = await _seed(admin, "claude-haiku-fast")
+        disabled = await admin.put(
+            f"/api/v1/llm/catalog/{mid}", headers=_ADMIN, json={"enabled": False}
+        )
+        assert disabled.status_code == 200, disabled.text
 
     resolver = _c7_resolver(c8_admin_app)
+    mine = await resolver.resolve(tenant_id=_TENANT, user_id="u-adm", model_quality="low")
     other = await resolver.resolve(tenant_id="tenant-other", user_id="u-x", model_quality="low")
     await resolver.aclose()
-    assert other is None
+    assert mine is None  # _TENANT disabled its only model
+    assert other == "claude-haiku-fast"  # a fresh tenant keeps the baseline

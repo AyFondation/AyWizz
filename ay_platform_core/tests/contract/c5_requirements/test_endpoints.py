@@ -23,6 +23,7 @@ from ay_platform_core.c5_requirements.models import (
     EntityPublic,
 )
 from ay_platform_core.c5_requirements.router import router
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -33,7 +34,7 @@ def _app() -> FastAPI:
 
 def _routes() -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())
@@ -84,7 +85,7 @@ class TestEndpointRoster:
 class TestResponseModels:
     def test_list_documents_returns_list_response(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/documents"
             and "GET" in (r.methods or set())
@@ -93,7 +94,7 @@ class TestResponseModels:
 
     def test_get_document_returns_document_public(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/documents/{slug}"
             and "GET" in (r.methods or set())
@@ -102,7 +103,7 @@ class TestResponseModels:
 
     def test_list_entities_returns_list_response(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/entities"
             and "GET" in (r.methods or set())
@@ -111,7 +112,7 @@ class TestResponseModels:
 
     def test_get_entity_returns_entity_public(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/entities/{entity_id}"
             and "GET" in (r.methods or set())
@@ -120,7 +121,7 @@ class TestResponseModels:
 
     def test_create_document_is_201(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/documents"
             and "POST" in (r.methods or set())
@@ -129,7 +130,7 @@ class TestResponseModels:
 
     def test_delete_document_is_204(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/projects/{project_id}/requirements/documents/{slug}"
             and "DELETE" in (r.methods or set())

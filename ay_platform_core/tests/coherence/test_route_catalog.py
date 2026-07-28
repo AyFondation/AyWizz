@@ -129,7 +129,7 @@ def test_catalog_entries_have_consistent_role_gates() -> None:
     """A ROLE_GATED endpoint SHALL declare at least one accepted role
     (`accept_roles` or `accept_global_roles`); an AUTHENTICATED or
     OPEN endpoint SHALL declare none. Also, no endpoint SHALL list
-    `tenant_manager` in `accept_global_roles` AND in
+    `platform_manager` in `accept_global_roles` AND in
     `excluded_global_roles` simultaneously (E-100-002 v2 separation
     of duties)."""
     errors: list[str] = []

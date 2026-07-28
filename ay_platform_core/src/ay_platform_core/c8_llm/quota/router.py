@@ -1,9 +1,9 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py
 # Description: FastAPI APIRouter for the global LLM quota policy (Lot 3),
-#              tenant_manager only (E-100-002 v3 platform operator). Identity
+#              platform_manager only (E-100-002 v3 platform operator). Identity
 #              arrives via Traefik forward-auth headers (X-User-Id /
 #              X-User-Roles), same pattern as the registry surface. Exposes
 #              GET/PUT of the single global policy and a per-tenant status
@@ -15,6 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from ay_platform_core.c8_llm.quota.models import (
+    ConsumptionReport,
     QuotaPolicy,
     QuotaPolicyUpdate,
     QuotaStatus,
@@ -23,7 +24,7 @@ from ay_platform_core.c8_llm.quota.service import QuotaService
 
 router = APIRouter(tags=["llm-quota"])
 
-_QUOTA_ROLES: tuple[str, ...] = ("tenant_manager",)
+_QUOTA_ROLES: tuple[str, ...] = ("platform_manager",)
 
 
 def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
@@ -67,7 +68,7 @@ async def put_quota_policy(
     x_user_roles: str | None = Header(default=None),
     service: QuotaService = Depends(get_quota_service),
 ) -> QuotaPolicy:
-    """Replace the global policy window set. tenant_manager only."""
+    """Replace the global policy window set. platform_manager only."""
     _require_role(x_user_roles, _QUOTA_ROLES)
     return await service.set_policy(body.windows)
 
@@ -75,14 +76,36 @@ async def put_quota_policy(
 @router.get("/admin/v1/quota/status", response_model=QuotaStatus)
 async def get_quota_status(
     tenant_id: str,
+    project_id: str | None = None,
     _user: str = Depends(_require_actor),
     x_user_roles: str | None = Header(default=None),
     service: QuotaService = Depends(get_quota_service),
 ) -> QuotaStatus:
     """Evaluate a tenant against the global policy (usage / limit / state per
-    window). Read-only oversight for the operator HMI. tenant_manager only."""
+    window). Read-only oversight for the operator HMI. platform_manager only.
+
+    When `project_id` is supplied, the evaluation additionally resolves the
+    PROJECT level, so each window's `levels` carries that project's
+    consumption (cost / tokens) — the project-governance consumption view
+    (E-100-002 v4). Consumption is a numeric aggregate over the project's
+    `llm_calls`; it exposes no project CONTENT, so it stays within the
+    operator's content-blind mandate."""
     _require_role(x_user_roles, _QUOTA_ROLES)
-    return await service.evaluate(tenant_id)
+    return await service.evaluate(tenant_id, project_id=project_id)
+
+
+@router.get("/admin/v1/quota/consumption", response_model=ConsumptionReport)
+async def get_consumption(
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    service: QuotaService = Depends(get_quota_service),
+) -> ConsumptionReport:
+    """Per-tenant LLM consumption across the reporting windows session / week /
+    month / quarter / semester / year (R-800-144). Read-only operator oversight
+    (platform_manager). Reporting only — the ENFORCED quota policy is
+    untouched. Amounts are in the platform currency."""
+    _require_role(x_user_roles, _QUOTA_ROLES)
+    return await service.consumption_report()
 
 
 @router.get("/api/v1/quota/me", response_model=QuotaStatus)

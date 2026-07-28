@@ -54,10 +54,10 @@ _HEADERS_VIEWER = {
     "X-Tenant-Id": "tenant-src",
     "X-User-Roles": "project_viewer",
 }
-_HEADERS_TENANT_MANAGER = {
+_HEADERS_PLATFORM_MANAGER = {
     "X-User-Id": "tm",
     "X-Tenant-Id": "tenant-src",
-    "X-User-Roles": "tenant_manager",
+    "X-User-Roles": "platform_manager",
 }
 
 
@@ -161,14 +161,14 @@ async def test_tree_returns_recursive_structure(
     assert children[0]["size_bytes"] > 0
 
 
-async def test_tree_rejected_for_tenant_manager(
+async def test_tree_rejected_for_platform_manager(
     source_app: tuple[FastAPI, ArtifactsService, _FakeGiteaClient, str],
 ) -> None:
     app, _svc, _g, run_id = source_app
     async with _client(app) as c:
         resp = await c.get(
             f"/api/v1/projects/proj-src/source/tree?run_id={run_id}",
-            headers=_HEADERS_TENANT_MANAGER,
+            headers=_HEADERS_PLATFORM_MANAGER,
         )
     assert resp.status_code == 403
 

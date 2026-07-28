@@ -1,6 +1,6 @@
 // =============================================================================
 // File: types.ts
-// Version: 12
+// Version: 13
 // Path: ay_platform_ui/lib/types.ts
 // Description: Wire-format type definitions for the platform's public
 //              bootstrap surface — `/runtime-config.json` (static, served
@@ -117,6 +117,11 @@ export interface PlatformConfig {
  *  default) ; `system_prompt_is_default` flags whether an override
  *  has been stored — the settings page uses it to render a 'Using
  *  default' badge + 'Reset to default' button only when meaningful. */
+/** Project lifecycle status (E-100-002 v4). `active` — normal. `inactive`
+ *  — members are refused access to the project's content. `archived` —
+ *  read-only freeze (content retained, no writes / uploads / runs). */
+export type ProjectStatus = "active" | "inactive" | "archived";
+
 export interface Project {
   project_id: string;
   tenant_id: string;
@@ -124,6 +129,7 @@ export interface Project {
   profile: string;
   created_at: string;
   created_by: string;
+  status: ProjectStatus;
   system_prompt: string;
   system_prompt_is_default: boolean;
   /** HTTPS clone URL of the project's Gitea repo (R-200-142).
@@ -131,9 +137,27 @@ export interface Project {
   git_repo_url?: string | null;
 }
 
-/** Response body of `GET /api/v1/projects`. */
+/** Response body of `GET /api/v1/projects` and `GET /admin/projects`. */
 export interface ProjectList {
   items: Project[];
+}
+
+/** A project's `project_*` role names (E-100-002). */
+export type RBACProjectRole = "project_owner" | "project_editor" | "project_viewer";
+
+/** One entry of a project's access-control list (governance view). */
+export interface ProjectMember {
+  user_id: string;
+  username: string;
+  role: RBACProjectRole;
+}
+
+/** Response of `GET /admin/projects/{pid}/members` — the project ACL.
+ *  Metadata only, exposes NO content (E-100-002 v4). */
+export interface ProjectMemberList {
+  project_id: string;
+  tenant_id: string;
+  members: ProjectMember[];
 }
 
 /** Body of `PATCH /api/v1/projects/{pid}`. Per-field semantics :
@@ -515,7 +539,7 @@ export interface UserAdminList {
 }
 
 // ---------------------------------------------------------------------------
-// Global LLM quota policy (Lot 3) — tenant_manager
+// Global LLM quota policy (Lot 3) — platform_manager
 // ---------------------------------------------------------------------------
 
 /** The four nested scopes a call is attributed to (widest → narrowest). */
@@ -589,6 +613,26 @@ export interface QuotaStatus {
   windows: QuotaWindowStatus[];
   warned: boolean;
   blocked: boolean;
+}
+
+/** One (window x tenant) consumption cell (R-800-144). */
+export interface ConsumptionCell {
+  cost: number;
+  tokens: number;
+}
+
+export interface TenantConsumption {
+  tenant_id: string;
+  /** window key (session/week/month/quarter/semester/year) → cell */
+  windows: Record<string, ConsumptionCell>;
+}
+
+/** Response of `GET /admin/v1/quota/consumption` — per-tenant LLM consumption
+ *  across the reporting windows, in the platform `currency`. */
+export interface ConsumptionReport {
+  currency: string;
+  windows: string[];
+  tenants: TenantConsumption[];
 }
 
 // ===========================================================================

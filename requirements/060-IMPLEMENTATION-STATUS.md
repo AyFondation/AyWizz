@@ -37,14 +37,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 
 | Spec | Total | tested | implemented | test-only | divergent | not-yet |
 |---|---|---|---|---|---|---|
-| [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 82 | 8 | 25 | 4 | 0 | 45 |
+| [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 82 | 8 | 26 | 4 | 0 | 44 |
 | [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 70 | 23 | 28 | 0 | 0 | 19 |
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
-| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 46 | 9 | 11 | 1 | 0 | 25 |
+| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 46 | 9 | 13 | 1 | 0 | 23 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 2 | 22 | 0 | 0 | 0 |
-| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 52 | 2 | 12 | 0 | 0 | 38 |
-| **Total** | **340** | **44** | **127** | **10** | **8** | **151** |
+| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 52 | 2 | 12 | 1 | 0 | 37 |
+| **Total** | **340** | **44** | **130** | **11** | **8** | **147** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -98,8 +98,8 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-100-073` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c2_auth/service.py` | — |
 | `R-100-074` | v1 | draft | **not-yet** | — | — |
 | `R-100-075` | v2 | draft | **not-yet** | — | — |
-| `R-100-080` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/ingest_text_source.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | `ay_platform_core/tests/system/test_uploads_to_retrieval.py` |
-| `R-100-081` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/ingest_text_source.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | `ay_platform_core/tests/system/test_uploads_to_retrieval.py` |
+| `R-100-080` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | `ay_platform_core/tests/system/test_uploads_to_retrieval.py` |
+| `R-100-081` | v3 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/c12_client.py`, `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json` (+1 more) | `ay_platform_core/tests/system/test_uploads_to_retrieval.py` |
 | `R-100-082` | v1 | draft | **not-yet** | — | — |
 | `R-100-083` | v1 | draft | **not-yet** | — | — |
 | `R-100-084` | v1 | draft | **not-yet** | — | — |
@@ -131,7 +131,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-100-122` | v1 | approved | **implemented** | `ay_platform_core/tests/docker-compose.yml` | — |
 | `R-100-123` | v1 | approved | **implemented** | `.github/workflows/ci-tests.yml` | — |
 | `R-100-124` | v1 | approved | **tested** | `ay_platform_core/src/ay_platform_core/_observability/main.py`, `ay_platform_core/src/ay_platform_core/_observability/synthesis.py`, `ay_platform_core/src/ay_platform_core/observability/workflow/__init__.py` (+3 more) | `ay_platform_core/tests/integration/observability/workflow/test_elasticsearch_integration.py`, `ay_platform_core/tests/integration/observability/workflow/test_loki_integration.py`, `ay_platform_core/tests/unit/observability/workflow/test_router.py` |
-| `R-100-125` | v2 | draft | **not-yet** | — | — |
+| `R-100-125` | v2 | draft | **implemented** | `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml`, `infra/k8s/base/c13_extractor/deployment.yaml` | — |
 
 ## R-200-* — [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md)
 
@@ -277,8 +277,8 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-011` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/db/repository.py`, `ay_platform_core/src/ay_platform_core/c7_memory/retrieval/similarity.py` | — |
 | `R-400-012` | v1 | draft | **not-yet** | — | — |
 | `R-400-013` | v1 | draft | **not-yet** | — | — |
-| `R-400-020` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py`, `infra/c12_workflow/workflows/chunk_and_track.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
-| `R-400-021` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/parser.py` | `ay_platform_core/tests/integration/c7_memory/test_auto_kg_extraction.py`, `ay_platform_core/tests/integration/c7_memory/test_kg_extraction.py`, `ay_platform_core/tests/integration/c7_memory/test_upload_pipeline.py` |
+| `R-400-020` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | — |
+| `R-400-021` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/parser.py` | `ay_platform_core/tests/integration/c7_memory/test_auto_kg_extraction.py`, `ay_platform_core/tests/integration/c7_memory/test_kg_extraction.py` |
 | `R-400-022` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/chunker.py` | — |
 | `R-400-023` | v1 | draft | **not-yet** | — | — |
 | `R-400-024` | v1 | draft | **not-yet** | — | — |
@@ -293,7 +293,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-051` | v1 | draft | **not-yet** | — | — |
 | `R-400-060` | v1 | draft | **not-yet** | — | — |
 | `R-400-061` | v1 | draft | **not-yet** | — | — |
-| `R-400-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_blob_download.py` |
+| `R-400-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_blob_download.py`, `ay_platform_core/tests/integration/c7_memory/test_enrichment_config_flow.py`, `ay_platform_core/tests/integration/c7_memory/test_runs_artifacts_flow.py` (+1 more) |
 | `R-400-071` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | — |
 | `R-400-100` | v1 | draft | **not-yet** | — | — |
 | `R-400-101` | v1 | draft | **not-yet** | — | — |
@@ -307,12 +307,12 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-205` | v1 | draft | **not-yet** | — | — |
 | `R-400-206` | v1 | draft | **not-yet** | — | — |
 | `R-400-207` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/artifacts.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py`, `ay_platform_core/src/ay_platform_core/c7_memory/storage/minio_storage.py` | `ay_platform_core/tests/integration/c7_memory/test_artifact_rebuild.py`, `ay_platform_core/tests/unit/c7_memory/test_artifacts.py` |
-| `R-400-208` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py`, `infra/c12_workflow/workflows/chunk_and_track.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | `ay_platform_core/tests/integration/c7_memory/test_processing_version.py`, `ay_platform_core/tests/unit/c7_memory/test_processing_version.py` |
+| `R-400-208` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/unit/c7_memory/test_processing_version.py` |
 | `R-400-209` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/kg/repository.py` | `ay_platform_core/tests/integration/c7_memory/test_bitemporal.py` |
-| `R-400-220` | v2 | draft | **not-yet** | — | — |
+| `R-400-220` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
 | `R-400-221` | v2 | draft | **not-yet** | — | — |
 | `R-400-222` | v2 | draft | **not-yet** | — | — |
-| `R-400-223` | v2 | draft | **not-yet** | — | — |
+| `R-400-223` | v3 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
 | `R-400-224` | v1 | draft | **not-yet** | — | — |
 | `R-400-225` | v1 | draft | **not-yet** | — | — |
 
@@ -389,14 +389,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-033` | v1 | draft | **not-yet** | — | — |
 | `R-800-040` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/catalog.py` | — |
 | `R-800-041` | v1 | draft | **not-yet** | — | — |
-| `R-800-042` | v1 | draft | **not-yet** | — | — |
+| `R-800-042` | v2 | draft | **test-only** | — | `ay_platform_core/tests/integration/c3_conversation/test_chat_quota_429_e2e.py`, `ay_platform_core/tests/integration/c8_llm/test_quota_attribution_pipeline_e2e.py`, `ay_platform_core/tests/integration/c8_llm/test_quota_concurrency_e2e.py` (+2 more) |
 | `R-800-050` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/catalog.py`, `ay_platform_core/src/ay_platform_core/c8_llm/validator.py` | — |
 | `R-800-051` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/catalog.py`, `ay_platform_core/src/ay_platform_core/c8_llm/validator.py` | — |
 | `R-800-060` | v1 | draft | **not-yet** | — | — |
 | `R-800-061` | v1 | draft | **not-yet** | — | — |
 | `R-800-062` | v1 | draft | **not-yet** | — | — |
 | `R-800-063` | v1 | draft | **not-yet** | — | — |
-| `R-800-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost_sink_arango.py`, `ay_platform_core/src/ay_platform_core/c8_llm/main.py` (+4 more) | `ay_platform_core/tests/integration/c8_llm/test_cost_receiver_api.py`, `ay_platform_core/tests/unit/c8_llm/test_cost_receiver.py` |
+| `R-800-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost_sink_arango.py`, `ay_platform_core/src/ay_platform_core/c8_llm/main.py` (+4 more) | `ay_platform_core/tests/integration/c8_llm/test_cost_receiver_api.py`, `ay_platform_core/tests/integration/c8_llm/test_quota_attribution_pipeline_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_cost_receiver.py` |
 | `R-800-071` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost.py` | — |
 | `R-800-072` | v1 | draft | **not-yet** | — | — |
 | `R-800-073` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py`, `ay_platform_core/src/ay_platform_core/c8_llm/models.py` | — |

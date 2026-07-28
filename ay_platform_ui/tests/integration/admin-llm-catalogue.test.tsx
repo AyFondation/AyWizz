@@ -3,8 +3,8 @@
 // Path: ay_platform_ui/tests/integration/admin-llm-catalogue.test.tsx
 // Description: Tests for the per-tenant LLM catalogue admin page. Covers :
 //              forbidden view for a non-admin ; list render ; enable toggle ;
-//              markup save ; remove ; add-by-alias ; the 404 (alias not in the
-//              platform registry) message.
+//              markup save ; remove ; re-add via the /available picker (800 v10) ;
+//              the 404 (model no longer in the platform registry) message.
 // =============================================================================
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -38,6 +38,23 @@ vi.mock("next/navigation", () => ({
 }));
 
 const CATALOG_URL = "/api/v1/llm/catalog";
+const AVAILABLE_URL = "/api/v1/llm/catalog/available";
+
+function regModel(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    model_id: "m1",
+    alias: "claude-haiku-fast",
+    provider_id: "p1",
+    upstream_model: "claude-haiku-4-5-20251001",
+    capabilities: { vision: true, tool_calling: true, context_window: 200000 },
+    provider_cost_in_per_1m: 0.8,
+    provider_cost_out_per_1m: 4.0,
+    default_model_quality: "low",
+    enabled: true,
+    effective_from: "2026-06-05T00:00:00+00:00",
+    ...over,
+  };
+}
 
 function entry(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -88,6 +105,9 @@ function renderPage() {
 
 beforeEach(() => {
   window.localStorage.clear();
+  // Default: nothing available to re-add (opt-out — all models catalogued).
+  // Tests that exercise the picker override this.
+  server.use(http.get(AVAILABLE_URL, () => HttpResponse.json({ models: [] })));
 });
 
 describe("LlmCataloguePage", () => {
@@ -163,18 +183,35 @@ describe("LlmCataloguePage", () => {
     await waitFor(() => expect(del).toHaveBeenCalled());
   });
 
-  it("404 on add of an alias not in the registry", async () => {
+  it("re-adds a model selected from the /available picker", async () => {
+    seedToken(["admin"]);
+    const put = vi.fn(() => HttpResponse.json(entry()));
+    server.use(
+      http.get(CATALOG_URL, () => HttpResponse.json({ models: [] })),
+      http.get(AVAILABLE_URL, () => HttpResponse.json({ models: [regModel()] })),
+      http.put(`${CATALOG_URL}/m1`, put),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("catalogue-add-select")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByTestId("catalogue-add-select"), "m1");
+    await user.click(screen.getByTestId("catalogue-add-button"));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+  });
+
+  it("404 when the picked model was meanwhile removed from the registry", async () => {
     seedToken(["admin"]);
     server.use(
       http.get(CATALOG_URL, () => HttpResponse.json({ models: [] })),
-      http.put(`${CATALOG_URL}/ghost`, () =>
+      http.get(AVAILABLE_URL, () => HttpResponse.json({ models: [regModel()] })),
+      http.put(`${CATALOG_URL}/m1`, () =>
         HttpResponse.json({ detail: "not in registry" }, { status: 404 }),
       ),
     );
     renderPage();
-    await waitFor(() => expect(screen.getByTestId("catalogue-empty")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("catalogue-add-select")).toBeInTheDocument());
     const user = userEvent.setup();
-    await user.type(screen.getByTestId("catalogue-add-input"), "ghost");
+    await user.selectOptions(screen.getByTestId("catalogue-add-select"), "m1");
     await user.click(screen.getByTestId("catalogue-add-button"));
     await waitFor(() =>
       expect(screen.getByTestId("catalogue-error")).toHaveTextContent(/Unknown model id/i),

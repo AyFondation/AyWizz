@@ -24,6 +24,7 @@ from ay_platform_core.c4_orchestrator.models import (
 )
 from ay_platform_core.c4_orchestrator.router import router
 from tests.fixtures.contract_registry import find_by_producer
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -34,7 +35,7 @@ def _app() -> FastAPI:
 
 def _routes() -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())
@@ -120,7 +121,7 @@ class TestEndpointRoster:
 
     def test_create_run_returns_run_public(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/orchestrator/runs"
             and "POST" in (r.methods or set())

@@ -2,7 +2,7 @@
 // File: page.tsx
 // Version: 1
 // Path: ay_platform_ui/app/(protected)/admin/llm-providers/page.tsx
-// Description: LLM provider registry admin surface (tenant_manager only). A
+// Description: LLM provider registry admin surface (platform_manager only). A
 //              provider is an ENDPOINT + a wire-format + a write-only API key,
 //              referenced by registry models via a stable id. The base URL is
 //              MANDATORY (the platform is provider-agnostic; no default). Each
@@ -31,7 +31,7 @@ export default function LlmProvidersPage() {
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
-    return (authState.claims.roles ?? []).includes("tenant_manager");
+    return (authState.claims.roles ?? []).includes("platform_manager");
   }, [authState]);
 
   const reload = useCallback(() => {
@@ -104,7 +104,7 @@ export default function LlmProvidersPage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="providers-forbidden"
         >
-          LLM providers are restricted to platform administrators (tenant_manager).
+          LLM providers are restricted to platform administrators (platform_manager).
         </p>
       </main>
     );

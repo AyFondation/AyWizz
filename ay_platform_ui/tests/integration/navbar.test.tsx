@@ -1,6 +1,6 @@
 // =============================================================================
 // File: navbar.test.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/tests/integration/navbar.test.tsx
 // Description: Integration tests for <Navbar>. Brand from ConfigProvider,
 //              user info from AuthProvider claims, logout button
@@ -94,7 +94,7 @@ describe("Navbar rendering", () => {
     seedAuthenticated({
       username: "platform-admin",
       tenant_id: "acme-prod",
-      roles: ["tenant_manager", "admin"],
+      roles: ["platform_manager", "admin"],
     });
     renderNavbar();
 
@@ -139,8 +139,8 @@ describe("Navbar logout", () => {
 });
 
 describe("Navbar LLM-governance links (role-gated)", () => {
-  it("shows the registry + tenants + users links to tenant_manager", async () => {
-    seedAuthenticated({ roles: ["tenant_manager"] });
+  it("shows the registry + tenants + users links to platform_manager", async () => {
+    seedAuthenticated({ roles: ["platform_manager"] });
     renderNavbar();
     await waitFor(() => expect(screen.getByTestId("navbar-link-llm-registry")).toBeInTheDocument());
     expect(screen.getByTestId("navbar-link-llm-providers")).toBeInTheDocument();
@@ -157,6 +157,20 @@ describe("Navbar LLM-governance links (role-gated)", () => {
       expect(screen.getByTestId("navbar-link-llm-catalogue")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("navbar-link-llm-registry")).not.toBeInTheDocument();
+  });
+
+  it("shows the tenant operator (admin) its scoped governance links only", async () => {
+    // E-100-002 v7: admin/tenant_admin is a content-blind, tenant-scoped
+    // operator — it gets the operator Projects + Users links but NOT the
+    // platform-only surfaces (Tenants, LLM registry/providers, global Quotas).
+    seedAuthenticated({ roles: ["admin"] });
+    renderNavbar();
+    await waitFor(() => expect(screen.getByTestId("navbar-link-users")).toBeInTheDocument());
+    expect(screen.getByTestId("navbar-link-projects")).toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-tenants")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-quotas")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-llm-registry")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("navbar-link-llm-providers")).not.toBeInTheDocument();
   });
 
   it("shows neither to a plain project member", async () => {

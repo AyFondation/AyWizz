@@ -146,7 +146,7 @@ configMapGenerator:
       - C2_JWT_PRIVATE_KEY=
       - C2_JWT_PUBLIC_KEY=
       - C2_LOCAL_ADMIN_USERNAME=alice
-      - C2_LOCAL_TENANT_MANAGER_USERNAME=platform-admin
+      - C2_LOCAL_PLATFORM_MANAGER_USERNAME=platform-admin
       - C2_TOKEN_TTL_SECONDS=3600
       - "C2_DEFAULT_USER_PROMPT=Do not invent things. Do not cheat. Do not lie. If you don't know, say so. If you are missing information, ask for it."
       - C2_DEFAULT_PROJECT_PROMPT=
@@ -270,7 +270,7 @@ secretGenerator:
       - MINIO_SECRET_KEY=ay-app-dev-password
       - C2_JWT_SECRET_KEY=local-dev-secret-min-32-chars!!!!
       - C2_LOCAL_ADMIN_PASSWORD=seed-password
-      - C2_LOCAL_TENANT_MANAGER_PASSWORD=seed-tm-password
+      - C2_LOCAL_PLATFORM_MANAGER_PASSWORD=seed-tm-password
       - OBS_ELASTICSEARCH_PASSWORD=
       - C8_GATEWAY_API_KEY=
     type: Opaque

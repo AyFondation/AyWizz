@@ -30,7 +30,7 @@ from tests.fixtures.containers import ArangoEndpoint, cleanup_arango_database
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-_TMGR_HEADERS = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager"}
+_TMGR_HEADERS = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager"}
 _USER_HEADERS = {"X-User-Id": "u-plain", "X-User-Roles": "user"}
 
 
@@ -129,7 +129,82 @@ async def test_status_reflects_real_usage_and_blocks(quota_app: FastAPI) -> None
     assert w["state"] == "exceeded"
 
 
-async def test_quota_policy_requires_tenant_manager(quota_app: FastAPI) -> None:
+async def test_status_project_id_surfaces_project_consumption(quota_app: FastAPI) -> None:
+    """`?project_id=` adds a PROJECT level whose consumption aggregates only
+    that project's `llm_calls` — the project-governance consumption view
+    (E-100-002 v4). A call for a different project must not count."""
+    db = quota_app.state.quota_db
+    now = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    db.collection(COLL_CALLS).insert(
+        {
+            "_key": uuid.uuid4().hex,
+            "tags": {"tenant_id": "t1", "project_id": "proj-x", "session_id": "s"},
+            "timestamp_start": now,
+            "cost_usd": 3.0,
+            "input_tokens": 100,
+            "output_tokens": 50,
+        }
+    )
+    db.collection(COLL_CALLS).insert(
+        {
+            "_key": uuid.uuid4().hex,
+            "tags": {"tenant_id": "t1", "project_id": "other", "session_id": "s"},
+            "timestamp_start": now,
+            "cost_usd": 99.0,
+            "input_tokens": 9,
+            "output_tokens": 9,
+        }
+    )
+    async with _client(quota_app) as c:
+        r = await c.get(
+            "/admin/v1/quota/status?tenant_id=t1&project_id=proj-x",
+            headers=_TMGR_HEADERS,
+        )
+    assert r.status_code == 200, r.text
+    proj_levels = [
+        lvl
+        for w in r.json()["windows"]
+        for lvl in w["levels"]
+        if lvl["level"] == "project"
+    ]
+    assert proj_levels, "no project level surfaced when project_id supplied"
+    assert any(
+        abs(lvl["usage_cost_usd"] - 3.0) < 1e-9 and lvl["usage_tokens"] == 150
+        for lvl in proj_levels
+    )
+
+
+async def test_consumption_report_groups_by_tenant(quota_app: FastAPI) -> None:
+    """`/admin/v1/quota/consumption` (R-800-144) sums cost + tokens per tenant
+    across the 6 reporting windows, in the platform currency."""
+    db = quota_app.state.quota_db
+    db.collection(COLL_CALLS).insert(_call_doc("t1", 2.0, 100, 50))
+    db.collection(COLL_CALLS).insert(_call_doc("t1", 3.0, 200, 100))
+    db.collection(COLL_CALLS).insert(_call_doc("t2", 1.0, 10, 5))
+    async with _client(quota_app) as c:
+        r = await c.get("/admin/v1/quota/consumption", headers=_TMGR_HEADERS)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["currency"] == "EUR"
+    assert set(body["windows"]) == {
+        "session", "week", "month", "quarter", "semester", "year",
+    }
+    by_tenant = {t["tenant_id"]: t for t in body["tenants"]}
+    assert set(by_tenant) == {"t1", "t2"}
+    # Calls are ~1 min old → always inside the rolling 5h `session` window.
+    t1 = by_tenant["t1"]["windows"]["session"]
+    assert abs(t1["cost"] - 5.0) < 1e-9 and t1["tokens"] == 450
+    t2 = by_tenant["t2"]["windows"]["session"]
+    assert abs(t2["cost"] - 1.0) < 1e-9 and t2["tokens"] == 15
+
+
+async def test_consumption_requires_platform_manager(quota_app: FastAPI) -> None:
+    async with _client(quota_app) as c:
+        r = await c.get("/admin/v1/quota/consumption", headers=_USER_HEADERS)
+    assert r.status_code == 403
+
+
+async def test_quota_policy_requires_platform_manager(quota_app: FastAPI) -> None:
     async with _client(quota_app) as c:
         get = await c.get("/admin/v1/quota/policy", headers=_USER_HEADERS)
         put = await c.put("/admin/v1/quota/policy", headers=_USER_HEADERS, json={"windows": []})
@@ -142,7 +217,7 @@ async def test_quota_policy_requires_tenant_manager(quota_app: FastAPI) -> None:
 async def test_self_quota_uses_caller_tenant_header(quota_app: FastAPI) -> None:
     db = quota_app.state.quota_db
     db.collection(COLL_CALLS).insert(_call_doc("t-self", 3.0, 100, 50))
-    # A PLAIN user (no tenant_manager) reads their OWN tenant via X-Tenant-Id.
+    # A PLAIN user (no platform_manager) reads their OWN tenant via X-Tenant-Id.
     headers = {"X-User-Id": "u-member", "X-User-Roles": "user", "X-Tenant-Id": "t-self"}
     async with _client(quota_app) as c:
         me = await c.get("/api/v1/quota/me", headers=headers)

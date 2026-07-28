@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/service.py
 # Description: C2 Auth Service facade. Orchestrates pluggable auth modes,
 #              JWT issuance/verification, and user management.
@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
@@ -42,7 +43,10 @@ from ay_platform_core.c2_auth.models import (
     JWTClaims,
     LoginRequest,
     ProjectCreate,
+    ProjectMember,
+    ProjectMemberList,
     ProjectPublic,
+    ProjectStatus,
     ProjectUpdate,
     RBACProjectRole,
     ResetPasswordRequest,
@@ -63,6 +67,8 @@ from ay_platform_core.c2_auth.modes.base import AuthMode
 from ay_platform_core.c2_auth.modes.local_mode import LocalMode
 from ay_platform_core.c2_auth.modes.none_mode import NoneMode
 from ay_platform_core.c2_auth.modes.sso_mode import SSOMode
+
+logger = logging.getLogger("c2_auth.service")
 
 _FORBIDDEN_ENVIRONMENTS = {"production", "staging"}
 
@@ -214,7 +220,7 @@ class AuthService:
             DevCredential(
                 username=cfg.demo_seed_superroot_username,
                 password=cfg.demo_seed_superroot_password,
-                role_label="super-root (tenant_manager)",
+                role_label="super-root (platform_manager)",
                 note="Content-blind: lifecycle ops only, no project access.",
             ),
             DevCredential(
@@ -254,7 +260,7 @@ class AuthService:
         user = await self._mode.authenticate(request)
         # Platform-operator tenant deactivation (E-100-002 v3): refuse login to
         # a member of a deactivated tenant (the user passed auth, but the tenant
-        # is suspended). tenant_manager itself is platform-scoped — its own
+        # is suspended). platform_manager itself is platform-scoped — its own
         # tenant_id may not be a managed tenant, so a missing tenant doc is
         # treated as active (no regression for the super-root login).
         if self._repo is not None:
@@ -397,7 +403,7 @@ class AuthService:
         repo = self._require_repo()
         await repo.deactivate_session(session_id)
 
-    # ---- Tenant lifecycle (tenant_manager only) -----------------------------
+    # ---- Tenant lifecycle (platform_manager only) -----------------------------
 
     async def create_tenant(self, payload: TenantCreate) -> TenantPublic:
         repo = self._require_repo()
@@ -424,7 +430,7 @@ class AuthService:
             )
 
     async def set_tenant_active(self, tenant_id: str, active: bool) -> TenantPublic:
-        """Deactivate / reactivate a tenant (tenant_manager). A deactivated
+        """Deactivate / reactivate a tenant (platform_manager). A deactivated
         tenant's users are refused login (enforced in `issue_token`)."""
         repo = self._require_repo()
         if not await repo.update_tenant(tenant_id, {"active": active}):
@@ -436,7 +442,7 @@ class AuthService:
         assert doc is not None
         return _tenant_doc_to_public(doc)
 
-    # ---- Cross-tenant user oversight (tenant_manager, E-100-002 v3) ----------
+    # ---- Cross-tenant user oversight (platform_manager, E-100-002 v3) ----------
 
     async def list_users(self, tenant_id: str | None = None) -> list[UserPublic]:
         """List users across ALL tenants (optionally filtered). The platform
@@ -449,7 +455,7 @@ class AuthService:
 
     async def set_user_active(self, user_id: str, active: bool) -> UserPublic:
         """Deactivate (status=disabled) / reactivate (status=active) a user,
-        cross-tenant (tenant_manager oversight)."""
+        cross-tenant (platform_manager oversight)."""
         repo = self._require_repo()
         existing = await repo.get_user_by_id(user_id)
         if existing is None:
@@ -459,6 +465,164 @@ class AuthService:
         updated = await repo.get_user_by_id(user_id)
         assert updated is not None
         return UserPublic.model_validate(updated.model_dump())
+
+    # ---- Project GOVERNANCE (platform_manager, E-100-002 v4, cross-tenant) ----
+
+    async def _audit(
+        self,
+        *,
+        action: str,
+        actor_id: str,
+        target: str,
+        before: Any = None,
+        after: Any = None,
+    ) -> None:
+        """Append one governance audit record (best-effort — never blocks
+        the action, mirrors the guard's best-effort discipline)."""
+        repo = self._require_repo()
+        try:
+            await repo.append_audit(
+                {
+                    "action": action,
+                    "actor_id": actor_id,
+                    "target": target,
+                    "before": before,
+                    "after": after,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+        except Exception:
+            # Audit is advisory — never block the governance action on it.
+            logger.warning("governance audit append failed for %s", action)
+
+    async def list_all_projects(
+        self, tenant_id: str | None = None
+    ) -> list[ProjectPublic]:
+        """Every project across all tenants (metadata only), optionally
+        narrowed to one tenant. Platform-operator governance view."""
+        repo = self._require_repo()
+        rows = await repo.list_all_projects(tenant_id)
+        return [self._project_doc_to_public(r) for r in rows]
+
+    async def set_project_status(
+        self, project_id: str, new_status: ProjectStatus, actor_id: str
+    ) -> ProjectPublic:
+        """Activate / deactivate / archive a project (governance status).
+        A non-`active` project blocks member access to its content. Audited."""
+        repo = self._require_repo()
+        doc = await repo.get_project(project_id)
+        if doc is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"project {project_id!r} not found",
+            )
+        before = doc.get("status", ProjectStatus.ACTIVE.value)
+        await repo.set_project_status(project_id, new_status.value)
+        await self._audit(
+            action="project.status",
+            actor_id=actor_id,
+            target=project_id,
+            before=before,
+            after=new_status.value,
+        )
+        updated = await repo.get_project(project_id)
+        assert updated is not None
+        return self._project_doc_to_public(updated)
+
+    async def get_project_status(self, project_id: str) -> ProjectStatus | None:
+        """The lifecycle status of a project, or `None` when it cannot be
+        determined (project absent, or no project store configured in this
+        mode). Consumed by the `/verify` forward-auth path to reject content
+        access to a non-`active` project (E-100-002 v4, §Lifecycle status):
+        `inactive` blocks all access, `archived` blocks mutations. Returning
+        `None` skips enforcement — a `None` (unknown) project is left to the
+        downstream component to 404, never blocked here."""
+        if self._repo is None:
+            return None
+        doc = await self._repo.get_project(project_id)
+        if doc is None:
+            return None
+        return ProjectStatus(doc.get("status", ProjectStatus.ACTIVE.value))
+
+    async def resolve_project_tenant(self, project_id: str) -> str | None:
+        """The `tenant_id` owning `project_id`, or `None` if unknown. Used by
+        the governance router to scope an `admin` (tenant operator) to its own
+        tenant (a cross-tenant target → 403); `platform_manager` is unscoped."""
+        if self._repo is None:
+            return None
+        doc = await self._repo.get_project(project_id)
+        return doc["tenant_id"] if doc else None
+
+    async def list_project_members(self, project_id: str) -> ProjectMemberList:
+        """The project's access-control list (members + project roles).
+        Metadata only — exposes NO content."""
+        repo = self._require_repo()
+        doc = await repo.get_project(project_id)
+        if doc is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"project {project_id!r} not found",
+            )
+        rows = await repo.list_project_members(project_id)
+        members = [
+            ProjectMember(
+                user_id=r["user_id"],
+                username=r.get("username") or "",
+                role=RBACProjectRole(r["role"]),
+            )
+            for r in rows
+        ]
+        return ProjectMemberList(
+            project_id=project_id, tenant_id=doc["tenant_id"], members=members
+        )
+
+    async def grant_project_access(
+        self,
+        project_id: str,
+        user_id: str,
+        role: RBACProjectRole,
+        actor_id: str,
+    ) -> ProjectMemberList:
+        """Grant a user a project role (cross-tenant operator action). No
+        tenant scoping — the operator governs access across all tenants.
+        Audited; returns the updated ACL."""
+        repo = self._require_repo()
+        if await repo.get_project(project_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"project {project_id!r} not found",
+            )
+        if await repo.get_user_by_id(user_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"user {user_id!r} not found",
+            )
+        await repo.grant_project_role(user_id, project_id, role.value)
+        await self._audit(
+            action="access.grant",
+            actor_id=actor_id,
+            target=f"{user_id}:{project_id}",
+            after=role.value,
+        )
+        return await self.list_project_members(project_id)
+
+    async def revoke_project_access(
+        self, project_id: str, user_id: str, actor_id: str
+    ) -> ProjectMemberList:
+        """Revoke a user's project role (cross-tenant operator action).
+        Audited; 404 when no grant exists; returns the updated ACL."""
+        repo = self._require_repo()
+        if not await repo.revoke_project_role(user_id, project_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"no grant for user {user_id!r} on project {project_id!r}",
+            )
+        await self._audit(
+            action="access.revoke",
+            actor_id=actor_id,
+            target=f"{user_id}:{project_id}",
+        )
+        return await self.list_project_members(project_id)
 
     # ---- Project lifecycle (admin / tenant_admin) ---------------------------
 
@@ -480,6 +644,7 @@ class AuthService:
             tenant_id=doc["tenant_id"],
             name=doc["name"],
             profile=doc.get("profile", "code"),
+            status=ProjectStatus(doc.get("status", ProjectStatus.ACTIVE.value)),
             created_at=datetime.fromisoformat(doc["created_at"]),
             created_by=doc["created_by"],
             system_prompt=effective,

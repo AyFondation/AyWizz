@@ -14,7 +14,7 @@
 #                  401/403. The role gate cleared; downstream errors
 #                  (422 body, 500 service, etc.) are OK because they
 #                  prove the request reached past the gate.
-#              (c) Excluded global role (e.g. `tenant_manager` on
+#              (c) Excluded global role (e.g. `platform_manager` on
 #                  content endpoints per E-100-002 v2 separation of
 #                  duties) → response code MUST NOT be a success.
 #
@@ -146,33 +146,33 @@ async def test_accepted_role_clears_gate(
 
 
 # ---------------------------------------------------------------------------
-# (c) Excluded global role — content-blindness for tenant_manager
+# (c) Excluded global role — content-blindness for platform_manager
 # ---------------------------------------------------------------------------
 
 
-_EXCLUDED_TENANT_MANAGER = [
-    e for e in _ROLE_GATED if "tenant_manager" in e.excluded_global_roles
+_EXCLUDED_PLATFORM_MANAGER = [
+    e for e in _ROLE_GATED if "platform_manager" in e.excluded_global_roles
 ]
 
 
 @pytest.mark.asyncio(loop_scope="session")
 @pytest.mark.parametrize(
     "spec",
-    _EXCLUDED_TENANT_MANAGER,
-    ids=[endpoint_id(e) for e in _EXCLUDED_TENANT_MANAGER],
+    _EXCLUDED_PLATFORM_MANAGER,
+    ids=[endpoint_id(e) for e in _EXCLUDED_PLATFORM_MANAGER],
 )
-async def test_tenant_manager_excluded_from_content(
+async def test_platform_manager_excluded_from_content(
     spec: EndpointSpec,
     auth_matrix_stack: PlatformStack,
     profiles: dict[str, RoleProfile],
 ) -> None:
-    """Per E-100-002 v2: `tenant_manager` SHALL be content-blind. On
+    """Per E-100-002 v2: `platform_manager` SHALL be content-blind. On
     every endpoint that operates on tenant content, a request bearing
-    only `tenant_manager` SHALL NOT receive a 2xx response."""
-    response = await _call(spec, auth_matrix_stack, profiles["tenant_manager"])
+    only `platform_manager` SHALL NOT receive a 2xx response."""
+    response = await _call(spec, auth_matrix_stack, profiles["platform_manager"])
     assert response.status_code not in _SUCCESS_CODES, (
         f"{spec.method} {spec.path} returned {response.status_code} for "
-        f"`tenant_manager` — but this endpoint declares `tenant_manager` "
+        f"`platform_manager` — but this endpoint declares `platform_manager` "
         f"as excluded (E-100-002 v2). The role gate must reject "
-        f"tenant_manager on content endpoints. Body: {response.text[:300]}"
+        f"platform_manager on content endpoints. Body: {response.text[:300]}"
     )

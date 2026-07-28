@@ -1,6 +1,6 @@
 # =============================================================================
 # File: repository.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/db/repository.py
 # Description: ArangoDB repository for C3 — conversations and messages.
 #              All public methods are async (asyncio.to_thread wrapper over
@@ -33,6 +33,16 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 
 COLL_CONVERSATIONS = "c3_conversations"
 COLL_MESSAGES = "c3_messages"
+
+# C2-owned governance store. Read ONLY, and ONLY the lifecycle `status` field,
+# to enforce E-100-002 v4 (a non-`active` project blocks access to its content)
+# on conversation content — the record-derived case the `/verify` forward-auth
+# cannot cover because a conversation carries no `{project_id}` in its URL.
+# This is a deliberate, reviewed cross-collection read within the single shared
+# database (R-100-012 isolates at the collection level, not the DB level); C3
+# never writes it. If C2 is not co-located (collection absent), the probe
+# returns None and enforcement is skipped.
+COLL_C2_PROJECTS = "c2_projects"
 
 
 class ConversationRepository:
@@ -225,6 +235,25 @@ class ConversationRepository:
 
     async def list_messages(self, conversation_id: UUID) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._list_messages_sync, conversation_id)
+
+    # ------------------------------------------------------------------
+    # Cross-component read: project lifecycle status (E-100-002 v4)
+    # ------------------------------------------------------------------
+
+    def _get_project_status_sync(self, project_id: str) -> str | None:
+        # Read-only probe of the C2-owned governance store; see COLL_C2_PROJECTS.
+        if not self._db.has_collection(COLL_C2_PROJECTS):
+            return None
+        doc = self._db.collection(COLL_C2_PROJECTS).get(project_id)
+        if doc is None:
+            return None
+        return cast("str | None", doc.get("status"))
+
+    async def get_project_status(self, project_id: str) -> str | None:
+        """The lifecycle status of `project_id` (`active` / `inactive` /
+        `archived`), or `None` when unknown (project absent, or the C2
+        governance collection is not co-located). `None` skips enforcement."""
+        return await asyncio.to_thread(self._get_project_status_sync, project_id)
 
 
 def make_repository(

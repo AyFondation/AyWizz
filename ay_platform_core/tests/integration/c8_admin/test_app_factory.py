@@ -36,7 +36,7 @@ _CANONICAL_CONFIG = (
     / "config"
     / "litellm-config.yaml"
 )
-_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager"}
+_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager"}
 
 
 @pytest_asyncio.fixture(scope="function")

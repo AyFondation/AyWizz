@@ -75,6 +75,9 @@ def _make_repo(**overrides: Any) -> MagicMock:
     repo.soft_delete_conversation = AsyncMock(return_value=None)
     repo.list_messages = AsyncMock(return_value=[])
     repo.append_message = AsyncMock(return_value=_make_msg_doc(uuid4()))
+    # Default: project status unknown → E-100-002 v4 enforcement is skipped
+    # (existing tests use project_id=None, so this is never consulted anyway).
+    repo.get_project_status = AsyncMock(return_value=None)
     for k, v in overrides.items():
         setattr(repo, k, v)
     return repo

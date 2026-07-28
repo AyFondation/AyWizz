@@ -341,7 +341,7 @@ async def test_status_endpoints_report_per_level(quota_db: Any) -> None:
     app = FastAPI()
     app.include_router(quota_router)
     app.state.quota_service = QuotaService(QuotaRepository(quota_db))
-    tmgr = {"X-User-Id": "op", "X-User-Roles": "tenant_manager"}
+    tmgr = {"X-User-Id": "op", "X-User-Roles": "platform_manager"}
 
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://c8") as c:
@@ -392,3 +392,129 @@ async def test_unblocked_call_returns_mocked_content(quota_db: Any) -> None:
     resp = await _call(quota_db, tenant="t1", user="u1")
     assert resp.choices[0].message.content == "ok"
     assert resp.usage.total_tokens == 2
+
+
+# --- 13. Exhaustive matrix: level x dimension x state -----------------------
+
+_CAP_COST = 10.0
+_CAP_TOK = 1000
+
+
+def _subject_for(level: str) -> tuple[str, str | None, str | None]:
+    """(tenant, project, user) ids putting usage at the requested level."""
+    return "t1", ("p1" if level == "project" else None), ("u1" if level == "user" else None)
+
+
+@pytest.mark.parametrize("level", ["global", "tenant", "project", "user"])
+@pytest.mark.parametrize("dim", ["cost", "tokens"])
+@pytest.mark.parametrize(
+    ("state", "factor", "expect_block"),
+    [("ok", 0.4, False), ("warn", 0.9, False), ("block", 1.1, True)],
+)
+async def test_level_dimension_state_matrix(
+    quota_db: Any, level: str, dim: str, state: str, factor: float, expect_block: bool
+) -> None:
+    cap = _CAP_COST if dim == "cost" else float(_CAP_TOK)
+    limits = (
+        QuotaLimits(max_cost_usd=cap) if dim == "cost" else QuotaLimits(max_tokens=int(cap))
+    )
+    await _set_policy(quota_db, _week(**{level: limits}))
+    tenant, project, user = _subject_for(level)
+    amount = cap * factor
+    if dim == "cost":
+        _seed_call(quota_db, cost=amount, tenant=tenant, project=project, user=user)
+    else:
+        _seed_call(
+            quota_db, cost=0.0, in_tok=int(amount), tenant=tenant, project=project, user=user
+        )
+    if expect_block:
+        with pytest.raises(QuotaExceededError):
+            await _call(quota_db, tenant=tenant, project=project, user=user)
+    else:
+        resp = await _call(quota_db, tenant=tenant, project=project, user=user)
+        assert resp.choices[0].message.content == "ok"
+
+
+# --- 14. Boundary: usage == cap blocks (the limit is inclusive, `>=`) -------
+
+
+@pytest.mark.parametrize(
+    ("usage", "expect_block"), [(999, False), (1000, True), (1001, True)]
+)
+async def test_token_cap_boundary_is_inclusive(
+    quota_db: Any, usage: int, expect_block: bool
+) -> None:
+    await _set_policy(quota_db, _week(tenant=QuotaLimits(max_tokens=1000)))
+    _seed_call(quota_db, cost=0.0, in_tok=usage, out_tok=0, tenant="t1")
+    if expect_block:
+        with pytest.raises(QuotaExceededError):
+            await _call(quota_db, tenant="t1")
+    else:
+        resp = await _call(quota_db, tenant="t1")
+        assert resp.choices[0].message.content == "ok"
+
+
+# --- 15. Warn precision: fires AT the threshold, not below ------------------
+
+
+@pytest.mark.parametrize(
+    ("pct", "expect_warn"), [(0.79, False), (0.80, True), (0.95, True)]
+)
+async def test_warn_threshold_precision(
+    quota_db: Any, caplog: pytest.LogCaptureFixture, pct: float, expect_warn: bool
+) -> None:
+    await _set_policy(
+        quota_db, _week(tenant=QuotaLimits(max_cost_usd=100.0))
+    )  # warn at 80%
+    _seed_call(quota_db, cost=100.0 * pct, tenant="t1")
+    with caplog.at_level(logging.WARNING):
+        await _call(quota_db, tenant="t1")
+    warned = any("approaching" in r.message for r in caplog.records)
+    assert warned is expect_warn
+
+
+# --- 15b. Cross-tenant isolation: /quota/me never leaks another tenant ------
+
+
+async def test_quota_me_is_isolated_per_tenant(quota_db: Any) -> None:
+    await _set_policy(quota_db, _week(tenant=QuotaLimits(max_cost_usd=100.0)))
+    _seed_call(quota_db, cost=10.0, tenant="t1")
+    _seed_call(quota_db, cost=50.0, tenant="t2")
+    app = FastAPI()
+    app.include_router(quota_router)
+    app.state.quota_service = QuotaService(QuotaRepository(quota_db))
+
+    def _tenant_cost(body: dict[str, Any]) -> float:
+        lv = next(x for x in body["windows"][0]["levels"] if x["level"] == "tenant")
+        return float(lv["usage_cost_usd"])
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://c8") as c:
+        a = await c.get("/api/v1/quota/me", headers={"X-User-Id": "u", "X-Tenant-Id": "t1"})
+        b = await c.get("/api/v1/quota/me", headers={"X-User-Id": "u", "X-Tenant-Id": "t2"})
+        # A query param cannot override the forward-auth tenant (no peeking).
+        spoof = await c.get(
+            "/api/v1/quota/me?tenant_id=t2",
+            headers={"X-User-Id": "u", "X-Tenant-Id": "t1"},
+        )
+    assert a.json()["tenant_id"] == "t1" and _tenant_cost(a.json()) == 10.0
+    assert b.json()["tenant_id"] == "t2" and _tenant_cost(b.json()) == 50.0
+    assert spoof.json()["tenant_id"] == "t1"  # the ?tenant_id=t2 is ignored
+
+
+# --- 16. Multi-window: the most-constraining window blocks ------------------
+
+
+async def test_multi_window_most_constraining_blocks(quota_db: Any) -> None:
+    week = _week(tenant=QuotaLimits(max_cost_usd=10.0))
+    month = QuotaWindow(
+        key="month",
+        label="Month",
+        duration_seconds=30 * 86400,
+        anchor="calendar_month",
+        limits={"tenant": QuotaLimits(max_cost_usd=1000.0)},
+    )
+    await _set_policy(quota_db, week, month)
+    _seed_call(quota_db, cost=12.0, tenant="t1")  # over week ($10), under month ($1000)
+    with pytest.raises(QuotaExceededError):
+        await _call(quota_db, tenant="t1")

@@ -1,16 +1,19 @@
 # =============================================================================
 # File: catalog_router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/catalog_router.py
 # Description: FastAPI APIRouter for the per-tenant LLM catalogue admin surface.
 #              Tenant-scoped (X-Tenant-Id forward-auth header) and gated to a
 #              tenant's content owners — `admin` / `tenant_admin`. Per
-#              E-100-002 v2 the catalogue is TENANT CONTENT, so `tenant_manager`
-#              (content-blind super-root) is EXCLUDED: a tenant_manager-only
+#              E-100-002 v2 the catalogue is TENANT CONTENT, so `platform_manager`
+#              (content-blind super-root) is EXCLUDED: a platform_manager-only
 #              caller fails the gate (it holds none of the accepted roles).
 #
 #              Carries no secret — catalogue rows never hold a key. Mounted by
 #              the c8_admin app factory with prefix "".
+#              v2 (800 v10): `GET /api/v1/llm/catalog/available` lists the
+#              platform-registry models NOT yet in the tenant catalogue (the
+#              re-add picker) — public projection, no provider secret.
 # =============================================================================
 
 from __future__ import annotations
@@ -29,7 +32,10 @@ from ay_platform_core.c8_llm.registry.catalog_service import (
     ModelNotInRegistryError,
     TenantCatalogService,
 )
-from ay_platform_core.c8_llm.registry.models import ModelQuality
+from ay_platform_core.c8_llm.registry.models import (
+    LLMRegistryListResponse,
+    ModelQuality,
+)
 
 router = APIRouter(tags=["llm-catalog"])
 
@@ -77,6 +83,20 @@ async def list_catalog(
     """List the calling tenant's catalogue (joined with registry public info)."""
     _require_role(x_user_roles, _CATALOG_ROLES)
     return TenantCatalogListResponse(models=await service.list_catalog(tenant_id))
+
+
+@router.get("/api/v1/llm/catalog/available", response_model=LLMRegistryListResponse)
+async def list_available_models(
+    _user: str = Depends(_require_actor),
+    tenant_id: str = Depends(_require_tenant),
+    x_user_roles: str | None = Header(default=None),
+    service: TenantCatalogService = Depends(get_catalog_service),
+) -> LLMRegistryListResponse:
+    """Platform-registry models NOT yet in the calling tenant's catalogue — the
+    set an admin can re-add via the HMI picker. Public projection only (no
+    provider key). admin / tenant_admin."""
+    _require_role(x_user_roles, _CATALOG_ROLES)
+    return LLMRegistryListResponse(models=await service.list_available_models(tenant_id))
 
 
 @router.get("/api/v1/llm/catalog/resolve", response_model=ResolvedModel)

@@ -63,7 +63,7 @@ test.describe("Demo seed login flow (real stack)", () => {
     await expect(page.getByText(/welcome,\s*project-editor/i)).toBeVisible();
   });
 
-  test("clicking superroot logs in as tenant_manager (cross-tenant content-blind)", async ({
+  test("clicking superroot logs in as platform_manager (cross-tenant content-blind)", async ({
     page,
   }) => {
     await page.goto("/login");
@@ -73,9 +73,9 @@ test.describe("Demo seed login flow (real stack)", () => {
 
     await expect(page).toHaveURL("/dashboard");
     // Dashboard renders the decoded claims — superroot has the
-    // `tenant_manager` global role.
+    // `platform_manager` global role.
     await expect(page.getByText(/welcome,\s*superroot/i)).toBeVisible();
-    await expect(page.getByText("tenant_manager")).toBeVisible();
+    await expect(page.getByText("platform_manager")).toBeVisible();
   });
 
   test("clicking project-viewer logs in with viewer scope", async ({ page }) => {

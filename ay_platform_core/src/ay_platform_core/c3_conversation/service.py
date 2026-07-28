@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 15
+# Version: 16
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/service.py
 # Description: C3 Conversation Service facade.
 #              Orchestrates CRUD and the SSE message-send flow.
@@ -288,8 +288,32 @@ class ConversationService:
     # Access guard
     # ------------------------------------------------------------------
 
+    async def _enforce_project_status(
+        self, project_id: str | None, *, mutating: bool
+    ) -> None:
+        """Reject content access to a conversation bound to a non-`active`
+        project (E-100-002 v4). `inactive` blocks reads AND writes; `archived`
+        is a read-only freeze (writes blocked, reads allowed). This is the
+        record-derived companion to the C2 `/verify` forward-auth check: a
+        conversation carries no `{project_id}` in its URL, so central
+        forward-auth cannot see its project — C3 resolves the status itself
+        (read-only probe of the C2 governance store, see the repository)."""
+        if not project_id:
+            return
+        getter = getattr(self._repo, "get_project_status", None)
+        if getter is None:  # stub repo without the probe → skip enforcement
+            return
+        st = await getter(project_id)
+        if st is None or st == "active":
+            return
+        if st == "inactive" or (st == "archived" and mutating):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"project is {st}",
+            )
+
     async def _require_access(
-        self, conversation_id: UUID, user_id: str
+        self, conversation_id: UUID, user_id: str, *, mutating: bool = False
     ) -> dict[str, Any]:
         doc = await self._repo.get_conversation(conversation_id)
         if doc is None:
@@ -298,6 +322,7 @@ class ConversationService:
             )
         if doc["owner_id"] != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        await self._enforce_project_status(doc.get("project_id"), mutating=mutating)
         return doc
 
     # ------------------------------------------------------------------
@@ -311,6 +336,8 @@ class ConversationService:
     async def create_conversation(
         self, user_id: str, payload: ConversationCreate
     ) -> ConversationPublic:
+        # Creating content in a frozen/inactive project is a write → refused.
+        await self._enforce_project_status(payload.project_id, mutating=True)
         doc = await self._repo.create_conversation(
             owner_id=user_id,
             title=payload.title,
@@ -327,7 +354,7 @@ class ConversationService:
     async def update_conversation(
         self, conversation_id: UUID, user_id: str, payload: ConversationUpdate
     ) -> ConversationPublic:
-        await self._require_access(conversation_id, user_id)
+        await self._require_access(conversation_id, user_id, mutating=True)
         updates: dict[str, Any] = {}
         if payload.title is not None:
             updates["title"] = payload.title
@@ -343,7 +370,7 @@ class ConversationService:
     async def delete_conversation(
         self, conversation_id: UUID, user_id: str
     ) -> None:
-        await self._require_access(conversation_id, user_id)
+        await self._require_access(conversation_id, user_id, mutating=True)
         await self._repo.soft_delete_conversation(conversation_id)
 
     async def list_messages(
@@ -385,7 +412,7 @@ class ConversationService:
           shipped — preserves backward compat with tests that don't
           care about the LLM.
         """
-        conv = await self._require_access(conversation_id, user_id)
+        conv = await self._require_access(conversation_id, user_id, mutating=True)
 
         # Tranche B (R-200-180..184) — resolve prompt-attached references
         # NOW, BEFORE persisting the user message, so an RBAC 403 or a

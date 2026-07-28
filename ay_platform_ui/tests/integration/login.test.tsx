@@ -310,7 +310,7 @@ describe("LoginPage — dev credentials panel", () => {
       {
         username: "superroot",
         password: "dev-superroot",
-        role_label: "super-root (tenant_manager)",
+        role_label: "super-root (platform_manager)",
         note: "Content-blind: lifecycle ops only.",
       },
       {
@@ -350,7 +350,7 @@ describe("LoginPage — dev credentials panel", () => {
     expect(screen.getByTestId("dev-credential-tenant-admin")).toBeInTheDocument();
     expect(screen.getByTestId("dev-credential-project-editor")).toBeInTheDocument();
     // Role labels surface for orientation.
-    expect(screen.getByText(/super-root \(tenant_manager\)/)).toBeInTheDocument();
+    expect(screen.getByText(/super-root \(platform_manager\)/)).toBeInTheDocument();
     expect(screen.getByText(/project editor \(read\/write\)/)).toBeInTheDocument();
     // Optional note rendered when present, omitted when null.
     expect(screen.getByText(/content-blind/i)).toBeInTheDocument();

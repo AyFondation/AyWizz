@@ -23,6 +23,7 @@ from ay_platform_core.c7_memory.models import (
 )
 from ay_platform_core.c7_memory.router import router
 from tests.fixtures.contract_registry import find_by_producer
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -33,7 +34,7 @@ def _app() -> FastAPI:
 
 def _routes() -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())
@@ -105,7 +106,7 @@ class TestEndpointRoster:
 
     def test_retrieve_returns_retrieval_response(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/memory/retrieve"
             and "POST" in (r.methods or set())
@@ -114,7 +115,7 @@ class TestEndpointRoster:
 
     def test_delete_source_is_204(self) -> None:
         target = next(
-            r for r in _app().routes
+            r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
             and r.path == "/api/v1/memory/projects/{project_id}/sources/{source_id}"
             and "DELETE" in (r.methods or set())

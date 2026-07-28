@@ -6,7 +6,7 @@
 #              Three read-only endpoints mounted under
 #              `/api/v1/projects/{pid}/artifacts/*`. Forward-auth
 #              identity model (X-User-Id / X-Tenant-Id / X-User-Roles)
-#              identical to C3/C5/C6/C7. `tenant_manager` is rejected
+#              identical to C3/C5/C6/C7. `platform_manager` is rejected
 #              because artifacts are tenant content (E-100-002 v2).
 #
 #              Profile-agnostic : the same endpoints serve `codegen`
@@ -63,14 +63,14 @@ def _require_tenant(x_tenant_id: str | None = Header(default=None)) -> str:
     return x_tenant_id
 
 
-def _reject_tenant_manager(x_user_roles: str | None) -> None:
+def _reject_platform_manager(x_user_roles: str | None) -> None:
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
-    if "tenant_manager" in roles and not roles.intersection(
+    if "platform_manager" in roles and not roles.intersection(
         ("admin", "tenant_admin"),
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="tenant_manager has no access to tenant content (E-100-002 v2)",
+            detail="platform_manager has no access to tenant content (E-100-002 v2)",
         )
 
 
@@ -109,7 +109,7 @@ async def list_artifact_runs(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> ArtifactRunList:
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     runs = await service.list_runs(
         project_id=project_id, tenant_id=tenant_id,
     )
@@ -128,7 +128,7 @@ async def get_artifact_tree(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> ArtifactTree:
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     return await service.get_tree(
         run_id=run_id, project_id=project_id, tenant_id=tenant_id,
     )
@@ -153,7 +153,7 @@ async def get_artifact_blob(
     direct browser navigation triggers a download. The byte stream
     is fully read in memory for Pass 1 — switch to a streaming
     response when file sizes warrant (see `artifacts_storage.py`)."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     blob = await service.get_blob(
         run_id=run_id,
         project_id=project_id,
@@ -204,7 +204,7 @@ async def list_project_commits(
     `path` (optional query) restricts the list to commits that touched
     that file — the per-file revision history backing the
     "view a previous version" UX (R-200-147)."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     raw = await service.list_commits(
         project_id=project_id, tenant_id=tenant_id, page=page, path=path,
     )
@@ -222,7 +222,7 @@ async def list_project_commits(
 # browse without waiting for a real C4 pipeline run. Kept on the
 # regular `c4-artifacts` router so it benefits from the same Traefik
 # routing rule ; gated to `admin` / `tenant_admin` and rejected for
-# `tenant_manager` (content-blind). NOT a public surface.
+# `platform_manager` (content-blind). NOT a public surface.
 # ---------------------------------------------------------------------------
 
 

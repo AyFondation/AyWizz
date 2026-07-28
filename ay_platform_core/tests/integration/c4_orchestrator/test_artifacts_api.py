@@ -49,10 +49,10 @@ _HEADERS_OTHER_TENANT = {
     "X-Tenant-Id": "tenant-other",
     "X-User-Roles": "project_editor,admin",
 }
-_HEADERS_TENANT_MANAGER = {
+_HEADERS_PLATFORM_MANAGER = {
     "X-User-Id": "tm",
     "X-Tenant-Id": "tenant-art",
-    "X-User-Roles": "tenant_manager",
+    "X-User-Roles": "platform_manager",
 }
 
 
@@ -259,27 +259,27 @@ async def test_tenant_mismatch_returns_404(artifacts_app: FastAPI) -> None:
         assert blob.status_code == 404
 
 
-async def test_tenant_manager_rejected_on_artifacts(
+async def test_platform_manager_rejected_on_artifacts(
     artifacts_app: FastAPI,
 ) -> None:
-    """E-100-002 v2 : tenant_manager is content-blind. SHALL be 403
+    """E-100-002 v2 : platform_manager is content-blind. SHALL be 403
     on every artifacts endpoint, even on listing."""
     async with _client(artifacts_app) as c:
         # No seed needed — list is enough to exercise the role gate.
         listing = await c.get(
             "/api/v1/projects/proj-x/artifacts/runs",
-            headers=_HEADERS_TENANT_MANAGER,
+            headers=_HEADERS_PLATFORM_MANAGER,
         )
         assert listing.status_code == 403
-        # Admin seed endpoint also rejects tenant_manager.
+        # Admin seed endpoint also rejects platform_manager.
         seed = await c.post(
             "/api/v1/admin/projects/proj-x/artifacts/seed",
-            headers=_HEADERS_TENANT_MANAGER,
+            headers=_HEADERS_PLATFORM_MANAGER,
             json={
                 "files": [{"path": "x", "content_b64": base64.b64encode(b"x").decode()}],
             },
         )
-        # First check is `_require_admin` which rejects tenant_manager
+        # First check is `_require_admin` which rejects platform_manager
         # (it's not in the admin set) — 403.
         assert seed.status_code == 403
 
@@ -388,16 +388,16 @@ async def test_seed_pushes_to_gitea_and_commits_visible(
         )
 
 
-async def test_commits_proxy_rejects_tenant_manager(
+async def test_commits_proxy_rejects_platform_manager(
     artifacts_app_with_gitea: tuple[FastAPI, _FakeGiteaClient],
 ) -> None:
-    """E-100-002 v2 : tenant_manager is content-blind. The commits
+    """E-100-002 v2 : platform_manager is content-blind. The commits
     proxy is project-scoped content -> SHALL be 403."""
     app, _ = artifacts_app_with_gitea
     async with _client(app) as c:
         r = await c.get(
             "/api/v1/projects/proj-x/git/commits",
-            headers=_HEADERS_TENANT_MANAGER,
+            headers=_HEADERS_PLATFORM_MANAGER,
         )
         assert r.status_code == 403, r.text
 

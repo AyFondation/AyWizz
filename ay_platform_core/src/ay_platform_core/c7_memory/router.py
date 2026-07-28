@@ -76,11 +76,19 @@ def _require_tenant(x_tenant_id: str | None = Header(default=None)) -> str:
     return x_tenant_id
 
 
+# E-100-002 v7: `admin` / `tenant_admin` are CONTENT-BLIND — they govern the
+# tenant but reach NO project content. They are stripped from the caller before
+# a content gate is evaluated, so project content flows ONLY through the
+# project-scoped roles (owner / editor / viewer).
+_CONTENT_BLIND_GLOBAL_ROLES = frozenset({"admin", "tenant_admin"})
+
+
 def _require_role(
     x_user_roles: str | None,
     required: tuple[str, ...],
 ) -> None:
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    roles -= _CONTENT_BLIND_GLOBAL_ROLES
     if not roles.intersection(required):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -198,7 +206,7 @@ async def ingest_chunks(
     artifact set produced by C13).
 
     Role gate identical to `POST /sources`: `project_editor` /
-    `project_owner` / `admin`. `tenant_manager` excluded by E-100-002 v2.
+    `project_owner` / `admin`. `platform_manager` excluded by E-100-002 v2.
 
     Backward-compat: when a chunk's `embedding` field is None, C7 falls
     back to its own embedder (transitional, removed in D-020 session 7).
@@ -229,7 +237,7 @@ async def extract_kg(
 ) -> KGExtractionResult:
     """Phase F.1 — extract entities + relations from an existing source
     via the C8 LLM gateway. Same role gate as `/sources` ingest:
-    `project_editor` / `project_owner` / `admin`. `tenant_manager`
+    `project_editor` / `project_owner` / `admin`. `platform_manager`
     excluded by E-100-002 v2."""
     _require_role(x_user_roles, required=("project_editor", "project_owner", "admin"))
     return await service.extract_kg(
@@ -255,7 +263,7 @@ async def extract_structural_kg(
     an existing source. `kind=requirements` (default) parses spec entity
     blocks ; `kind=code` parses the Python AST (reads raw bytes). Same role
     gate as `extract-kg`: `project_editor` / `project_owner` / `admin` ;
-    `tenant_manager` excluded by E-100-002 v2."""
+    `platform_manager` excluded by E-100-002 v2."""
     _require_role(x_user_roles, required=("project_editor", "project_owner", "admin"))
     return await service.extract_structural_kg(
         tenant_id=tenant_id, project_id=project_id, source_id=source_id, kind=kind,
@@ -339,7 +347,7 @@ async def put_enrichment_config(
     service: MemoryService = Depends(get_service),
 ) -> EnrichmentConfig:
     """Persist the project's enrichment config. Owner/admin only — it changes
-    how every subsequent upload is processed (E-100-002 v2: tenant_manager is
+    how every subsequent upload is processed (E-100-002 v2: platform_manager is
     content-blind and excluded)."""
     _require_role(
         x_user_roles, required=("project_owner", "admin", "tenant_admin")
@@ -575,7 +583,7 @@ async def embed_entity(
     x_user_roles: str | None = Header(default=None),
     service: MemoryService = Depends(get_service),
 ) -> ChunkPublic:
-    _require_role(x_user_roles, required=("admin",))
+    _require_role(x_user_roles, required=("project_owner",))
     return await service.embed_entity(payload, tenant_id=tenant_id)
 
 
@@ -613,7 +621,7 @@ async def refresh(
     x_user_roles: str | None = Header(default=None),
 ) -> None:
     _ = project_id
-    _require_role(x_user_roles, required=("admin",))
+    _require_role(x_user_roles, required=("project_owner",))
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="memory refresh deferred to a follow-up (R-400-060/061)",

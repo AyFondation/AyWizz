@@ -1,8 +1,8 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/admin/users/page.tsx
-// Description: Cross-tenant user oversight (platform operator, tenant_manager —
+// Description: Cross-tenant user oversight (platform operator, platform_manager —
 //              E-100-002 v3). List users across ALL tenants, filter by tenant,
 //              and deactivate / reactivate them. Read + account-status only;
 //              user create/delete stays with the tenant's own admin.
@@ -26,9 +26,17 @@ export default function UsersAdminPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [tenantFilter, setTenantFilter] = useState("");
 
+  // Operator gate (E-100-002 v7): platform_manager (cross-tenant) OR the
+  // tenant operator admin/tenant_admin (backend scopes the list + actions to
+  // its own tenant). Named `isTenantManager` for legacy continuity.
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
-    return (authState.claims.roles ?? []).includes("tenant_manager");
+    const roles = authState.claims.roles ?? [];
+    return (
+      roles.includes("platform_manager") ||
+      roles.includes("admin") ||
+      roles.includes("tenant_admin")
+    );
   }, [authState]);
 
   const reload = useCallback(
@@ -69,7 +77,7 @@ export default function UsersAdminPage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="users-forbidden"
         >
-          User oversight is restricted to platform administrators (tenant_manager).
+          User oversight is restricted to platform administrators (platform_manager).
         </p>
       </main>
     );

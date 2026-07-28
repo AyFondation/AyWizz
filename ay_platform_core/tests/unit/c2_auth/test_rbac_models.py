@@ -21,14 +21,15 @@ from ay_platform_core.c2_auth.models import (
 class TestRBACGlobalRole:
     def test_values_match_spec(self) -> None:
         # E-100-002 v2: 4 global roles.
-        assert RBACGlobalRole.TENANT_MANAGER.value == "tenant_manager"
+        assert RBACGlobalRole.PLATFORM_MANAGER.value == "platform_manager"
         assert RBACGlobalRole.ADMIN.value == "admin"
         assert RBACGlobalRole.TENANT_ADMIN.value == "tenant_admin"
         assert RBACGlobalRole.USER.value == "user"
 
-    def test_all_four_roles_defined(self) -> None:
+    def test_all_global_roles_defined(self) -> None:
+        # E-100-002 v7: platform_manager + admin (+ tenant_admin synonym) + user.
         assert {r.value for r in RBACGlobalRole} == {
-            "tenant_manager", "admin", "tenant_admin", "user",
+            "platform_manager", "admin", "tenant_admin", "user",
         }
 
 

@@ -1,11 +1,19 @@
 // =============================================================================
 // File: navbar.tsx
-// Version: 6
+// Version: 8
 // Path: ay_platform_ui/components/navbar.tsx
 // Description: Top header rendered on every protected page. Brand
 //              (left) is read from the runtime config ; user menu
 //              (right) is read from the auth provider's decoded JWT
 //              claims. Logout button clears auth + redirects to login.
+//
+//              v8 (E-100-002 v7) : the tenant operator `admin`
+//              (= tenant_admin) is now a content-blind, tenant-scoped
+//              mirror of platform_manager. It gets the operator
+//              Projects + Users governance links (backend scopes them
+//              to its tenant) and the classic /projects workspace is
+//              hidden for it. Platform-only links (Tenants, Providers,
+//              LLM registry, global Quotas) stay platform_manager-only.
 //
 //              v6 : a two-line `BuildStamp` block (UI build / API
 //              build) is rendered to the LEFT of the avatar on the
@@ -74,11 +82,20 @@ export function Navbar() {
   const trigram = getEffectiveTrigram(state.claims);
   const fullName = fullNameForTooltip(state.claims);
 
-  // LLM-governance nav (role-gated): the platform registry is tenant_manager
-  // only; the tenant catalogue is admin / tenant_admin.
+  // Operator nav (role-gated, E-100-002 v7). Two operator tiers:
+  //  - platform_manager: cross-tenant PLATFORM operator (tenants, LLM
+  //    registry/providers, global quota policy) + governance.
+  //  - admin / tenant_admin: tenant-SCOPED operator, mirror of
+  //    platform_manager confined to its own tenant — project governance +
+  //    user oversight. Both are content-blind (no classic project workspace).
   const roles = new Set(state.claims.roles ?? []);
-  const showRegistry = roles.has("tenant_manager");
-  const showCatalogue = roles.has("admin") || roles.has("tenant_admin");
+  const isPlatformManager = roles.has("platform_manager");
+  const isTenantOperator = roles.has("admin") || roles.has("tenant_admin");
+  const isOperator = isPlatformManager || isTenantOperator;
+  // Platform-only surfaces (cross-tenant): registry, providers, tenants,
+  // global quotas. `showCatalogue` = the tenant LLM catalogue (tenant ops).
+  const showRegistry = isPlatformManager;
+  const showCatalogue = isTenantOperator;
 
   const navLinkClass = (active: boolean | undefined): string =>
     [
@@ -94,7 +111,7 @@ export function Navbar() {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
         <div className="flex items-center gap-6">
           <Link
-            href="/projects"
+            href={isOperator ? "/operator/projects" : "/projects"}
             className="text-lg font-semibold tracking-tight"
             style={{ color: accent }}
           >
@@ -102,20 +119,27 @@ export function Navbar() {
           </Link>
           <nav aria-label="Primary" className="hidden md:block">
             <ul className="flex items-center gap-1 text-sm">
-              <li>
-                <Link
-                  href="/projects"
-                  className={[
-                    "rounded-md px-3 py-1.5 transition-colors",
-                    pathname?.startsWith("/projects")
-                      ? "bg-neutral-100 text-neutral-900"
-                      : "text-neutral-600 hover:bg-neutral-50",
-                  ].join(" ")}
-                  data-testid="navbar-link-projects"
-                >
-                  Projects
-                </Link>
-              </li>
+              {/* Classic project workspace — hidden for the content-blind
+                  operators (platform_manager AND admin/tenant_admin, v7),
+                  whose project surface is the governance page
+                  /operator/projects below. Without this an operator sees two
+                  "Projects" links, the classic one 403-ing on /api/v1/projects. */}
+              {!isOperator && (
+                <li>
+                  <Link
+                    href="/projects"
+                    className={[
+                      "rounded-md px-3 py-1.5 transition-colors",
+                      pathname?.startsWith("/projects")
+                        ? "bg-neutral-100 text-neutral-900"
+                        : "text-neutral-600 hover:bg-neutral-50",
+                    ].join(" ")}
+                    data-testid="navbar-link-projects"
+                  >
+                    Projects
+                  </Link>
+                </li>
+              )}
               {showRegistry && (
                 <li>
                   <Link
@@ -160,7 +184,18 @@ export function Navbar() {
                   </Link>
                 </li>
               )}
-              {showRegistry && (
+              {isOperator && (
+                <li>
+                  <Link
+                    href="/operator/projects"
+                    className={navLinkClass(pathname?.startsWith("/operator/projects"))}
+                    data-testid="navbar-link-projects"
+                  >
+                    Projects
+                  </Link>
+                </li>
+              )}
+              {isOperator && (
                 <li>
                   <Link
                     href="/operator/users"

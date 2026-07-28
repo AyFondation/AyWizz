@@ -10,7 +10,7 @@
 #              trace?before=<ts>&limit=N` (R-200-201) and `POST /runs/
 #              {id}/steer` (R-200-202). Both reuse the actor-only auth
 #              guard ; RBAC inside the methods aligns with `/feedback`
-#              (project_owner / project_editor / admin), tenant_manager
+#              (project_owner / project_editor / admin), platform_manager
 #              rejected on content endpoints (E-100-002 v2).
 #
 # @relation implements:R-200-002
@@ -62,11 +62,16 @@ def _require_tenant(x_tenant_id: str | None = Header(default=None)) -> str:
     return x_tenant_id
 
 
+# E-100-002 v7: content-blind global roles — stripped before a content gate.
+_CONTENT_BLIND_GLOBAL_ROLES = frozenset({"admin", "tenant_admin"})
+
+
 def _require_role(
     x_user_roles: str | None,
     required: tuple[str, ...],
 ) -> None:
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    roles -= _CONTENT_BLIND_GLOBAL_ROLES
     if not roles.intersection(required):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -129,8 +134,8 @@ async def resume_run(
     x_user_roles: str | None = Header(default=None),
     service: OrchestratorService = Depends(get_service),
 ) -> RunPublic:
-    # Admin endpoint — only `admin` global role may resume.
-    _require_role(x_user_roles, required=("admin",))
+    # Content op on a project run — project_owner (admin is content-blind, v7).
+    _require_role(x_user_roles, required=("project_owner",))
     return await service.resume_run(run_id, payload)
 
 

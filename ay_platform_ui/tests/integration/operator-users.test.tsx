@@ -2,7 +2,7 @@
 // File: operator-users.test.tsx
 // Path: ay_platform_ui/tests/integration/operator-users.test.tsx
 // Description: Tests for the cross-tenant user oversight page (platform
-//              operator, tenant_manager). Covers: forbidden; cross-tenant
+//              operator, platform_manager). Covers: forbidden; cross-tenant
 //              list; tenant filter; deactivate; reactivate.
 // =============================================================================
 
@@ -75,14 +75,16 @@ function renderPage() {
 beforeEach(() => window.localStorage.clear());
 
 describe("UsersAdminPage", () => {
-  it("forbids a non-tenant_manager", async () => {
-    seedToken(["admin"]);
+  it("forbids a non-operator (baseline user)", async () => {
+    // E-100-002 v7: user oversight is an operator surface. `admin` (tenant
+    // operator) is now allowed (scoped); a baseline `user` is refused.
+    seedToken(["user"]);
     renderPage();
     await waitFor(() => expect(screen.getByTestId("users-forbidden")).toBeInTheDocument());
   });
 
   it("lists users across tenants", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(
       http.get(USERS_URL, () =>
         HttpResponse.json({
@@ -97,7 +99,7 @@ describe("UsersAdminPage", () => {
   });
 
   it("filters by tenant", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const get = vi.fn(({ request }) => {
       const url = new URL(request.url);
       const t = url.searchParams.get("tenant_id");
@@ -115,7 +117,7 @@ describe("UsersAdminPage", () => {
   });
 
   it("deactivates then reactivates a user", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const deact = vi.fn(() => HttpResponse.json(user_({ status: "disabled" })));
     const react = vi.fn(() => HttpResponse.json(user_({ status: "active" })));
     server.use(

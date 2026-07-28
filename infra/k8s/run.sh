@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 2
+# Version: 4
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
@@ -13,6 +13,16 @@
 #              image) before applying the overlay. Needed once per cluster
 #              on docker-desktop / any cluster that doesn't already ship
 #              them (kind smoke installs them itself).
+#              v3 (2026-07-27): adds `--reinit` — deletes the bootstrap
+#              Jobs before applying so a changed (immutable) Job spec, e.g.
+#              a new MinIO bucket, actually takes effect. All Jobs are
+#              idempotent one-shots.
+#              v4 (2026-07-28): adds `--restart` — forces a rollout restart
+#              of every Deployment after apply. Needed when the images
+#              changed but their TAGS did not (overlays/dev pins `:latest`
+#              with `IfNotPresent` + `disableNameSuffixHash`, so `apply` is
+#              a no-op and pods keep the old image). Run it after
+#              `infra/scripts/k8s_build_images.sh`.
 #
 #              Usage (from monorepo root or anywhere via absolute path):
 #                infra/k8s/run.sh dev          # apply overlays/dev
@@ -51,6 +61,12 @@ Options:
   --crds        install Traefik CRDs (v3.3) before applying — once per cluster
   --wait        wait for every Deployment to become Available (5 min cap)
   --no-jobs     skip bootstrap Jobs (use when re-applying without re-init)
+  --reinit      delete + recreate bootstrap Jobs (needed when a Job spec
+                changed, e.g. a new MinIO bucket). Mutually exclusive with
+                --no-jobs. All Jobs are idempotent one-shots.
+  --restart     force a rollout restart of every Deployment after apply
+                (needed when images changed but their tags did not, e.g.
+                :latest — run after k8s_build_images.sh)
   -h, --help    this message
 EOF
 }
@@ -70,16 +86,25 @@ shift
 WAIT=0
 SKIP_JOBS=0
 WANT_CRDS=0
+REINIT=0
+RESTART=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --wait) WAIT=1 ;;
         --no-jobs) SKIP_JOBS=1 ;;
         --crds) WANT_CRDS=1 ;;
+        --reinit) REINIT=1 ;;
+        --restart) RESTART=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
     shift
 done
+
+if [ "${SKIP_JOBS}" -eq 1 ] && [ "${REINIT}" -eq 1 ]; then
+    echo "ERROR: --no-jobs and --reinit are mutually exclusive" >&2
+    exit 2
+fi
 
 case "${ENV}" in
     dev|prod) ;;
@@ -104,6 +129,15 @@ if [ "${WANT_CRDS}" -eq 1 ]; then
     kubectl apply -f "${TRAEFIK_CRDS_URL}"
 fi
 
+# Bootstrap Jobs are immutable: once Completed, `apply` cannot change their
+# spec (e.g. a new bucket in minio-init). --reinit deletes them first so the
+# apply recreates them with the current spec. They are all idempotent
+# one-shots, so re-running is safe.
+if [ "${REINIT}" -eq 1 ]; then
+    echo "==> --reinit: deleting bootstrap Jobs in aywizz so they re-run"
+    kubectl delete jobs --all -n aywizz --ignore-not-found
+fi
+
 echo "==> Applying overlay: ${OVERLAY_PATH}"
 
 if [ "${SKIP_JOBS}" -eq 1 ]; then
@@ -119,6 +153,11 @@ PY
     kubectl apply -f "${BUILD_OUT}"
 else
     kubectl apply -k "${OVERLAY_PATH}"
+fi
+
+if [ "${RESTART}" -eq 1 ]; then
+    echo "==> Forcing rollout restart of all Deployments in aywizz"
+    kubectl rollout restart deployment -n aywizz
 fi
 
 if [ "${WAIT}" -eq 1 ]; then

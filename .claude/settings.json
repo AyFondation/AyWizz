@@ -1,5 +1,5 @@
 {
-  "_comment_header": "File: .claude/settings.json | Version: 20 | Path: .claude/settings.json | Claude Code permissions for the ay_monorepo. Evaluation order: deny > ask > allow. v20 allowlists two more mechanical/bounded wrapper scripts (autonomy, operator-requested): `generate_test_matrix_doc.py:*` (regenerates requirements/065-TEST-MATRIX.md from the auth-matrix catalog — same generated-from-SOT category as export_route_catalog_json) and `seed_demo_ux.py:*` (post-stack demo seeder for the manual-test stack; python+python3 forms). Composed shell (`&&`, pipes) remains §5.7-unmatched regardless — keep commands bare. v18 allowlists the route-catalog generator: `python ay_platform_core/scripts/checks/export_route_catalog_json.py:*` which regenerates `ay_platform_ui/tests/contract/backend-routes.json` from the FastAPI route declarations (pure mechanical projection — the catalog file is the contract SOT per CLAUDE.md §8.4 and SESSION-STATE §3 catalog-driven CI, but its CONTENT is derived from source code, so `--write` is execution-gate not decision-gate per §3 validation philosophy). Other `checks/` scripts (e.g. generate_test_matrix_doc.py) NOT yet allowlisted — confirm their generated-vs-hand-edited status before extending. v17 anticipates the full UI test-runner spectrum: adds `npx playwright test:*` + `--version` (e2e), `npx jest:*` (unit/integration, blanket), `npx cypress run:*` + `--version` + `verify` (e2e, headless only). v16 allowlists `npx vitest run:*`. v15 narrows the .env deny. v14 allowlists the npx-direct entry points for UI tooling. v13 allowlists the UI test/lint/typecheck pipeline. v8 added the `model` field.",
+  "_comment_header": "File: .claude/settings.json | Version: 21 | Path: .claude/settings.json | Claude Code permissions for the ay_monorepo. Evaluation order: deny > ask > allow. v21 allowlists the `k8s_reseed_c2.sh:*` wrapper (3 canonical forms) — a DEV-only C2 identity re-seed (truncate `c2_users`+`c2_role_assignments` via a one-shot arangosh Job, then restart c2-auth) used after a role rename; the destructive kubectl (`apply`/`rollout`) stays denied and is encapsulated inside the wrapper per §5.3. v20 allowlists two more mechanical/bounded wrapper scripts (autonomy, operator-requested): `generate_test_matrix_doc.py:*` (regenerates requirements/065-TEST-MATRIX.md from the auth-matrix catalog — same generated-from-SOT category as export_route_catalog_json) and `seed_demo_ux.py:*` (post-stack demo seeder for the manual-test stack; python+python3 forms). Composed shell (`&&`, pipes) remains §5.7-unmatched regardless — keep commands bare. v18 allowlists the route-catalog generator: `python ay_platform_core/scripts/checks/export_route_catalog_json.py:*` which regenerates `ay_platform_ui/tests/contract/backend-routes.json` from the FastAPI route declarations (pure mechanical projection — the catalog file is the contract SOT per CLAUDE.md §8.4 and SESSION-STATE §3 catalog-driven CI, but its CONTENT is derived from source code, so `--write` is execution-gate not decision-gate per §3 validation philosophy). Other `checks/` scripts (e.g. generate_test_matrix_doc.py) NOT yet allowlisted — confirm their generated-vs-hand-edited status before extending. v17 anticipates the full UI test-runner spectrum: adds `npx playwright test:*` + `--version` (e2e), `npx jest:*` (unit/integration, blanket), `npx cypress run:*` + `--version` + `verify` (e2e, headless only). v16 allowlists `npx vitest run:*`. v15 narrows the .env deny. v14 allowlists the npx-direct entry points for UI tooling. v13 allowlists the UI test/lint/typecheck pipeline. v8 added the `model` field.",
 
   "model": "opus",
 
@@ -46,6 +46,14 @@
       "Bash(./infra/k8s/stop.sh:*)",
       "Bash(bash infra/k8s/stop.sh:*)",
       "Bash(bash -n:*)",
+
+      "Bash(infra/scripts/k8s_build_images.sh:*)",
+      "Bash(./infra/scripts/k8s_build_images.sh:*)",
+      "Bash(bash infra/scripts/k8s_build_images.sh:*)",
+
+      "Bash(infra/scripts/k8s_reseed_c2.sh:*)",
+      "Bash(./infra/scripts/k8s_reseed_c2.sh:*)",
+      "Bash(bash infra/scripts/k8s_reseed_c2.sh:*)",
 
       "Bash(python -m pytest:*)",
       "Bash(python -m ruff:*)",

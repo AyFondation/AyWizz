@@ -127,3 +127,12 @@ class TestStructuralExtractor:
         assert [e.model_dump() for e in first.entities] == [
             e.model_dump() for e in second.entities
         ]
+
+    def test_derives_from_on_out_of_ontology_id_is_skipped(self) -> None:
+        # `E-100-002` has no ontology slot → yields no entity; the
+        # `derives-from:` that would attach to it therefore has no in-ontology
+        # owner and is dropped (no orphan edge, no crash).
+        text = _block("E-100-002", derives="D-004")
+        result = extract_structural(text)
+        assert result.entities == []
+        assert result.relations == []

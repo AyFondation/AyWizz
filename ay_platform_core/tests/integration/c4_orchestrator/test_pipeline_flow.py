@@ -29,6 +29,10 @@ _HEADERS = {
     "X-User-Roles": "project_editor,admin",
 }
 
+# Resume/abort is a content op on a project run → project_owner (admin is
+# content-blind per E-100-002 v7).
+_OWNER_HEADERS = {**_HEADERS, "X-User-Roles": "project_owner"}
+
 
 def _client(app: FastAPI) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -225,11 +229,11 @@ async def test_abort_resume_marks_run_completed(
             headers=_HEADERS,
         )
         run_id = start.json()["run_id"]
-        # Abort via admin endpoint
+        # Abort/resume — project_owner (content op; admin is content-blind v7).
         resume = await client.post(
             f"/api/v1/orchestrator/runs/{run_id}/resume",
             json={"strategy": "abort"},
-            headers=_HEADERS,
+            headers=_OWNER_HEADERS,
         )
     assert resume.status_code == 200
     assert resume.json()["status"] == RunStatus.COMPLETED.value

@@ -27,6 +27,7 @@ from ay_platform_core.c9_mcp.models import (
 from ay_platform_core.c9_mcp.router import router
 from ay_platform_core.c9_mcp.tools.base import build_default_toolset
 from tests.fixtures.contract_registry import find_by_producer
+from tests.fixtures.routes import iter_api_routes
 
 
 def _app() -> FastAPI:
@@ -37,7 +38,7 @@ def _app() -> FastAPI:
 
 def _routes() -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
-    for route in _app().routes:
+    for route in iter_api_routes(_app()):
         if isinstance(route, APIRoute):
             result.setdefault(route.path, set()).update(
                 m.upper() for m in (route.methods or set())

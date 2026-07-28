@@ -13,8 +13,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
+
+from arango.exceptions import CollectionCreateError
 
 COLL_POLICY = "llm_quota_policy"
 COLL_CALLS = "llm_calls"
@@ -41,6 +44,9 @@ class QuotaStore(Protocol):
         project_id: str | None = None,
         user_id: str | None = None,
     ) -> tuple[float, int, str | None]: ...
+    async def consumption_by_tenant(
+        self, since_iso: str
+    ) -> list[tuple[str, float, int]]: ...
 
 
 class QuotaRepository:
@@ -64,9 +70,17 @@ class QuotaRepository:
     async def get_policy(self) -> dict[str, Any] | None:
         return await self._run(self._get_policy_sync)
 
+    def _ensure_collection(self, name: str) -> None:
+        """Create the collection if absent — CONCURRENCY-SAFE: a `duplicate name`
+        error from a racing caller (two first-calls creating the anchors
+        collection at once) is benign, the collection now exists."""
+        if self._db.has_collection(name):
+            return
+        with contextlib.suppress(CollectionCreateError):
+            self._db.create_collection(name)
+
     def _set_policy_sync(self, doc: dict[str, Any]) -> None:
-        if not self._db.has_collection(COLL_POLICY):
-            self._db.create_collection(COLL_POLICY)
+        self._ensure_collection(COLL_POLICY)
         coll = self._db.collection(COLL_POLICY)
         body = {**doc, "_key": POLICY_KEY}
         if coll.has(POLICY_KEY):
@@ -90,8 +104,7 @@ class QuotaRepository:
         return await self._run(self._get_anchor_sync, key)
 
     def _set_anchor_sync(self, key: str, iso: str) -> None:
-        if not self._db.has_collection(COLL_ANCHORS):
-            self._db.create_collection(COLL_ANCHORS)
+        self._ensure_collection(COLL_ANCHORS)
         self._db.collection(COLL_ANCHORS).insert(
             {"_key": key, "anchor": iso}, overwrite=True
         )
@@ -157,3 +170,35 @@ class QuotaRepository:
         return await self._run(
             self._usage_in_window_sync, since_iso, tenant_id, project_id, user_id
         )
+
+    def _consumption_by_tenant_sync(
+        self, since_iso: str
+    ) -> list[tuple[str, float, int]]:
+        if not self._db.has_collection(COLL_CALLS):
+            return []
+        query = (
+            "FOR c IN @@col "
+            "  FILTER c.timestamp_start >= @since AND c.tags.tenant_id != null "
+            "  COLLECT tenant = c.tags.tenant_id "
+            "  AGGREGATE cost = SUM(c.cost_usd), "
+            "            toks = SUM(c.input_tokens + c.output_tokens) "
+            "  RETURN { tenant, cost, toks }"
+        )
+        rows = list(
+            self._db.aql.execute(
+                query, bind_vars={"@col": COLL_CALLS, "since": since_iso}
+            )
+        )
+        return [
+            (str(r["tenant"]), float(r.get("cost") or 0.0), int(r.get("toks") or 0))
+            for r in rows
+            if r.get("tenant")
+        ]
+
+    async def consumption_by_tenant(
+        self, since_iso: str
+    ) -> list[tuple[str, float, int]]:
+        """Per-tenant (cost, tokens) of `llm_calls` since `since_iso`, grouped
+        by `tags.tenant_id`. Reporting aggregation for the operator consumption
+        table (R-800-144)."""
+        return await self._run(self._consumption_by_tenant_sync, since_iso)

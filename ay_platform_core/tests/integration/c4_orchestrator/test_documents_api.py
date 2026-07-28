@@ -33,10 +33,10 @@ _HEADERS = {
     "X-Tenant-Id": "tenant-doc",
     "X-User-Roles": "project_editor,admin",
 }
-_HEADERS_TENANT_MANAGER = {
+_HEADERS_PLATFORM_MANAGER = {
     "X-User-Id": "tm",
     "X-Tenant-Id": "tenant-doc",
-    "X-User-Roles": "tenant_manager",
+    "X-User-Roles": "platform_manager",
 }
 
 
@@ -145,23 +145,23 @@ async def test_path_traversal_rejected(
             assert r.status_code == 400, f"{bad!r} should be 400 (got {r.status_code})"
 
 
-async def test_tenant_manager_rejected(
+async def test_platform_manager_rejected(
     documents_app: tuple[FastAPI, _FakeGiteaClient],
 ) -> None:
-    """E-100-002 v2 : tenant_manager is content-blind → 403 on every
+    """E-100-002 v2 : platform_manager is content-blind → 403 on every
     document verb."""
     app, _ = documents_app
     async with _client(app) as c:
         assert (
             await c.get(
                 "/api/v1/projects/proj-d/documents",
-                headers=_HEADERS_TENANT_MANAGER,
+                headers=_HEADERS_PLATFORM_MANAGER,
             )
         ).status_code == 403
         assert (
             await c.post(
                 "/api/v1/projects/proj-d/documents",
-                headers=_HEADERS_TENANT_MANAGER,
+                headers=_HEADERS_PLATFORM_MANAGER,
                 json={"path": "x.md", "content": "y"},
             )
         ).status_code == 403

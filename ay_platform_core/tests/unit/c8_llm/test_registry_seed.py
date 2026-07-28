@@ -17,9 +17,18 @@ from typing import Any
 import pytest
 import yaml
 
-from ay_platform_core.c8_llm.config import LiteLLMConfig
+from ay_platform_core.c8_llm.config import (
+    LiteLLMConfig,
+    LiteLLMParams,
+    ModelEntry,
+    ModelInfo,
+)
 from ay_platform_core.c8_llm.registry.models import ModelQuality
-from ay_platform_core.c8_llm.registry.seed import seed_missing
+from ay_platform_core.c8_llm.registry.seed import (
+    _quality_for,
+    _split_upstream,
+    seed_missing,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -127,3 +136,40 @@ async def test_seed_is_idempotent_and_preserves_provider_key() -> None:
     assert second == []  # nothing re-created
     assert prov.store[pid]["api_key_ciphertext"] == "ay.1.k1.X.Y"  # key survived
     assert len(prov.store) == 1  # provider reused, not duplicated
+
+
+def _entry(litellm_model: str) -> ModelEntry:
+    return ModelEntry(
+        model_name="custom",
+        litellm_params=LiteLLMParams(model=litellm_model),
+        model_info=ModelInfo(
+            display_name="Custom",
+            features=[],
+            context_window=1000,
+            cost_per_million_input=1.0,
+            cost_per_million_output=2.0,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("litellm_model", "expected"),
+    [
+        ("anthropic/claude-opus-4-8", ModelQuality.HIGH),
+        ("anthropic/claude-sonnet-5", ModelQuality.MEDIUM),
+        ("anthropic/claude-haiku-4-5", ModelQuality.LOW),
+        # No opus/sonnet/haiku token → the MEDIUM default (covers the fallthrough).
+        ("openai/gpt-4o", ModelQuality.MEDIUM),
+        ("some-local-model", ModelQuality.MEDIUM),
+    ],
+)
+async def test_quality_for_maps_tier_or_defaults_medium(
+    litellm_model: str, expected: ModelQuality
+) -> None:
+    assert _quality_for(_entry(litellm_model)) is expected
+
+
+async def test_split_upstream_with_and_without_provider_prefix() -> None:
+    assert _split_upstream("anthropic/claude-opus-4-8") == ("anthropic", "claude-opus-4-8")
+    # No "/" → the whole string is BOTH the wire format and the upstream model.
+    assert _split_upstream("some-local-model") == ("some-local-model", "some-local-model")

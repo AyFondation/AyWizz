@@ -3,7 +3,7 @@
 // Version: 1
 // Path: ay_platform_ui/app/(protected)/operator/quotas/page.tsx
 // Description: Global LLM quota policy console (platform operator,
-//              tenant_manager — Lot 3). Edit the single platform-wide policy
+//              platform_manager — Lot 3). Edit the single platform-wide policy
 //              (rolling windows; per-window limits in cost AND/OR tokens +
 //              warn threshold, all parametrable) and inspect any tenant's live
 //              status (usage / limit / % / ok·warn·exceeded). Soft → hard:
@@ -16,7 +16,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { QuotaLevel, QuotaState, QuotaStatus, QuotaWindow } from "@/lib/types";
+import type {
+  ConsumptionReport,
+  QuotaLevel,
+  QuotaState,
+  QuotaStatus,
+  QuotaWindow,
+} from "@/lib/types";
+
+function currencySymbol(code: string): string {
+  if (code === "EUR") return "€";
+  if (code === "USD") return "$";
+  return `${code} `;
+}
 
 const _LEVELS: { level: QuotaLevel; label: string; hint: string }[] = [
   { level: "global", label: "Global", hint: "platform aggregate" },
@@ -48,10 +60,11 @@ export default function QuotasAdminPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState("");
   const [status, setStatus] = useState<QuotaStatus | null>(null);
+  const [consumption, setConsumption] = useState<ConsumptionReport | null>(null);
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
-    return (authState.claims.roles ?? []).includes("tenant_manager");
+    return (authState.claims.roles ?? []).includes("platform_manager");
   }, [authState]);
 
   const reload = useCallback(() => {
@@ -61,6 +74,10 @@ export default function QuotasAdminPage() {
       .catch((err) =>
         setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
       );
+    apiClient
+      .getConsumption()
+      .then(setConsumption)
+      .catch(() => setConsumption(null));
   }, [apiClient]);
 
   useEffect(() => {
@@ -114,7 +131,7 @@ export default function QuotasAdminPage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="quotas-forbidden"
         >
-          Quota management is restricted to platform administrators (tenant_manager).
+          Quota management is restricted to platform administrators (platform_manager).
         </p>
       </main>
     );
@@ -286,6 +303,61 @@ export default function QuotasAdminPage() {
                       {w.max_tokens !== null ? ` / ${w.max_tokens}` : ""}
                     </td>
                     <td className={`px-2 py-2 font-medium ${STATE_CLASS[w.state]}`}>{w.state}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-10" data-testid="consumption-section">
+        <h2 className="text-lg font-semibold text-neutral-800">Per-tenant consumption</h2>
+        <p className="mt-1 text-sm text-neutral-600">
+          LLM consumption per tenant across reporting windows (cost + tokens). Reporting only —
+          independent of the enforced policy above.
+        </p>
+        {consumption === null ? (
+          <p className="mt-3 text-sm text-neutral-500">No consumption data.</p>
+        ) : consumption.tenants.length === 0 ? (
+          <p className="mt-3 text-sm text-neutral-500" data-testid="consumption-empty">
+            No recorded consumption yet.
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full border-collapse text-sm" data-testid="consumption-table">
+              <thead>
+                <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <th className="px-3 py-2">Tenant</th>
+                  {consumption.windows.map((w) => (
+                    <th key={w} className="px-3 py-2 text-right">
+                      {w}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {consumption.tenants.map((t) => (
+                  <tr
+                    key={t.tenant_id}
+                    className="border-b border-neutral-100"
+                    data-testid={`consumption-row-${t.tenant_id}`}
+                  >
+                    <td className="px-3 py-2 font-medium text-neutral-800">{t.tenant_id}</td>
+                    {consumption.windows.map((w) => {
+                      const cell = t.windows[w] ?? { cost: 0, tokens: 0 };
+                      return (
+                        <td key={w} className="px-3 py-2 text-right text-neutral-700">
+                          <div>
+                            {currencySymbol(consumption.currency)}
+                            {cell.cost.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-neutral-400">
+                            {cell.tokens.toLocaleString()} tok
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

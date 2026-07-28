@@ -12,11 +12,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from pydantic import ValidationError
 
 from ay_platform_core.c8_llm.quota.models import (
+    CONSUMPTION_WINDOWS,
     LEVELS_WIDE_TO_NARROW,
+    ConsumptionCell,
+    ConsumptionReport,
     QuotaLevel,
     QuotaLevelStatus,
     QuotaLimits,
@@ -25,8 +32,52 @@ from ay_platform_core.c8_llm.quota.models import (
     QuotaStatus,
     QuotaWindow,
     QuotaWindowStatus,
+    TenantConsumption,
 )
 from ay_platform_core.c8_llm.quota.repository import QuotaStore
+
+_LEGACY_ANCHOR_BY_KEY = {
+    "session": "first_use",
+    "week": "calendar_week",
+    "month": "calendar_month",
+}
+
+
+def _migrate_legacy_policy(clean: dict[str, Any]) -> QuotaPolicy | None:
+    """Best-effort upgrade of a pre-four-level policy doc: a window's flat
+    `max_cost_usd`/`max_tokens` become the `tenant` level, and a missing `anchor`
+    is derived from the window key. Returns None if the doc isn't recognisably a
+    window list (caller then uses defaults)."""
+    windows = clean.get("windows")
+    if not isinstance(windows, list):
+        return None
+    upgraded: list[dict[str, Any]] = []
+    for w in windows:
+        if not isinstance(w, dict):
+            return None
+        key = str(w.get("key", "session"))
+        limits = w.get("limits")
+        if not limits:
+            tenant: dict[str, Any] = {}
+            if w.get("max_cost_usd") is not None:
+                tenant["max_cost_usd"] = w["max_cost_usd"]
+            if w.get("max_tokens") is not None:
+                tenant["max_tokens"] = w["max_tokens"]
+            limits = {"tenant": tenant} if tenant else {}
+        upgraded.append(
+            {
+                "key": key,
+                "label": str(w.get("label", key)),
+                "duration_seconds": int(w.get("duration_seconds", 18000)),
+                "anchor": w.get("anchor") or _LEGACY_ANCHOR_BY_KEY.get(key, "first_use"),
+                "warn_threshold_pct": float(w.get("warn_threshold_pct", 80.0)),
+                "limits": limits,
+            }
+        )
+    try:
+        return QuotaPolicy.model_validate({"windows": upgraded})
+    except ValidationError:
+        return None
 
 
 def _pct(usage: float, limit: float | None) -> float | None:
@@ -59,6 +110,34 @@ def _week_start(now: datetime) -> datetime:
     return midnight - timedelta(days=now.weekday())  # Monday=0
 
 
+def _year_start(now: datetime) -> datetime:
+    return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _quarter_start(now: datetime) -> datetime:
+    m = ((now.month - 1) // 3) * 3 + 1  # 1,4,7,10
+    return now.replace(month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _semester_start(now: datetime) -> datetime:
+    m = 1 if now.month <= 6 else 7
+    return now.replace(month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _consumption_since(now: datetime) -> dict[str, datetime]:
+    """The start instant of each reporting window (R-800-144). `session` is a
+    rolling 5-hour block (the default session duration); the rest anchor on the
+    platform calendar."""
+    return {
+        "session": now - timedelta(hours=5),
+        "week": _week_start(now),
+        "month": _month_start(now),
+        "quarter": _quarter_start(now),
+        "semester": _semester_start(now),
+        "year": _year_start(now),
+    }
+
+
 class QuotaService:
     """Owns the global policy and evaluates a subject's per-level usage."""
 
@@ -66,16 +145,64 @@ class QuotaService:
         self,
         store: QuotaStore,
         clock: Callable[[], datetime] | None = None,
+        currency: str = "EUR",
     ) -> None:
         self._store = store
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._currency = currency
+
+    async def consumption_report(self) -> ConsumptionReport:
+        """Per-tenant LLM consumption across the reporting windows session /
+        week / month / quarter / semester / year (R-800-144). Reporting only —
+        the ENFORCED policy windows are untouched. Amounts are in the platform
+        `currency`."""
+        now = self._clock()
+        since = _consumption_since(now)
+        # window key → {tenant_id: (cost, tokens)}
+        per_window: dict[str, dict[str, tuple[float, int]]] = {}
+        tenants: set[str] = set()
+        for key in CONSUMPTION_WINDOWS:
+            rows = await self._store.consumption_by_tenant(since[key].isoformat())
+            per_window[key] = {t: (c, tok) for t, c, tok in rows}
+            tenants.update(per_window[key].keys())
+        report_tenants = [
+            TenantConsumption(
+                tenant_id=tid,
+                windows={
+                    key: ConsumptionCell(
+                        cost=per_window[key].get(tid, (0.0, 0))[0],
+                        tokens=per_window[key].get(tid, (0.0, 0))[1],
+                    )
+                    for key in CONSUMPTION_WINDOWS
+                },
+            )
+            for tid in sorted(tenants)
+        ]
+        return ConsumptionReport(
+            currency=self._currency,
+            windows=list(CONSUMPTION_WINDOWS),
+            tenants=report_tenants,
+        )
 
     async def get_policy(self) -> QuotaPolicy:
         doc = await self._store.get_policy()
         if doc is None:
             return QuotaPolicy()
         clean = {k: v for k, v in doc.items() if not k.startswith("_")}
-        return QuotaPolicy.model_validate(clean)
+        try:
+            return QuotaPolicy.model_validate(clean)
+        except ValidationError:
+            # A stored policy must NEVER 500 the platform (it would break every
+            # tenant's /quota/me + the operator console). Migrate a legacy
+            # (pre-four-level) doc — flat `max_cost_usd`/`max_tokens` on a window
+            # → the `tenant` level — or fall back to inert defaults.
+            migrated = _migrate_legacy_policy(clean)
+            if migrated is not None:
+                return migrated
+            logging.getLogger("c8_llm.quota").warning(
+                "stored quota policy is unparseable — using defaults (re-save to fix)"
+            )
+            return QuotaPolicy()
 
     async def set_policy(self, windows: list[QuotaWindow]) -> QuotaPolicy:
         policy = QuotaPolicy(windows=windows, updated_at=self._clock())

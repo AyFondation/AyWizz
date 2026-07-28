@@ -27,7 +27,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 **Global roles**:
 
-- `tenant_manager` — super-root, content-blind. Tenant lifecycle ONLY.
+- `platform_manager` — super-root, content-blind. Tenant lifecycle ONLY.
 - `admin` — tenant-scoped admin (synonyms in v2).
 - `tenant_admin` — tenant-scoped admin (synonyms in v2).
 - `user` — baseline authenticated user.
@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**135 endpoints** across 8 components. Order: by component, method, path.
+**144 endpoints** across 8 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -52,30 +52,37 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/auth/login` | open | — | *(open)* | — | — | 200 |
 | `GET` | `/auth/verify` | authenticated | — | any authenticated | — | — | 200 |
 | `POST` | `/auth/logout` | authenticated | — | any authenticated | — | — | 204 |
-| `POST` | `/auth/users` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_users` | 201 |
-| `GET` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 200 |
-| `PATCH` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_users` | 200 |
-| `DELETE` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_users` | 204 |
-| `POST` | `/auth/users/{user_id}/reset-password` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 204 |
-| `GET` | `/auth/sessions` | role_gated | — | `admin` | `tenant_manager` | — | 200 |
-| `DELETE` | `/auth/sessions/{session_id}` | role_gated | — | `admin` | `tenant_manager` | — | 204 |
-| `POST` | `/admin/tenants` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 201 |
-| `GET` | `/admin/tenants` | role_gated | — | `tenant_manager` | — | — | 200 |
-| `DELETE` | `/admin/tenants/{tenant_id}` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 204 |
-| `POST` | `/admin/tenants/{tenant_id}/deactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 200 |
-| `POST` | `/admin/tenants/{tenant_id}/reactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_tenants` | 200 |
-| `GET` | `/admin/users` | role_gated | — | `tenant_manager` | — | — | 200 |
-| `POST` | `/admin/users/{user_id}/deactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_users` | 200 |
-| `POST` | `/admin/users/{user_id}/reactivate` | role_gated | — | `tenant_manager` | — | arango · `c2_users` | 200 |
-| `POST` | `/api/v1/projects` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_projects` | 201 |
+| `POST` | `/auth/users` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `c2_users` | 201 |
+| `GET` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `PATCH` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `c2_users` | 200 |
+| `DELETE` | `/auth/users/{user_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `c2_users` | 204 |
+| `POST` | `/auth/users/{user_id}/reset-password` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 204 |
+| `GET` | `/auth/sessions` | role_gated | — | `admin` | `platform_manager` | — | 200 |
+| `DELETE` | `/auth/sessions/{session_id}` | role_gated | — | `admin` | `platform_manager` | — | 204 |
+| `POST` | `/admin/tenants` | role_gated | — | `platform_manager` | — | arango · `c2_tenants` | 201 |
+| `GET` | `/admin/tenants` | role_gated | — | `platform_manager` | — | — | 200 |
+| `DELETE` | `/admin/tenants/{tenant_id}` | role_gated | — | `platform_manager` | — | arango · `c2_tenants` | 204 |
+| `POST` | `/admin/tenants/{tenant_id}/deactivate` | role_gated | — | `platform_manager` | — | arango · `c2_tenants` | 200 |
+| `POST` | `/admin/tenants/{tenant_id}/reactivate` | role_gated | — | `platform_manager` | — | arango · `c2_tenants` | 200 |
+| `GET` | `/admin/users` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/users/{user_id}/deactivate` | role_gated | — | `platform_manager` | — | arango · `c2_users` | 200 |
+| `POST` | `/admin/users/{user_id}/reactivate` | role_gated | — | `platform_manager` | — | arango · `c2_users` | 200 |
+| `GET` | `/admin/projects` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/projects/{project_id}/activate` | role_gated | — | `platform_manager` | — | arango · `c2_projects` | 200 |
+| `POST` | `/admin/projects/{project_id}/deactivate` | role_gated | — | `platform_manager` | — | arango · `c2_projects` | 200 |
+| `POST` | `/admin/projects/{project_id}/archive` | role_gated | — | `platform_manager` | — | arango · `c2_projects` | 200 |
+| `GET` | `/admin/projects/{project_id}/members` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/projects/{project_id}/members/{user_id}` | role_gated | — | `platform_manager` | — | arango · `c2_role_assignments` | 200 |
+| `DELETE` | `/admin/projects/{project_id}/members/{user_id}` | role_gated | — | `platform_manager` | — | arango · `c2_role_assignments` | 200 |
+| `POST` | `/api/v1/projects` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `c2_projects` | 201 |
 | `GET` | `/api/v1/projects` | authenticated | tenant | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}` | authenticated | tenant | any authenticated | `tenant_manager` | — | 200 |
-| `PATCH` | `/api/v1/projects/{project_id}` | role_gated | tenant | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `c2_projects` | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `c2_projects` | 204 |
-| `GET` | `/api/v1/users/me/preferences` | authenticated | tenant | any authenticated | `tenant_manager` | — | 200 |
-| `PUT` | `/api/v1/users/me/preferences` | authenticated | tenant | any authenticated | `tenant_manager` | arango · `c2_user_preferences` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/members/{user_id}` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `c2_role_assignments` | 204 |
-| `DELETE` | `/api/v1/projects/{project_id}/members/{user_id}` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `c2_role_assignments` | 204 |
+| `GET` | `/api/v1/projects/{project_id}` | authenticated | tenant | any authenticated | `platform_manager` | — | 200 |
+| `PATCH` | `/api/v1/projects/{project_id}` | role_gated | tenant | `admin` · `tenant_admin` · `project_owner` | `platform_manager` | arango · `c2_projects` | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `c2_projects` | 204 |
+| `GET` | `/api/v1/users/me/preferences` | authenticated | tenant | any authenticated | `platform_manager` | — | 200 |
+| `PUT` | `/api/v1/users/me/preferences` | authenticated | tenant | any authenticated | `platform_manager` | arango · `c2_user_preferences` | 200 |
+| `POST` | `/api/v1/projects/{project_id}/members/{user_id}` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `platform_manager` | arango · `c2_role_assignments` | 204 |
+| `DELETE` | `/api/v1/projects/{project_id}/members/{user_id}` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `platform_manager` | arango · `c2_role_assignments` | 204 |
 ### c3_conversation
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
@@ -95,57 +102,57 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/orchestrator/runs` | authenticated | tenant | any authenticated | — | arango · `c4_runs` | 201 |
 | `GET` | `/api/v1/orchestrator/runs/{run_id}` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/feedback` | authenticated | tenant | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/orchestrator/runs/{run_id}/resume` | role_gated | tenant | `admin` | `tenant_manager` | — | 200 |
+| `POST` | `/api/v1/orchestrator/runs/{run_id}/resume` | role_gated | tenant | `project_owner` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/orchestrator/runs/{run_id}/trace` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/steer` | authenticated | tenant | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs` | authenticated | project | any authenticated | `tenant_manager` | arango · `c4_artifact_runs` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree` | authenticated | project | any authenticated | `tenant_manager` | minio · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob` | authenticated | project | any authenticated | `tenant_manager` | minio · bucket `orchestrator` | 200 |
-| `POST` | `/api/v1/admin/projects/{project_id}/artifacts/seed` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/git/commits` | authenticated | project | any authenticated | `tenant_manager` | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
-| `PUT` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `tenant_manager` | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `tenant_manager` | — | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
-| `POST` | `/api/v1/projects/{project_id}/documents/mkdir` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
-| `POST` | `/api/v1/projects/{project_id}/documents/rename` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/documents/move` | authenticated | project | any authenticated | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/source/tree` | authenticated | project | any authenticated | `tenant_manager` | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/source/mkdir` | role_gated | project | `admin` · `project_owner` · `project_editor` | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
-| `POST` | `/api/v1/projects/{project_id}/source/rename` | role_gated | project | `admin` · `project_owner` · `project_editor` | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/source/move` | role_gated | project | `admin` · `project_owner` · `project_editor` | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/source/file/{path:path}/meta` | authenticated | project | any authenticated | `tenant_manager` | — | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}/source/file/{path:path}` | role_gated | project | `admin` · `project_owner` · `project_editor` | `tenant_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs` | authenticated | project | any authenticated | `platform_manager` | arango · `c4_artifact_runs` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree` | authenticated | project | any authenticated | `platform_manager` | minio · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob` | authenticated | project | any authenticated | `platform_manager` | minio · bucket `orchestrator` | 200 |
+| `POST` | `/api/v1/admin/projects/{project_id}/artifacts/seed` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/git/commits` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `POST` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
+| `PUT` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
+| `POST` | `/api/v1/projects/{project_id}/documents/mkdir` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
+| `POST` | `/api/v1/projects/{project_id}/documents/rename` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `POST` | `/api/v1/projects/{project_id}/documents/move` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/source/tree` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `POST` | `/api/v1/projects/{project_id}/source/mkdir` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
+| `POST` | `/api/v1/projects/{project_id}/source/rename` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `POST` | `/api/v1/projects/{project_id}/source/move` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/source/file/{path:path}/meta` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}/source/file/{path:path}` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
 ### c5_requirements
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
 |---|---|---|---|---|---|---|---|
 | `GET` | `/api/v1/projects/{project_id}/requirements/documents` | authenticated | project | any authenticated | — | arango · `c5_documents` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/requirements/documents` | role_gated | project | `admin` · `tenant_admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c5_documents` | 201 |
+| `POST` | `/api/v1/projects/{project_id}/requirements/documents` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 201 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | authenticated | project | any authenticated | — | arango · `c5_documents` | 200 |
-| `PUT` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `admin` · `tenant_admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c5_documents` | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `c5_documents` | 204 |
+| `PUT` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c5_documents` | 204 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities` | authenticated | project | any authenticated | — | arango · `c5_entities` | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | authenticated | project | any authenticated | — | arango · `c5_entities` | 200 |
-| `PATCH` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `admin` · `tenant_admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c5_entities` | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `admin` · `tenant_admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c5_entities` | 204 |
+| `PATCH` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 204 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}` | authenticated | project | any authenticated | — | — | 501 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/relations` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/tailorings` | authenticated | project | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/requirements/reindex` | role_gated | project | `admin` · `project_owner` | `tenant_manager` | — | 202 |
+| `POST` | `/api/v1/projects/{project_id}/requirements/reindex` | role_gated | project | `project_owner` | `platform_manager` | — | 202 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/reindex/{job_id}` | authenticated | project | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/requirements/reconcile` | role_gated | project | `admin` · `project_owner` | `tenant_manager` | — | 200 |
+| `POST` | `/api/v1/projects/{project_id}/requirements/reconcile` | role_gated | project | `project_owner` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/export` | authenticated | project | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/requirements/import` | role_gated | project | `admin` · `tenant_admin` · `project_editor` · `project_owner` | `tenant_manager` | — | 501 |
+| `POST` | `/api/v1/projects/{project_id}/requirements/import` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | — | 501 |
 ### c6_validation
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
 |---|---|---|---|---|---|---|---|
 | `GET` | `/api/v1/validation/plugins` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/domains` | authenticated | — | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/validation/runs` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | — | 202 |
+| `POST` | `/api/v1/validation/runs` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | — | 202 |
 | `GET` | `/api/v1/validation/runs/{run_id}` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/runs/{run_id}/findings` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/findings/{finding_id}` | authenticated | — | any authenticated | — | — | 200 |
@@ -155,11 +162,11 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
 |---|---|---|---|---|---|---|---|
 | `POST` | `/api/v1/memory/retrieve` | authenticated | tenant | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/memory/projects/{project_id}/sources` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 201 |
-| `POST` | `/api/v1/memory/projects/{project_id}/sources/upload` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 202 |
-| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_chunks` | 201 |
-| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-kg` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_kg_entities` | 200 |
-| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-structural` | role_gated | project | `admin` · `project_editor` · `project_owner` | `tenant_manager` | arango · `memory_kg_entities` | 200 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c7_sources` | 201 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources/upload` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c7_sources` | 202 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 201 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-kg` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_kg_entities` | 200 |
+| `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-structural` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_kg_entities` | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics` | authenticated | project | any authenticated | — | — | 200 |
@@ -171,37 +178,39 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/enrichment-config` | authenticated | project | any authenticated | — | — | 200 |
-| `PUT` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `admin` · `tenant_admin` · `project_owner` | `tenant_manager` | arango · `memory_project_config` | 200 |
+| `PUT` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_project_config` | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | authenticated | project | any authenticated | — | — | 200 |
-| `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `admin` · `project_owner` | `tenant_manager` | arango · `c7_sources` | 204 |
-| `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `admin` | `tenant_manager` | — | 201 |
+| `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c7_sources` | 204 |
+| `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `project_owner` | `platform_manager` | — | 201 |
 | `GET` | `/api/v1/memory/projects/{project_id}/quota` | authenticated | project | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `admin` | `tenant_manager` | — | 501 |
+| `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `project_owner` | `platform_manager` | — | 501 |
 | `GET` | `/api/v1/memory/refresh/{job_id}` | authenticated | — | any authenticated | — | — | 501 |
 | `GET` | `/api/v1/memory/health` | open | — | *(open)* | — | — | 200 |
 ### c8_admin
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
 |---|---|---|---|---|---|---|---|
-| `GET` | `/admin/v1/llm/registry` | role_gated | — | `tenant_manager` | — | — | 200 |
-| `POST` | `/admin/v1/llm/registry` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 201 |
-| `PUT` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 200 |
-| `DELETE` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_registry` | 204 |
-| `GET` | `/admin/v1/llm/providers` | role_gated | — | `tenant_manager` | — | — | 200 |
-| `POST` | `/admin/v1/llm/providers` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 201 |
-| `PUT` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 200 |
-| `PUT` | `/admin/v1/llm/providers/{provider_id}/api-key` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 200 |
-| `DELETE` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `tenant_manager` | — | arango · `llm_providers` | 204 |
-| `GET` | `/admin/v1/quota/policy` | role_gated | — | `tenant_manager` | — | — | 200 |
-| `PUT` | `/admin/v1/quota/policy` | role_gated | — | `tenant_manager` | — | arango · `llm_quota_policy` | 200 |
-| `GET` | `/admin/v1/quota/status` | role_gated | — | `tenant_manager` | — | — | 200 |
+| `GET` | `/admin/v1/llm/registry` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/registry` | role_gated | — | `platform_manager` | — | arango · `llm_registry` | 201 |
+| `PUT` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `platform_manager` | — | arango · `llm_registry` | 200 |
+| `DELETE` | `/admin/v1/llm/registry/{model_id}` | role_gated | — | `platform_manager` | — | arango · `llm_registry` | 204 |
+| `GET` | `/admin/v1/llm/providers` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/providers` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 201 |
+| `PUT` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
+| `PUT` | `/admin/v1/llm/providers/{provider_id}/api-key` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
+| `DELETE` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 204 |
+| `GET` | `/admin/v1/quota/policy` | role_gated | — | `platform_manager` | — | — | 200 |
+| `PUT` | `/admin/v1/quota/policy` | role_gated | — | `platform_manager` | — | arango · `llm_quota_policy` | 200 |
+| `GET` | `/admin/v1/quota/status` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/quota/consumption` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/api/v1/quota/me` | authenticated | — | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/llm/catalog` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 200 |
+| `GET` | `/api/v1/llm/catalog` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/llm/catalog/available` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/llm/catalog/resolve` | authenticated | tenant | any authenticated | — | — | 200 |
-| `PUT` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `tenant_llm_catalog` | 200 |
-| `DELETE` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `tenant_llm_catalog` | 204 |
-| `GET` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | — | 200 |
-| `PUT` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `tenant_manager` | arango · `project_llm_models` | 200 |
+| `PUT` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `tenant_llm_catalog` | 200 |
+| `DELETE` | `/api/v1/llm/catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `tenant_llm_catalog` | 204 |
+| `GET` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `PUT` | `/api/v1/llm/projects/{project_id}/models` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `project_llm_models` | 200 |
 ### c9_mcp
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |

@@ -97,14 +97,14 @@ function renderPage() {
 beforeEach(() => window.localStorage.clear());
 
 describe("LlmRegistryPage", () => {
-  it("forbids a non-tenant_manager", async () => {
+  it("forbids a non-platform_manager", async () => {
     seedToken(["admin"]);
     renderPage();
     await waitFor(() => expect(screen.getByTestId("registry-forbidden")).toBeInTheDocument());
   });
 
   it("lists models and resolves the provider name", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     withProviders();
     server.use(http.get(REG, () => HttpResponse.json({ models: [model()] })));
     renderPage();
@@ -114,7 +114,7 @@ describe("LlmRegistryPage", () => {
   });
 
   it("creates a model via POST with a provider from the dropdown", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     withProviders();
     let sentBody: Record<string, unknown> | null = null;
     const post = vi.fn(async ({ request }) => {
@@ -137,7 +137,7 @@ describe("LlmRegistryPage", () => {
   });
 
   it("edits a model's cost by id (PUT)", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     withProviders();
     let sentBody: Record<string, unknown> | null = null;
     const put = vi.fn(async ({ request }) => {
@@ -161,7 +161,7 @@ describe("LlmRegistryPage", () => {
   });
 
   it("deletes a model by id", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     withProviders();
     const del = vi.fn(() => new HttpResponse(null, { status: 204 }));
     server.use(
@@ -175,7 +175,7 @@ describe("LlmRegistryPage", () => {
   });
 
   it("sorts by quality ascending by default and flips on header click", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     withProviders();
     server.use(
       http.get(REG, () =>

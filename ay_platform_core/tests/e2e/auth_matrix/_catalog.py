@@ -85,7 +85,7 @@ class EndpointSpec:
     Project-scoped roles flow via the user's `project_scopes` claim.
     """
     accept_global_roles: tuple[str, ...] = ()
-    """Global roles (admin, tenant_admin, tenant_manager) that ALSO pass
+    """Global roles (admin, tenant_admin, platform_manager) that ALSO pass
     this gate, in addition to project-scoped `accept_roles`. The audit
     documents that for most project-scoped operations, `admin` /
     `tenant_admin` are also accepted."""
@@ -94,8 +94,8 @@ class EndpointSpec:
     backend_bucket: str | None = None
     excluded_global_roles: tuple[str, ...] = ()
     """Global roles that SHALL be REJECTED by this endpoint even though
-    they are present in the user's claims. Used for `tenant_manager`
-    on content endpoints (E-100-002 v2: tenant_manager is content-blind)."""
+    they are present in the user's claims. Used for `platform_manager`
+    on content endpoints (E-100-002 v2: platform_manager is content-blind)."""
     notes: str = ""
 
 
@@ -159,7 +159,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.NONE,
         success_status=204,
     ),
-    # User management — admin / tenant_admin only. tenant_manager is
+    # User management — admin / tenant_admin only. platform_manager is
     # excluded by E-100-002 v2: managing users IS tenant content.
     EndpointSpec(
         component="c2_auth",
@@ -169,7 +169,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=201,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
@@ -181,7 +181,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c2_auth",
@@ -191,7 +191,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
@@ -203,7 +203,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=204,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
@@ -215,7 +215,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=204,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
     # Session management — `admin` ONLY (no tenant_admin in v1; cross-
     # tenant view of all platform sessions).
@@ -227,7 +227,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.NONE,
         success_status=200,
         accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c2_auth",
@@ -237,10 +237,10 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.NONE,
         success_status=204,
         accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
-    # Tenant lifecycle (Phase A) — tenant_manager super-root ONLY.
-    # These are the platform's only endpoints where tenant_manager is
+    # Tenant lifecycle (Phase A) — platform_manager super-root ONLY.
+    # These are the platform's only endpoints where platform_manager is
     # the EXCLUSIVE accepted role: tenant lifecycle is the operator
     # surface, not tenant content.
     EndpointSpec(
@@ -250,7 +250,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=201,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_tenants",
     ),
@@ -261,7 +261,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c2_auth",
@@ -270,12 +270,12 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=204,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_tenants",
     ),
     # Platform-operator surface (E-100-002 v3, LLM-governance Lot 2):
-    # tenant_manager deactivates tenants + oversees users cross-tenant.
+    # platform_manager deactivates tenants + oversees users cross-tenant.
     EndpointSpec(
         component="c2_auth",
         method="POST",
@@ -283,7 +283,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_tenants",
     ),
@@ -294,10 +294,16 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_tenants",
     ),
+    # User oversight (E-100-002 v7) — `_require_operator` /
+    # `_require_user_operator`: platform_manager cross-tenant, `admin` scoped
+    # to its OWN tenant. Same convention as project governance below —
+    # `accept_global_roles` lists `platform_manager` only (UNCONDITIONAL
+    # acceptance); the tenant-conditional `admin` path is covered by
+    # `tests/integration/c2_auth/test_admin_governance.py`.
     EndpointSpec(
         component="c2_auth",
         method="GET",
@@ -305,7 +311,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c2_auth",
@@ -314,7 +320,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
@@ -325,12 +331,99 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
+    # Project GOVERNANCE (E-100-002 v4) — platform_manager platform operator,
+    # cross-tenant. Governance object only (metadata / lifecycle status / ACL);
+    # NOT project content. scope=NONE because these are operator endpoints.
+    #
+    # E-100-002 v6: the gate is `_require_project_operator`, which ALSO accepts
+    # `admin` — but ONLY for a project in the caller's OWN tenant
+    # (a tenant-SCOPED, conditional acceptance). `accept_global_roles` below
+    # lists `platform_manager` only, deliberately: the auth-matrix models
+    # UNCONDITIONAL global-role acceptance (`test_accepted_role_clears_gate`),
+    # and `admin` here is conditional on tenant ownership. Modelling
+    # scoped acceptance is a §13 framework follow-up (a `scoped_global_roles`
+    # dimension + a tenant-aligned `admin` fixture project); until
+    # then the `admin` path is covered by
+    # `tests/integration/c2_auth/test_admin_governance.py` (E-100-002 v7).
+    EndpointSpec(
+        component="c2_auth",
+        method="GET",
+        path="/admin/projects",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="POST",
+        path="/admin/projects/{project_id}/activate",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c2_projects",
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="POST",
+        path="/admin/projects/{project_id}/deactivate",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c2_projects",
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="POST",
+        path="/admin/projects/{project_id}/archive",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c2_projects",
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="GET",
+        path="/admin/projects/{project_id}/members",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="POST",
+        path="/admin/projects/{project_id}/members/{user_id}",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c2_role_assignments",
+    ),
+    EndpointSpec(
+        component="c2_auth",
+        method="DELETE",
+        path="/admin/projects/{project_id}/members/{user_id}",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="c2_role_assignments",
+    ),
     # Project lifecycle (Phase A) — admin / tenant_admin / project_owner
-    # depending on operation. tenant_manager is EXCLUDED because
+    # depending on operation. platform_manager is EXCLUDED because
     # projects are tenant content (E-100-002 v2 separation of duties).
     EndpointSpec(
         component="c2_auth",
@@ -340,7 +433,7 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=201,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_projects",
     ),
@@ -353,7 +446,7 @@ _C2_AUTH: list[EndpointSpec] = [
         success_status=200,
         notes=(
             "Any authenticated user lists projects in their tenant; "
-            "tenant_manager is rejected in the handler since listing "
+            "platform_manager is rejected in the handler since listing "
             "tenant projects is tenant content."
         ),
     ),
@@ -364,7 +457,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.TENANT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes=(
             "Any tenant member reads a single project (incl. the "
             "effective system_prompt + is_default flag for the "
@@ -380,7 +473,7 @@ _C2_AUTH: list[EndpointSpec] = [
         success_status=200,
         accept_roles=("project_owner",),
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_projects",
     ),
@@ -392,12 +485,12 @@ _C2_AUTH: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=204,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_projects",
     ),
     # Self-service per-user preferences. Any tenant member writes their
-    # own record ; tenant_manager is content-blind and rejected.
+    # own record ; platform_manager is content-blind and rejected.
     EndpointSpec(
         component="c2_auth",
         method="GET",
@@ -405,7 +498,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.TENANT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c2_auth",
@@ -414,7 +507,7 @@ _C2_AUTH: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.TENANT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_user_preferences",
     ),
@@ -427,7 +520,7 @@ _C2_AUTH: list[EndpointSpec] = [
         success_status=204,
         accept_roles=("project_owner",),
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_role_assignments",
     ),
@@ -440,7 +533,7 @@ _C2_AUTH: list[EndpointSpec] = [
         success_status=204,
         accept_roles=("project_owner",),
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c2_role_assignments",
     ),
@@ -466,8 +559,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=201,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c5_documents",
     ),
@@ -489,8 +582,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c5_documents",
     ),
@@ -502,8 +595,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=204,
         accept_roles=("project_owner",),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c5_documents",
     ),
@@ -535,8 +628,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c5_entities",
     ),
@@ -548,8 +641,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=204,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c5_entities",
     ),
@@ -594,8 +687,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=202,
         accept_roles=("project_owner",),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c5_requirements",
@@ -613,8 +706,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_owner",),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c5_requirements",
@@ -632,8 +725,8 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=501,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         notes="Stub — import format negotiation deferred to v2.",
     ),
 ]
@@ -656,8 +749,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=201,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c7_sources",
     ),
@@ -673,8 +766,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=202,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c7_sources",
         notes=(
@@ -692,8 +785,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=201,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="memory_chunks",
         notes=(
@@ -712,8 +805,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="memory_kg_entities",
         notes=(
@@ -734,8 +827,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="memory_kg_entities",
         notes=(
@@ -862,8 +955,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_owner",),
-        accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="memory_project_config",
         notes="Persist the project's enrichment config (owner/admin only, R-400-224).",
@@ -888,8 +981,8 @@ _C7_MEMORY: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=204,
         accept_roles=("project_owner",),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c7_sources",
     ),
@@ -903,8 +996,9 @@ _C7_MEMORY: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.TENANT,
         success_status=201,
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_roles=("project_owner",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c7_memory",
@@ -921,8 +1015,9 @@ _C7_MEMORY: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.PROJECT,
         success_status=501,
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_roles=("project_owner",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         notes="Stub — refresh job deferred (R-400-060/061).",
     ),
     EndpointSpec(
@@ -970,8 +1065,8 @@ _C6_VALIDATION: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=202,
         accept_roles=("project_editor", "project_owner"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c6_validation",
@@ -1116,8 +1211,9 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.TENANT,
         success_status=200,
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_roles=("project_owner",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     # Tranche B — Trace ledger paginated read (R-200-201). Same auth
     # shape as GET /runs/{run_id} : authenticated, tenant-scoped read,
@@ -1142,7 +1238,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
     ),
     # Project artifacts surface — Pass 1 of the Code source / DocGen
     # feature (R-200-131). Read-only for any tenant member ;
-    # tenant_manager is rejected because artifacts are tenant content
+    # platform_manager is rejected because artifacts are tenant content
     # (E-100-002 v2). Profile-agnostic — same endpoints serve
     # `codegen` and `docgen` projects.
     EndpointSpec(
@@ -1152,7 +1248,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="c4_artifact_runs",
     ),
@@ -1163,7 +1259,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.MINIO,
         backend_bucket="orchestrator",
     ),
@@ -1174,7 +1270,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.MINIO,
         backend_bucket="orchestrator",
     ),
@@ -1189,13 +1285,13 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
     ),
     # Project versioning — commit history proxy over Gitea (R-200-147).
-    # Read-only for any tenant member ; tenant_manager rejected in-app.
+    # Read-only for any tenant member ; platform_manager rejected in-app.
     EndpointSpec(
         component="c4_orchestrator",
         method="GET",
@@ -1203,7 +1299,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes=(
             "Transparent Gitea proxy (R-200-145) — UX never reaches "
             "Gitea directly. Returns [] when Gitea is not wired."
@@ -1211,7 +1307,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
     ),
     # Chat-direct DocGen document CRUD (D-015 / R-200-153..156). The
     # C3 conversation's tool calls land here. Project-scoped content ;
-    # tenant_manager rejected (content-blind per E-100-002 v2).
+    # platform_manager rejected (content-blind per E-100-002 v2).
     EndpointSpec(
         component="c4_orchestrator",
         method="POST",
@@ -1219,7 +1315,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=201,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1232,7 +1328,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1245,7 +1341,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes="List documents in the live-docs corpus (D-015).",
     ),
     EndpointSpec(
@@ -1255,7 +1351,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes="Read one document (D-015).",
     ),
     EndpointSpec(
@@ -1265,7 +1361,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=204,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1280,7 +1376,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=201,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1293,7 +1389,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1306,7 +1402,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1322,7 +1418,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes="Recursive source-files tree projection (R-200-170).",
     ),
     EndpointSpec(
@@ -1333,8 +1429,8 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=201,
         accept_roles=("project_owner", "project_editor"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1348,8 +1444,8 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_owner", "project_editor"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1363,8 +1459,8 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=200,
         accept_roles=("project_owner", "project_editor"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1377,7 +1473,7 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         auth=Auth.AUTHENTICATED,
         scope=Scope.PROJECT,
         success_status=200,
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         notes="Source-file metadata (size, mime, last commit) — R-200-173.",
     ),
     EndpointSpec(
@@ -1388,8 +1484,8 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.PROJECT,
         success_status=204,
         accept_roles=("project_owner", "project_editor"),
-        accept_global_roles=("admin",),
-        excluded_global_roles=("tenant_manager",),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.BOTH,
         backend_collection="c4_artifact_runs",
         backend_bucket="orchestrator",
@@ -1428,9 +1524,9 @@ _C9_MCP: list[EndpointSpec] = [
 
 
 _C8_ADMIN: list[EndpointSpec] = [
-    # Platform LLM registry — tenant_manager ONLY. This is platform config
+    # Platform LLM registry — platform_manager ONLY. This is platform config
     # (model list, prices, capabilities, encrypted provider keys), NOT tenant
-    # content, so tenant_manager is the ACCEPTED role here (not excluded).
+    # content, so platform_manager is the ACCEPTED role here (not excluded).
     # The API key is write-only: GET never returns it.
     EndpointSpec(
         component="c8_admin",
@@ -1439,7 +1535,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c8_admin",
@@ -1448,7 +1544,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=201,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_registry",
         notes="Create a model (mints stable model_id). 409 on duplicate alias.",
@@ -1460,7 +1556,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_registry",
     ),
@@ -1471,11 +1567,11 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=204,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_registry",
     ),
-    # Provider registry (endpoint + write-only credential) — tenant_manager.
+    # Provider registry (endpoint + write-only credential) — platform_manager.
     EndpointSpec(
         component="c8_admin",
         method="GET",
@@ -1483,7 +1579,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c8_admin",
@@ -1492,7 +1588,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=201,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_providers",
     ),
@@ -1503,7 +1599,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_providers",
     ),
@@ -1514,7 +1610,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_providers",
         notes="Write-only key: encrypted at rest (SecretCipher), never returned.",
@@ -1526,11 +1622,11 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=204,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_providers",
     ),
-    # Global LLM quota policy (Lot 3) — tenant_manager platform operator.
+    # Global LLM quota policy (Lot 3) — platform_manager platform operator.
     EndpointSpec(
         component="c8_admin",
         method="GET",
@@ -1538,7 +1634,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c8_admin",
@@ -1547,7 +1643,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="llm_quota_policy",
     ),
@@ -1558,7 +1654,17 @@ _C8_ADMIN: list[EndpointSpec] = [
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
-        accept_global_roles=("tenant_manager",),
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-tenant consumption report (R-800-144) — reporting only, operator.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/quota/consumption",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
     ),
     # Self-service quota view — ANY authenticated user, own tenant only
     # (tenant taken from the X-Tenant-Id forward-auth header, not a parameter).
@@ -1572,7 +1678,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         notes="Caller's own tenant quota status; no role gate, no tenant param.",
     ),
     # Per-tenant LLM catalogue (increment #4) — TENANT CONTENT, owned by
-    # admin / tenant_admin. tenant_manager (content-blind) is EXCLUDED. Tenant
+    # admin / tenant_admin. platform_manager (content-blind) is EXCLUDED. Tenant
     # scope is carried by the X-Tenant-Id header (no path segment), so a
     # cross-tenant call can only ever touch the caller's own tenant rows.
     EndpointSpec(
@@ -1583,7 +1689,18 @@ _C8_ADMIN: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
+    ),
+    # Re-add picker (800 v10) — registry models not yet in the tenant catalogue.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/api/v1/llm/catalog/available",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=200,
+        accept_global_roles=("admin", "tenant_admin"),
+        excluded_global_roles=("platform_manager",),
     ),
     # Quality→model resolution — any authenticated tenant member (the project
     # picker + ingestion both read it). Read-only, returns no secret.
@@ -1603,7 +1720,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="tenant_llm_catalog",
     ),
@@ -1615,7 +1732,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=204,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="tenant_llm_catalog",
     ),
@@ -1628,7 +1745,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c8_admin",
@@ -1638,7 +1755,7 @@ _C8_ADMIN: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
         accept_global_roles=("admin", "tenant_admin"),
-        excluded_global_roles=("tenant_manager",),
+        excluded_global_roles=("platform_manager",),
         backend=Backend.ARANGO,
         backend_collection="project_llm_models",
     ),
@@ -1705,7 +1822,7 @@ del _seen
 # Reserved roles documented in E-100-002 v2 — used by tests to enumerate
 # the role universe.
 ALL_GLOBAL_ROLES: tuple[str, ...] = (
-    "tenant_manager",
+    "platform_manager",
     "admin",
     "tenant_admin",
     "user",

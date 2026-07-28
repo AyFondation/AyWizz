@@ -40,6 +40,7 @@ COLL_USER_PREFERENCES = "c2_user_preferences"
 # tokens, …). Keyed by project_id. v1 stores plaintext ; Q-100-020
 # tracks the prod upgrade to a KMS / vault.
 COLL_PROJECT_SECRETS = "c2_project_secrets"
+COLL_AUDIT = "c2_audit"  # append-only governance audit trail (E-100-002 v4)
 
 
 class AuthRepository:
@@ -70,7 +71,8 @@ class AuthRepository:
     def _ensure_collections_sync(self) -> None:
         for name in (COLL_USERS, COLL_TENANTS, COLL_PROJECTS,
                      COLL_ROLE_ASSIGNMENTS, COLL_SESSIONS,
-                     COLL_USER_PREFERENCES, COLL_PROJECT_SECRETS):
+                     COLL_USER_PREFERENCES, COLL_PROJECT_SECRETS,
+                     COLL_AUDIT):
             if not self._db.has_collection(name):
                 self._db.create_collection(name)
 
@@ -132,7 +134,7 @@ class AuthRepository:
 
     async def list_users(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """List users across ALL tenants (optionally filtered by `tenant_id`).
-        Cross-tenant — the platform-operator (tenant_manager) oversight surface."""
+        Cross-tenant — the platform-operator (platform_manager) oversight surface."""
         return await asyncio.to_thread(self._list_users_sync, tenant_id)
 
     def _increment_failed_attempts_sync(self, user_id: str) -> int:
@@ -438,6 +440,73 @@ class AuthRepository:
 
     async def delete_project(self, project_id: str) -> bool:
         return await asyncio.to_thread(self._delete_project_sync, project_id)
+
+    # ---- Project governance (E-100-002 v4, cross-tenant) --------------------
+
+    def _list_all_projects_sync(
+        self, tenant_id: str | None
+    ) -> list[dict[str, Any]]:
+        # Unscoped cross-tenant listing for the platform operator. An
+        # optional tenant filter narrows to one tenant without changing
+        # the (platform_manager-only) authorization.
+        if tenant_id is None:
+            cursor = self._db.aql.execute(
+                "FOR p IN @@col SORT p.tenant_id ASC, p._key ASC RETURN p",
+                bind_vars={"@col": COLL_PROJECTS},
+            )
+        else:
+            cursor = self._db.aql.execute(
+                "FOR p IN @@col FILTER p.tenant_id == @tid "
+                "SORT p._key ASC RETURN p",
+                bind_vars={"@col": COLL_PROJECTS, "tid": tenant_id},
+            )
+        return list(cursor)  # type: ignore[arg-type]
+
+    async def list_all_projects(
+        self, tenant_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._list_all_projects_sync, tenant_id)
+
+    def _set_project_status_sync(self, project_id: str, status: str) -> bool:
+        coll = self._db.collection(COLL_PROJECTS)
+        if not coll.has(project_id):
+            return False
+        coll.update({"_key": project_id, "status": status})
+        return True
+
+    async def set_project_status(self, project_id: str, status: str) -> bool:
+        """Set the governance lifecycle status; returns False if absent."""
+        return await asyncio.to_thread(
+            self._set_project_status_sync, project_id, status
+        )
+
+    def _list_project_members_sync(self, project_id: str) -> list[dict[str, Any]]:
+        # The ACL: role assignments for this project, joined best-effort to
+        # the user's username for display. Metadata only — no content.
+        cursor = self._db.aql.execute(
+            "FOR r IN @@ra FILTER r.project_id == @pid SORT r.user_id ASC "
+            "LET u = DOCUMENT(@users, r.user_id) "
+            "RETURN {user_id: r.user_id, role: r.role, "
+            "username: u ? u.username : ''}",
+            bind_vars={
+                "@ra": COLL_ROLE_ASSIGNMENTS,
+                "users": COLL_USERS,
+                "pid": project_id,
+            },
+        )
+        return list(cursor)  # type: ignore[arg-type]
+
+    async def list_project_members(
+        self, project_id: str
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._list_project_members_sync, project_id)
+
+    def _append_audit_sync(self, record: dict[str, Any]) -> None:
+        self._db.collection(COLL_AUDIT).insert(record)
+
+    async def append_audit(self, record: dict[str, Any]) -> None:
+        """Append one append-only governance audit record (best-effort)."""
+        await asyncio.to_thread(self._append_audit_sync, record)
 
     # ---- User preferences ---------------------------------------------------
 

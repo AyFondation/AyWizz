@@ -9,7 +9,7 @@
 #              cross-tenant / cross-project leak.
 #
 #              Roles in the matrix follow E-100-002 v2:
-#                tenant_manager  — super-root, content-blind
+#                platform_manager  — super-root, content-blind
 #                admin           — tenant-scoped admin
 #                project_owner   — owner of a specific project
 #                project_editor  — editor of a specific project
@@ -137,14 +137,14 @@ def profiles() -> dict[str, RoleProfile]:
             global_roles=("tenant_admin",),
             project_id=PROJECT_A,
         ),
-        "tenant_manager": RoleProfile(
+        "platform_manager": RoleProfile(
             user_id="u-tmgr",
-            # tenant_manager is platform-wide; the X-Tenant-Id of the
+            # platform_manager is platform-wide; the X-Tenant-Id of the
             # request is whatever resource they target. By convention
-            # we set TENANT_A so tenant_manager calls don't 401 on
+            # we set TENANT_A so platform_manager calls don't 401 on
             # missing tenant header.
             tenant_id=TENANT_A,
-            global_roles=("tenant_manager",),
+            global_roles=("platform_manager",),
         ),
         # Cross-tenant probe: same role suite as project_owner, but in
         # tenant B. Used to assert that a cross-tenant attempt against
@@ -182,7 +182,7 @@ async def seeded_c2_users(auth_matrix_stack: PlatformStack) -> dict[str, str]:
     seedlings = [
         ("admin", [RBACGlobalRole.ADMIN]),
         ("tenant_admin", [RBACGlobalRole.TENANT_ADMIN]),
-        ("tenant_manager", [RBACGlobalRole.TENANT_MANAGER]),
+        ("platform_manager", [RBACGlobalRole.PLATFORM_MANAGER]),
         ("user", [RBACGlobalRole.USER]),
     ]
     for role_label, roles in seedlings:

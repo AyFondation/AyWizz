@@ -6,7 +6,7 @@
 #              `/api/v1/users/me/preferences` by the C2 app factory.
 #              Open to any authenticated tenant member — preferences
 #              are per-user data, the caller is the only legitimate
-#              actor on their own record. tenant_manager is rejected
+#              actor on their own record. platform_manager is rejected
 #              because the super-root has no content/identity inside
 #              a tenant (E-100-002 v2).
 #
@@ -41,12 +41,12 @@ def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
     return x_user_id
 
 
-def _reject_tenant_manager(x_user_roles: str | None) -> None:
+def _reject_platform_manager(x_user_roles: str | None) -> None:
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
-    if "tenant_manager" in roles and "admin" not in roles and "tenant_admin" not in roles:
+    if "platform_manager" in roles and "admin" not in roles and "tenant_admin" not in roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="tenant_manager has no access to tenant content (E-100-002 v2)",
+            detail="platform_manager has no access to tenant content (E-100-002 v2)",
         )
 
 
@@ -59,7 +59,7 @@ async def get_my_preferences(
     """Read effective preferences for the calling user. Always
     succeeds — the response falls back to the C2 default user prompt
     when no override has been stored yet."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     return await service.get_user_preferences(actor_id)
 
 
@@ -73,5 +73,5 @@ async def put_my_preferences(
     """Upsert the caller's preferences. Empty-string field values
     clear the corresponding override (revert to C2 default) ; missing
     or `null` values leave the stored value untouched."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     return await service.update_user_preferences(actor_id, body)

@@ -3,7 +3,7 @@
 # Version: 3
 # Path: ay_platform_core/tests/contract/c2_auth/test_rbac_schema.py
 # Description: Contract tests — RBAC roles match E-100-002 v2 exactly
-#              (4 global roles: tenant_manager, admin, tenant_admin, user).
+#              (4 global roles: platform_manager, admin, tenant_admin, user).
 # =============================================================================
 
 from __future__ import annotations
@@ -17,18 +17,18 @@ from ay_platform_core.c2_auth.models import RBACGlobalRole, RBACProjectRole
 
 @pytest.mark.contract
 class TestRBACGlobalRoleContract:
-    """E-100-002 v2: four global roles (tenant_manager super-root + admin
-    + tenant_admin + user), exact string values."""
+    """E-100-002 v7: global roles (platform_manager super-root + admin tenant
+    operator + tenant_admin synonym + user), exact string values."""
 
     EXPECTED_GLOBAL_ROLES: ClassVar[set[str]] = {
-        "tenant_manager", "admin", "tenant_admin", "user",
+        "platform_manager", "admin", "tenant_admin", "user",
     }
 
     def test_global_roles_exact_set(self) -> None:
         assert set(RBACGlobalRole) == self.EXPECTED_GLOBAL_ROLES
 
-    def test_tenant_manager_value(self) -> None:
-        assert RBACGlobalRole.TENANT_MANAGER.value == "tenant_manager"
+    def test_platform_manager_value(self) -> None:
+        assert RBACGlobalRole.PLATFORM_MANAGER.value == "platform_manager"
 
     def test_admin_value(self) -> None:
         assert RBACGlobalRole.ADMIN.value == "admin"

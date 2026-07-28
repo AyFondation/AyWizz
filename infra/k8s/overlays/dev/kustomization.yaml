@@ -47,6 +47,7 @@ resources:
   - ../../base/c7_memory
   - ../../base/c8_gateway
   - ../../base/c9_mcp
+  - ../../base/c13_extractor   # opt-in extractor (R-100-125); bucket seeded by minio-init
   - ../../base/c1_gateway
   - ../../base/_init
 
@@ -104,3 +105,15 @@ patches:
       - op: replace
         path: /spec/ports/0/port
         value: 56000
+  # C13 defaults to a 1-CPU request; on a small local node (≈4 CPU) that
+  # would leave it Pending alongside the rest of the stack. Lower only the
+  # scheduling REQUEST — the 4-CPU limit is untouched, so heavy extraction
+  # passes still burst. Dev-local tuning per R-100-125 §9.
+  - target:
+      version: v1
+      kind: Deployment
+      name: c13-extractor
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 250m

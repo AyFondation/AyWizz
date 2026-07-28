@@ -1,6 +1,6 @@
 # =============================================================================
 # File: code_extractor.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/kg/code_extractor.py
 # Description: Deterministic schema-guided L1 structural extractor for the
 #              `code` domain — Python (V2 #3-A.a / R-400-200, R-400-201,
@@ -54,10 +54,11 @@ from ay_platform_core.c7_memory.kg.ontology import (
 # it at IMPORT time would crash the whole C7 service (and transitively C3,
 # which imports `c7_memory.service`) at boot. A single OPTIONAL feature
 # (code-AST extraction) must never prevent the service from starting, so the
-# load is deferred to first use. Typed `Any` on purpose : the installed Rust
-# binding exposes node accessors as METHODS (`kind()`, `start_byte()`,
-# `root_node()`), which the official property-based stubs do not match —
-# treating nodes as `Any` avoids that mismatch.
+# load is deferred to first use. Typed `Any` on purpose : the installed
+# tree-sitter 0.25 binding exposes node accessors as PROPERTIES (`.type`,
+# `.start_byte`, `.root_node`) and `Parser.parse` takes `bytes` — but
+# `tree-sitter-language-pack.get_parser` is itself untyped, so `Any` on the
+# node graph avoids threading partial stubs through the whole extractor.
 @functools.cache
 def _python_parser() -> Any:
     """Return the cached tree-sitter Python parser, loading it on first use.
@@ -78,19 +79,19 @@ _MARKER_VERB_TO_RELATION: dict[str, RelationType] = {
 
 
 def _text(node: Any, src: bytes) -> str:
-    return src[node.start_byte() : node.end_byte()].decode("utf-8", "replace")
+    return src[node.start_byte : node.end_byte].decode("utf-8", "replace")
 
 
 def _named(node: Any) -> list[Any]:
-    return [node.named_child(i) for i in range(node.named_child_count())]
+    return [node.named_child(i) for i in range(node.named_child_count)]
 
 
 def _unwrap(node: Any) -> Any:
     """A `decorated_definition` wraps the real class/function node — unwrap it
     so a decorated class/method is still classified correctly."""
-    if node.kind() == "decorated_definition":
+    if node.type == "decorated_definition":
         for child in _named(node):
-            if child.kind() in ("class_definition", "function_definition"):
+            if child.type in ("class_definition", "function_definition"):
                 return child
     return node
 
@@ -104,9 +105,9 @@ def _imported_modules(node: Any, src: bytes) -> list[str]:
     """Module paths of an `import a, b.c` / `import a.b as z` statement."""
     modules: list[str] = []
     for child in _named(node):
-        if child.kind() == "dotted_name":
+        if child.type == "dotted_name":
             modules.append(_text(child, src))
-        elif child.kind() == "aliased_import":
+        elif child.type == "aliased_import":
             inner = child.named_child(0)  # the dotted_name, before the alias
             if inner is not None:
                 modules.append(_text(inner, src))
@@ -121,12 +122,12 @@ def _callee_names(scope: Any, src: bytes) -> list[str]:
     stack: list[Any] = _named(scope)
     while stack:
         n = stack.pop()
-        kind = n.kind()
+        kind = n.type
         if kind in ("function_definition", "class_definition"):
             continue  # separate scope — its calls aren't this caller's
         if kind == "call":
             fn = n.child_by_field_name("function")
-            if fn is not None and fn.kind() in ("identifier", "attribute"):
+            if fn is not None and fn.type in ("identifier", "attribute"):
                 names.append(_text(fn, src))
         stack.extend(_named(n))
     return names
@@ -149,7 +150,7 @@ def extract_structural_python(
     qualified under it (`<module>.Foo`, `<module>.Foo.method`). Deterministic
     and deduplicated."""
     src = text.encode("utf-8")
-    root = _python_parser().parse(text).root_node()
+    root = _python_parser().parse(src).root_node
 
     entities: dict[str, StructuralEntity] = {}
     relations: dict[tuple[str, str, str], StructuralRelation] = {}
@@ -168,7 +169,7 @@ def extract_structural_python(
 
     for top in _named(root):
         node = _unwrap(top)
-        kind = node.kind()
+        kind = node.type
         if kind == "import_statement":
             for mod in _imported_modules(node, src):
                 _add_rel(module, "IMPORTS", StructuralEntity(name=mod, type="MODULE"))
@@ -216,7 +217,7 @@ def _extract_class(
     if superclasses is not None:
         for arg in _named(superclasses):
             # Skip keyword args (e.g. metaclass=…) — only positional bases.
-            if arg.kind() in ("identifier", "attribute", "dotted_name"):
+            if arg.type in ("identifier", "attribute", "dotted_name"):
                 add_rel(
                     cls, "INHERITS_FROM",
                     StructuralEntity(name=_text(arg, src), type="CLASS"),
@@ -226,7 +227,7 @@ def _extract_class(
     if body is not None:
         for stmt in _named(body):
             member = _unwrap(stmt)
-            if member.kind() == "function_definition":
+            if member.type == "function_definition":
                 method_name = _def_name(member, src)
                 if method_name:
                     method = StructuralEntity(

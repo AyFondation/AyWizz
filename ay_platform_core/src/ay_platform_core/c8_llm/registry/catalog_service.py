@@ -1,6 +1,6 @@
 # =============================================================================
 # File: catalog_service.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/catalog_service.py
 # Description: Business logic for the per-tenant LLM catalogue + the
 #              quality→model RESOLUTION. v2: catalogue rows reference the stable
@@ -8,6 +8,11 @@
 #              a tenant's curation. Resolution returns the model's CURRENT alias
 #              (the platform routes by alias → the C8 injector resolves the
 #              provider). NO cross-quality fallback (explicit > surprising).
+#              v3 (800 v10): the tenant catalogue is OPT-OUT — on a tenant's
+#              first touch it is LAZILY MATERIALISED with every platform-registry
+#              model (enabled), then marked initialised so a later "remove all"
+#              is not undone. `list_available_models` powers the HMI's re-add
+#              picker (registry models NOT currently in the tenant catalogue).
 # =============================================================================
 
 from __future__ import annotations
@@ -35,6 +40,37 @@ class TenantCatalogService:
         self._repo = repo
         self._registry = registry
 
+    # ---- Opt-out lazy materialisation (800 v10) ---------------------------
+
+    async def _ensure_initialized(self, tenant_id: str) -> None:
+        """On a tenant's FIRST touch, materialise its catalogue with every
+        platform-registry model (enabled), then mark it initialised. Idempotent
+        and cheap thereafter (one marker read). An admin who subsequently removes
+        models is NOT re-populated, because the marker persists independently of
+        the catalogue rows."""
+        if await self._repo.is_initialized(tenant_id):
+            return
+        for rp in await self._registry.list_models():
+            entry = TenantCatalogEntry(
+                tenant_id=tenant_id, model_id=rp.model_id, enabled=True
+            )
+            await self._repo.upsert(entry.to_document())
+        await self._repo.mark_initialized(tenant_id)
+
+    async def list_available_models(self, tenant_id: str) -> list[LLMRegistryPublic]:
+        """Registry models NOT currently in the tenant's catalogue — the set an
+        admin can (re-)add via the HMI picker. Materialises defaults first so a
+        brand-new tenant reports an empty 'available' set (all already catalogued)."""
+        await self._ensure_initialized(tenant_id)
+        catalogued = {
+            raw["model_id"] for raw in await self._repo.list_for_tenant(tenant_id)
+        }
+        return [
+            rp
+            for rp in await self._registry.list_models()
+            if rp.model_id not in catalogued
+        ]
+
     # ---- CRUD -------------------------------------------------------------
 
     async def upsert_model(
@@ -42,6 +78,7 @@ class TenantCatalogService:
     ) -> TenantCatalogModelPublic:
         """Add/configure a registry model in a tenant's catalogue. Raises
         ModelNotInRegistryError if the model_id is unknown to the registry."""
+        await self._ensure_initialized(tenant_id)
         registry_public = await self._registry.get_model(model_id)
         if registry_public is None:
             raise ModelNotInRegistryError(model_id)
@@ -63,7 +100,9 @@ class TenantCatalogService:
 
     async def list_catalog(self, tenant_id: str) -> list[TenantCatalogModelPublic]:
         """List a tenant's catalogue joined with the registry public view.
-        Rows whose registry model has since been deleted are skipped (stale)."""
+        Rows whose registry model has since been deleted are skipped (stale).
+        Materialises the opt-out defaults on the tenant's first touch (800 v10)."""
+        await self._ensure_initialized(tenant_id)
         rows = await self._repo.list_for_tenant(tenant_id)
         out: list[TenantCatalogModelPublic] = []
         for raw in rows:
@@ -81,6 +120,7 @@ class TenantCatalogService:
     ) -> ProjectModelsResponse:
         """A project's EFFECTIVE model list: the explicit set if configured,
         else the tenant's `default_for_new_projects` set (lazy default)."""
+        await self._ensure_initialized(tenant_id)
         catalogue = await self.list_catalog(tenant_id)
         by_id = {c.model_id: c for c in catalogue}
         doc = await self._repo.get_project_models(tenant_id, project_id)
@@ -149,6 +189,7 @@ class TenantCatalogService:
         SCOPED to the project's effective model set (explicit list, else tenant
         defaults, else the whole catalogue). None when no enabled,
         capability-satisfying model of the requested quality qualifies."""
+        await self._ensure_initialized(tenant_id)
         scope = await self._effective_model_ids(tenant_id, project_id)
         rows = await self._repo.list_for_tenant(tenant_id)
         candidates: list[LLMRegistryPublic] = []

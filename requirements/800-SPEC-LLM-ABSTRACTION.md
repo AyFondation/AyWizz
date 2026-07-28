@@ -1,25 +1,29 @@
 ---
 document: 800-SPEC-LLM-ABSTRACTION
-version: 8
+version: 10
 path: requirements/800-SPEC-LLM-ABSTRACTION.md
 language: en
 status: draft
-derives-from: [D-002, D-011, D-012, D-020]
+derives-from: [D-002, D-011, D-012, D-020, D-021]
 ---
 
 # LLM Abstraction Specification
 
 > **Purpose of this document.** Specify the LLM Gateway (C8): the LiteLLM proxy deployment, the OpenAI-compatible API contract, provider and model management, routing strategies across v1/v2/v3 stages, the per-agent feature catalog, cost tracking, budget enforcement, and the logging hooks required for the v2 eval harness. This spec defines the contract between C8 and every component that invokes an LLM.
 
+> **Version 10 changes.** **Tenant catalogue is OPT-OUT (lazy-materialised) + a discovery picker.** The per-tenant LLM catalogue stops being an empty opt-in collection: on a tenant's FIRST touch of the catalogue (list / resolve / project-models / upsert) it is **lazily materialised** with EVERY platform-registry model (enabled), then a per-tenant `initialized` marker (`tenant_llm_catalog_meta`) is set so an admin who subsequently removes models is **not** re-populated on the next read. This closes the dead-end where a freshly-seeded tenant had an empty catalogue and no way to populate it (the registry list is `platform_manager`-only) — and where an empty catalogue meant `model_quality` resolution had nothing to resolve. A NEW read endpoint **`GET /api/v1/llm/catalog/available`** (admin / tenant_admin, tenant-scoped) lists the registry models NOT currently in the tenant catalogue — the set an admin can **re-add** — as a public projection (no provider key). The HMI replaces the blind "add by id" input with a picker fed by this endpoint. Materialisation writes `default_for_new_projects=false` (the admin still curates project defaults). Catalogued in `065-TEST-MATRIX.md`. No migration — existing tenants materialise lazily on next access.
+>
+> **Version 9 changes.** **Model pricing = a dated source-of-truth series, replayable + reporting.** Model unit cost stops being a single mutable pair on the registry model and becomes an **effective-dated pricing series** — the `c8_model_pricing` collection (E-800-004): each entry `(model_id, effective_from, input_price_per_mtok, output_price_per_mtok)` is the AUTHORITATIVE basis for every cost calculation. **The cost of a call = tokens × the price effective at the call's `timestamp_start`** (R-800-140), looked up in this table — so the pricing basis of any historical call is always recoverable WITHOUT snapshotting a rate onto the call (operator decision: no per-call unit-price field). Editing a model's cost = **appending / correcting a dated entry** (R-800-141); this IS the change history and the timeline-graph source. A retroactive correction (fixing an erroneous price) is the same operation on the truth table, and it triggers an **AUTOMATIC replay** — the stored costs of the affected calls are recomputed from the corrected series — with a **manual replay** endpoint (`platform_manager`) available for on-demand re-runs (R-800-142). Costs are denominated in a **single platform currency** (config, default `EUR`): `llm_calls.cost_usd` is **renamed `cost_amount`** and gains a `currency` field (R-800-143), and the pricing series carries the same currency. A **per-tenant consumption report** aggregates `cost_amount` + tokens per tenant across the reporting windows **session / week / month / quarter / semester / year** (reporting only — the ENFORCED `QuotaPolicy` windows are unchanged) (R-800-144). Registry admin cost editing (`platform_manager`) now writes dated pricing entries; the UI surfaces the per-tenant consumption table (quotas), a dated pricing editor + timeline graph, and the replay trigger.
+>
 > **Version 8 changes.** **Cost/quality optimisation — increment 1: provider-aware prompt caching.** **R-800-042 v1→v2** makes the `X-Cache-Hint: static` translation **provider-aware** and applied AFTER upstream resolution: the cache marker is keyed on the resolved model's `wire_format` — `anthropic` gets the `cache_control: {type: ephemeral}` breakpoint, automatic-caching providers (`openai`, `gemini`) get NONE (an Anthropic-shaped block sent there is rejected — a defect, not best-effort), and an unresolved alias/mock gets none. This fixes a latent bug (the marker was emitted unconditionally) and establishes the **per-`wire_format` translation seam** at C8 that increments 2 (extended thinking on generate/judge) and 3 (token counting + budget-aware routing) reuse. C3 chat (`c3-rag` stream + `c3-docgen`) now opts in (`cache_hint="static"`) — its system + RAG prefix recurs every turn. C13 sliding-window caching (R-800-131/132) remains the next sub-step (ay_extractor prompt restructuring).
 
 > **Version 7 changes.** **Per-project model lists + tenant defaults (scoped resolution).** A tenant catalogue entry gains `default_for_new_projects` (the tenant-admin browses the catalogue and flags the models new projects should start with). A NEW per-project association (`project_llm_models/<tenant>:<project>`, a list of `model_id`s) records which models a project may use. The `model_quality` resolution is now SCOPED: `resolve(tenant, quality, project_id?)` selects the cheapest qualifying model AMONG the project's EFFECTIVE set — the explicit list if configured, ELSE the tenant's `default_for_new_projects` set (LAZY: no project-creation hook; an unconfigured project inherits the defaults until its list is set), ELSE the whole catalogue (backward-compatible). C7's resolver client forwards the project via `X-Project-Id`. Admin surface (admin / tenant_admin): `GET`/`PUT /api/v1/llm/projects/{project_id}/models` ; catalogue PUT carries the `default_for_new_projects` flag. HMI: catalogue "default for new projects" checkbox + a project-Settings "Models" section. Catalogued in `065-TEST-MATRIX.md` (135 endpoints).
 
-> **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (tenant_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
+> **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (platform_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
 
-> **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (tenant_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
+> **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (platform_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
 
-> **Version 5 changes.** **Global LLM quota policy (Lot 3).** A SINGLE platform-wide `QuotaPolicy` (owned by `tenant_manager`, E-100-002 v3) applies identical limits to every tenant across parametrable **rolling** windows (default session-5h / week / month; durations + limits all editable). Each window carries optional limits in **cost (USD) AND/OR tokens** (first dimension reached triggers). Usage is summed from the `llm_calls` ledger (E-800-002) per tenant per window — no new metering path. Enforcement is **soft → hard**: a window at/above its `warn_threshold_pct` logs a warning (non-blocking); an EXCEEDED window raises at the C8 gateway client (`QuotaGuard`, wired in C3/C4/C7 beside the registry key provider) BEFORE any upstream spend. Surface (c8_admin, tenant_manager): `GET`/`PUT /admin/v1/quota/policy`, `GET /admin/v1/quota/status?tenant_id=`. Defaults are inert (open limits) until an operator sets real values. Storage: `llm_quota_policy/global` in ArangoDB. Catalogued in `065-TEST-MATRIX.md`.
+> **Version 5 changes.** **Global LLM quota policy (Lot 3).** A SINGLE platform-wide `QuotaPolicy` (owned by `platform_manager`, E-100-002 v3) applies identical limits to every tenant across parametrable **rolling** windows (default session-5h / week / month; durations + limits all editable). Each window carries optional limits in **cost (USD) AND/OR tokens** (first dimension reached triggers). Usage is summed from the `llm_calls` ledger (E-800-002) per tenant per window — no new metering path. Enforcement is **soft → hard**: a window at/above its `warn_threshold_pct` logs a warning (non-blocking); an EXCEEDED window raises at the C8 gateway client (`QuotaGuard`, wired in C3/C4/C7 beside the registry key provider) BEFORE any upstream spend. Surface (c8_admin, platform_manager): `GET`/`PUT /admin/v1/quota/policy`, `GET /admin/v1/quota/status?tenant_id=`. Defaults are inert (open limits) until an operator sets real values. Storage: `llm_quota_policy/global` in ArangoDB. Catalogued in `065-TEST-MATRIX.md`.
 
 > **Version 4 changes.** **R-800-131 v1→v2** and **R-800-132 v1→v2** make the `cache_control` prompt-marker structure normative (was: "prompt_caching is a required feature" — too implicit; without the explicit marker placement, the provider's cache does not key on the sliding-window prefix). New **R-800-134** declares `ayextract.decontextualizer_screener` (Haiku-class, ~50 input + ~10 output tokens per call) — the 2-tier gating from D-020 v2 §A. §8.1 `agent_routes:` extended with the screener entry. R-800-131 v2 now explicitly conditions the decontextualiser invocation on the screener's YES verdict (the gate, not a separate agent dependency). All four C13 agents inherit the `urgency=background` routing option declared at R-100-125 v2 §2 (batch API).
 
@@ -1031,7 +1035,8 @@ The `llm_calls` collection schema (owned by C8) is:
   "input_tokens": 12500,
   "output_tokens": 850,
   "cached_tokens": 10000,
-  "cost_usd": 0.0345,
+  "cost_amount": 0.0345,
+  "currency": "EUR",
   "latency_ms": 2333,
   "status": "success",
   "error_code": null,
@@ -1056,6 +1061,138 @@ Indexes:
 - Persistent on `(tags.session_id, timestamp_start)` for session cost aggregation.
 - Hash on `request_fingerprint` for deduplication.
 - TTL index on `timestamp_start` for retention (90 days default, tenant-configurable).
+
+**Cost basis (E-100 v6 / D-021).** `cost_amount` is the cost computed at call
+time from the effective pricing (E-800-004) in the platform `currency`. It is
+STORED (not recomputed on every read) but is **replayable** — a retroactive
+pricing correction recomputes it (R-800-142). No per-token unit price is
+snapshotted onto the call: the basis is always recoverable by looking up the
+price effective at `timestamp_start` in `c8_model_pricing`.
+
+#### E-800-004: Model pricing (dated source of truth)
+
+```yaml
+id: E-800-004
+version: 1
+status: draft
+category: architecture
+```
+
+The `c8_model_pricing` collection (owned by C8) is the AUTHORITATIVE, dated
+source of every model's unit cost. It replaces the single mutable
+`cost_per_million_input/output` pair on the registry model (which becomes a
+convenience mirror of the current-effective entry). Schema:
+
+```json
+{
+  "_key": "<uuid>",
+  "model_id": "<llm_registry model_id>",
+  "effective_from": "2026-07-01T00:00:00Z",
+  "input_price_per_mtok": 3.0,
+  "output_price_per_mtok": 15.0,
+  "currency": "EUR",
+  "created_at": "2026-07-28T09:00:00Z",
+  "created_by": "<user_id>",
+  "note": "correction: Q3 list price"
+}
+```
+
+- Entries are **append-only per correction**; the price in force for a given
+  instant is the entry with the greatest `effective_from` ≤ that instant.
+- Editing a model's cost = inserting an entry (future or corrective
+  `effective_from`); the full set of entries for a `model_id` IS the change
+  history and the timeline-graph source.
+- Index: persistent on `(model_id, effective_from)`.
+
+#### R-800-140
+
+```yaml
+id: R-800-140
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-002, E-800-004]
+```
+
+The cost of an LLM call SHALL be computed as
+`input_tokens/1e6 × input_price + output_tokens/1e6 × output_price`, where the
+prices are the `c8_model_pricing` entry for the call's `model_id` with the
+greatest `effective_from` ≤ the call's `timestamp_start` (the price in force
+at call time). If no entry applies (unpriced model), `cost_amount` SHALL be
+`0` and the call flagged unpriced. Prices and `cost_amount` share the platform
+`currency`.
+
+#### R-800-141
+
+```yaml
+id: R-800-141
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-004]
+```
+
+Editing a model's cost via the registry admin surface SHALL insert a
+`c8_model_pricing` entry with the operator-supplied `effective_from` (default:
+now), NEVER overwrite a prior entry. `GET /admin/v1/llm/registry/{model_id}/pricing`
+SHALL return the full dated series (newest first) for display + the timeline
+graph. `platform_manager` only.
+
+#### R-800-142
+
+```yaml
+id: R-800-142
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-002, E-800-004]
+```
+
+Inserting or correcting a `c8_model_pricing` entry SHALL **automatically
+replay** the affected calls: every `llm_calls` row for that `model_id` whose
+`timestamp_start` falls in the corrected entry's effective range SHALL have its
+`cost_amount` recomputed per R-800-140. A **manual** replay endpoint
+`POST /admin/v1/llm/pricing/replay` (`platform_manager`; body `{model_id?,
+from?, to?}`) SHALL recompute on demand for edge cases / re-runs. Replay is
+idempotent (recompute is deterministic from tokens + effective price).
+
+#### R-800-143
+
+```yaml
+id: R-800-143
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-002]
+```
+
+Costs SHALL be denominated in a single platform-wide `currency` (config,
+default `EUR`). The `llm_calls` field `cost_usd` is RENAMED `cost_amount` and a
+`currency` field is added; the cost forwarder, quota repository/aggregation,
+and every consumer SHALL use the new field. (Breaking data-model change,
+executed as one coordinated pass — no dual-write compat.)
+
+#### R-800-144
+
+```yaml
+id: R-800-144
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-002]
+```
+
+A per-tenant consumption report SHALL aggregate `cost_amount` + tokens per
+tenant across the reporting windows **session / week / month / quarter /
+semester / year** (`GET /admin/v1/quota/consumption`, `platform_manager`).
+These windows are **reporting-only**: the ENFORCED `QuotaPolicy` windows
+(R-800 Lot 3) are UNCHANGED. Calendar windows anchor on the platform timezone;
+`session` reuses the QuotaPolicy session window duration.
 
 #### E-800-003: Agent-to-feature catalog reference
 

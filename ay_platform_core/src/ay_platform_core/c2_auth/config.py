@@ -147,21 +147,21 @@ class AuthConfig(BaseSettings):
         description="Password of the bootstrap admin (auth_mode=local).",
     )
 
-    # Pre-existing tenant_manager (super-root) user bootstrapped by the
+    # Pre-existing platform_manager (super-root) user bootstrapped by the
     # C2 lifespan when `auth_mode == "local"` AND both fields are
-    # non-empty. The tenant_manager is content-blind per E-100-002 v2:
+    # non-empty. The platform_manager is content-blind per E-100-002 v2:
     # tenant lifecycle (create / list / delete tenants) ONLY, no
     # access to projects / sources / conversations / etc. Empty fields
-    # → no tenant_manager bootstrap (admin alone suffices for
+    # → no platform_manager bootstrap (admin alone suffices for
     # single-tenant setups).
-    local_tenant_manager_username: str = Field(
+    local_platform_manager_username: str = Field(
         default="",
-        description="Username of the bootstrap tenant_manager "
+        description="Username of the bootstrap platform_manager "
         "(auth_mode=local, both _USERNAME and _PASSWORD set).",
     )
-    local_tenant_manager_password: str = Field(
+    local_platform_manager_password: str = Field(
         default="",
-        description="Password of the bootstrap tenant_manager.",
+        description="Password of the bootstrap platform_manager.",
     )
 
     # ---- UX bootstrap config (served via GET /ux/config) ------------------

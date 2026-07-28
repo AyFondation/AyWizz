@@ -2,7 +2,7 @@
 // File: operator-quotas.test.tsx
 // Path: ay_platform_ui/tests/integration/operator-quotas.test.tsx
 // Description: Tests for the global LLM quota console (platform operator,
-//              tenant_manager). Covers: forbidden; policy load + edit + save;
+//              platform_manager). Covers: forbidden; policy load + edit + save;
 //              per-tenant status (verdict + per-window usage/state).
 // =============================================================================
 
@@ -36,6 +36,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 
 const POLICY_URL = "/admin/v1/quota/policy";
 const STATUS_URL = "/admin/v1/quota/status";
+const CONSUMPTION_URL = "/admin/v1/quota/consumption";
+
+const _EMPTY_CONSUMPTION = {
+  currency: "EUR",
+  windows: ["session", "week", "month", "quarter", "semester", "year"],
+  tenants: [],
+};
 
 function policy() {
   return {
@@ -75,24 +82,29 @@ function renderPage() {
   );
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  // The page loads consumption alongside the policy on mount — default it so
+  // the policy-focused tests don't hit an unhandled request.
+  server.use(http.get(CONSUMPTION_URL, () => HttpResponse.json(_EMPTY_CONSUMPTION)));
+});
 
 describe("QuotasAdminPage", () => {
-  it("forbids a non-tenant_manager", async () => {
+  it("forbids a non-platform_manager", async () => {
     seedToken(["admin"]);
     renderPage();
     await waitFor(() => expect(screen.getByTestId("quotas-forbidden")).toBeInTheDocument());
   });
 
   it("loads the policy windows", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(http.get(POLICY_URL, () => HttpResponse.json(policy())));
     renderPage();
     await waitFor(() => expect(screen.getByTestId("quota-window-session")).toBeInTheDocument());
   });
 
   it("edits a limit and saves the policy", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     let sent: Record<string, unknown> | null = null;
     const put = vi.fn(async ({ request }) => {
       sent = (await request.json()) as Record<string, unknown>;
@@ -116,7 +128,7 @@ describe("QuotasAdminPage", () => {
   });
 
   it("shows a tenant status with an exceeded window", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(
       http.get(POLICY_URL, () => HttpResponse.json(policy())),
       http.get(STATUS_URL, () =>
@@ -153,5 +165,38 @@ describe("QuotasAdminPage", () => {
       expect(screen.getByTestId("quotas-status-verdict")).toHaveTextContent("BLOCKED"),
     );
     expect(screen.getByTestId("quota-status-session")).toHaveTextContent("exceeded");
+  });
+
+  it("renders the per-tenant consumption table", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(POLICY_URL, () => HttpResponse.json(policy())),
+      http.get(CONSUMPTION_URL, () =>
+        HttpResponse.json({
+          currency: "EUR",
+          windows: ["session", "week", "month", "quarter", "semester", "year"],
+          tenants: [
+            {
+              tenant_id: "acme",
+              windows: {
+                session: { cost: 1.23, tokens: 4567 },
+                week: { cost: 2.0, tokens: 9000 },
+                month: { cost: 5.5, tokens: 20000 },
+                quarter: { cost: 5.5, tokens: 20000 },
+                semester: { cost: 5.5, tokens: 20000 },
+                year: { cost: 5.5, tokens: 20000 },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    const table = await screen.findByTestId("consumption-table");
+    const row = screen.getByTestId("consumption-row-acme");
+    expect(row).toHaveTextContent("acme");
+    expect(row).toHaveTextContent("€1.23");
+    expect(row).toHaveTextContent("4,567 tok");
+    expect(table).toHaveTextContent("session");
   });
 });

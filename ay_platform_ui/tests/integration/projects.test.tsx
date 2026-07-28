@@ -115,14 +115,14 @@ describe("ProjectsPage", () => {
     expect(screen.getByText(/Failed to load projects: HTTP 500/)).toBeInTheDocument();
   });
 
-  it("routes a content-blind tenant_manager (403) to the admin home", async () => {
+  it("routes a content-blind platform_manager (403) to the admin home", async () => {
     window.localStorage.setItem(
       "aywizz.token",
       fakeJWT({
         sub: "u-root",
         username: "root",
         tenant_id: "t1",
-        roles: ["tenant_manager"],
+        roles: ["platform_manager"],
         exp: Math.floor(Date.now() / 1000) + 3600,
         iat: Math.floor(Date.now() / 1000),
       }),

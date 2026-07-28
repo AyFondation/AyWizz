@@ -104,7 +104,7 @@ http:
     # C4 — Project artifacts (transparent MinIO surface). Pinned with
     # priority 100 so it WINS over `c2-projects` (also under
     # `/api/v1/projects/*`, priority 50) for the artifacts subpath.
-    # R-200-131. Per-tenant member ; tenant_manager rejected in-app.
+    # R-200-131. Per-tenant member ; platform_manager rejected in-app.
     c4-artifacts:
       rule: "PathRegexp(`^/api/v1/projects/[^/]+/artifacts(/.*)?$`)"
       service: c4
@@ -156,7 +156,7 @@ http:
       priority: 100
 
     # -------------------------------------------------------------------------
-    # C2 — Admin (tenants lifecycle, tenant_manager only)
+    # C2 — Admin (tenants lifecycle, platform_manager only)
     # -------------------------------------------------------------------------
 
     c2-admin:
@@ -264,7 +264,7 @@ http:
     # over `c2-admin` (`PathPrefix(/admin)`, priority 50) → priority 100.
     # The catalogue/resolve sub-path `/api/v1/llm` has no collision (distinct
     # from `/api/v1/projects` etc.) → priority 50. Both forward-auth gated ;
-    # per-role authorization is enforced in-app (tenant_manager for registry,
+    # per-role authorization is enforced in-app (platform_manager for registry,
     # admin/tenant_admin for catalogue).
     # -------------------------------------------------------------------------
 

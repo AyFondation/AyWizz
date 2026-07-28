@@ -58,7 +58,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="function"
 _TENANT = "tenant-up"
 _PROJECT = "project-up"
 _ADMIN = {"X-User-Id": "u-adm", "X-User-Roles": "admin", "X-Tenant-Id": _TENANT}
-_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager"}
+_TMGR = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager"}
 
 
 class _CapturingC12:

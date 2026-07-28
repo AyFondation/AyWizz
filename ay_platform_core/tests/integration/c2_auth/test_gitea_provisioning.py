@@ -273,7 +273,7 @@ async def test_create_project_provisions_gitea_repo(
     tenant_id = "tenant-gp"
     project_id = "proj-gp"
 
-    # Pre-create the tenant via tenant_manager.
+    # Pre-create the tenant via platform_manager.
     tm_jti = f"tm-{uuid.uuid4().hex[:6]}"
     from datetime import UTC, datetime  # noqa: PLC0415
 
@@ -281,7 +281,7 @@ async def test_create_project_provisions_gitea_repo(
     tm_claims = JWTClaims(
         sub="u-tm", iat=int(datetime.now(tz=UTC).timestamp()),
         exp=10**12, jti=tm_jti, auth_mode="local",
-        tenant_id="platform", roles=[RBACGlobalRole.TENANT_MANAGER],
+        tenant_id="platform", roles=[RBACGlobalRole.PLATFORM_MANAGER],
     )
     tm_token = service._sign_jwt(tm_claims)
     if service._repo is not None:
@@ -347,7 +347,7 @@ async def test_create_project_rolls_back_on_gitea_failure(
     tm_claims = JWTClaims(
         sub="u-tm", iat=int(datetime.now(tz=UTC).timestamp()),
         exp=10**12, jti=tm_jti, auth_mode="local",
-        tenant_id="platform", roles=[RBACGlobalRole.TENANT_MANAGER],
+        tenant_id="platform", roles=[RBACGlobalRole.PLATFORM_MANAGER],
     )
     tm_token = service._sign_jwt(tm_claims)
     if service._repo is not None:

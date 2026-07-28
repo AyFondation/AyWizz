@@ -433,7 +433,7 @@ category: contract
 **Demo seed envelope** — the local manual-test stack provisions a
 deterministic scenario at C2 lifespan (`_ensure_demo_seed`) :
 - 1 tenant (`tenant-test`).
-- 4 users : `superroot` (tenant_manager super-root), `tenant-admin`
+- 4 users : `superroot` (platform_manager super-root), `tenant-admin`
   (admin of tenant-test), `project-editor`, `project-viewer`.
 - 1 project (`project-test`, profile `code`).
 - 2 project grants (editor + viewer on project-test).

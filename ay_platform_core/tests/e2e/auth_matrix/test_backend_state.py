@@ -219,9 +219,9 @@ async def test_c2_create_user_persists_in_arango(
 # ---------------------------------------------------------------------------
 
 
-def _tenant_manager_headers(user_id: str = "u-bs-tmgr") -> dict[str, str]:
+def _platform_manager_headers(user_id: str = "u-bs-tmgr") -> dict[str, str]:
     return build_forward_auth_headers(
-        RoleProfile(user_id=user_id, tenant_id=_TENANT, global_roles=("tenant_manager",))
+        RoleProfile(user_id=user_id, tenant_id=_TENANT, global_roles=("platform_manager",))
     )
 
 
@@ -248,7 +248,7 @@ def _model_body(provider_id: str, alias: str) -> dict[str, object]:
 async def _create_provider(client: httpx.AsyncClient, name: str) -> str:
     resp = await client.post(
         "/admin/v1/llm/providers",
-        headers=_tenant_manager_headers(),
+        headers=_platform_manager_headers(),
         json={**_PROVIDER_BODY, "name": name},
     )
     assert resp.status_code == 201, resp.text
@@ -265,7 +265,7 @@ async def test_c8_create_registry_model_persists_in_arango(
         pid = await _create_provider(client, f"prov-{uuid.uuid4().hex[:8]}")
         response = await client.post(
             "/admin/v1/llm/registry",
-            headers=_tenant_manager_headers(),
+            headers=_platform_manager_headers(),
             json=_model_body(pid, alias),
         )
     assert response.status_code == 201, response.text
@@ -288,7 +288,7 @@ async def test_c8_provider_key_persists_ciphertext_not_plaintext(
         pid = await _create_provider(client, f"prov-key-{uuid.uuid4().hex[:8]}")
         keyed = await client.put(
             f"/admin/v1/llm/providers/{pid}/api-key",
-            headers=_tenant_manager_headers(),
+            headers=_platform_manager_headers(),
             json={"api_key": plaintext},
         )
     assert keyed.status_code == 200, keyed.text
@@ -319,7 +319,7 @@ async def test_c8_catalog_upsert_persists_in_arango(
         pid = await _create_provider(client, f"prov-cat-{uuid.uuid4().hex[:8]}")
         reg = await client.post(
             "/admin/v1/llm/registry",
-            headers=_tenant_manager_headers(),
+            headers=_platform_manager_headers(),
             json=_model_body(pid, alias),
         )
         assert reg.status_code == 201, reg.text

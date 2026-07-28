@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 3
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/router.py
 # Description: FastAPI APIRouter for C2 Auth Service. 12 endpoints covering
 #              authentication, token verification, logout, user management,
@@ -15,6 +15,18 @@
 #              was effectively global-admin-only and a project_editor got a
 #              spurious 403. No cross-project leak: only the request's
 #              project role is added.
+#              v4 (E-100-002 v4): `/verify` now also enforces project
+#              LIFECYCLE STATUS on content URIs — an `inactive` project
+#              refuses all access, an `archived` project refuses mutations
+#              (read-only freeze), independently of role. Governance URIs
+#              (admin, project metadata, ACL) are exempt. Record-derived
+#              project scoping (C3/C4 by-id) is out of scope here (inc3b).
+#              v6 (E-100-002 v7): per-user CRUD (`/users` create + `/users/{id}`
+#              get/update/delete/reset-password) is TENANT-ISOLATED — an
+#              `admin`/`tenant_admin` is confined to its own tenant. Create
+#              forces the caller's `tenant_id`; the {user_id} routes 403 on a
+#              cross-tenant target (`_require_same_tenant_user`). Closes a
+#              cross-tenant provisioning/oversight hole.
 #
 # @relation implements:R-100-039
 # @relation implements:R-100-040
@@ -33,6 +45,7 @@ from ay_platform_core.c2_auth.models import (
     AuthConfigResponse,
     JWTClaims,
     LoginRequest,
+    ProjectStatus,
     RBACGlobalRole,
     ResetPasswordRequest,
     SessionInfo,
@@ -72,6 +85,23 @@ def _require_admin_or_tenant_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="admin or tenant_admin role required",
+        )
+    return claims
+
+
+async def _require_same_tenant_user(
+    user_id: str,
+    claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    service: AuthService = Depends(get_service),
+) -> JWTClaims:
+    """Tenant-isolation gate for per-user CRUD (E-100-002 v7). An `admin`
+    (= tenant_admin) is confined to its OWN tenant: the target user SHALL
+    belong to the caller's tenant (404 if absent, 403 if cross-tenant)."""
+    target = await service.get_user(user_id)  # 404 if absent
+    if target.tenant_id != claims.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user is not in your tenant",
         )
     return claims
 
@@ -130,6 +160,37 @@ def _project_id_from_uri(uri: str) -> str | None:
     return unquote(match.group(1)) if match else None
 
 
+# Methods that WRITE. Under an `archived` (read-only-frozen) project these are
+# refused while reads still pass; under `inactive` every method is refused.
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _content_project_id(uri: str) -> str | None:
+    """Return the `{project_id}` of a project-scoped **content** request, or
+    `None` when the URI is not project content.
+
+    E-100-002 v4 separates a project's *governance* surface (its metadata,
+    lifecycle status, ACL) from its *content* (requirements, sources, runs,
+    artifacts, …). Lifecycle-status enforcement applies to CONTENT only — an
+    operator must still reach a non-`active` project's governance to
+    reactivate it, and an owner must still see that their project is frozen.
+    Governance URIs excluded here:
+      * anything under `/admin/…` (platform-operator surface);
+      * the bare project resource `/api/v1/projects/{pid}` (metadata CRUD);
+      * `/api/v1/projects/{pid}/members…` (the project ACL).
+    Every other `…/projects/{pid}/<sub-resource>` is content."""
+    path = uri.split("?", 1)[0].split("#", 1)[0]
+    if "/admin/" in path:
+        return None
+    match = _PROJECT_URI_RE.search(path)
+    if match is None:
+        return None
+    remainder = path[match.end() :]
+    if remainder in ("", "/") or remainder.startswith("/members"):
+        return None
+    return unquote(match.group(1))
+
+
 def _forward_auth_roles(claims: JWTClaims, request: Request) -> str:
     """Build the `X-User-Roles` forward-auth value (E-100-002).
 
@@ -153,6 +214,7 @@ async def verify(
     request: Request,
     response: Response,
     claims: JWTClaims = Depends(_get_current_claims),
+    service: AuthService = Depends(get_service),
 ) -> JWTClaims:
     """Verify bearer token, return parsed claims, and emit Traefik forward-auth
     headers — these are picked up by Traefik's forward-auth middleware and
@@ -164,7 +226,32 @@ async def verify(
     forwarded request targets `…/projects/{pid}/…`, their project-scoped
     role for that project (E-100-002) — so project_editor/owner can act on
     every project they hold a scope on (and only those).
+
+    **Project lifecycle enforcement (E-100-002 v4).** When the forwarded
+    request targets project *content* (see `_content_project_id`), the target
+    project's `status` is resolved and access is refused at this boundary,
+    independently of the caller's role: an `inactive` project blocks every
+    method, an `archived` project blocks mutating methods only (read-only
+    freeze). Governance URIs (admin, project metadata, ACL) are never blocked,
+    so an operator can still reactivate and an owner can still see the freeze.
+    Record-derived project scoping (C3 conversations, C4 run-by-id — no
+    `{project_id}` in the URL) is NOT covered here; it is tracked as inc3b.
     """
+    content_pid = _content_project_id(request.headers.get("X-Forwarded-Uri", ""))
+    if content_pid is not None:
+        project_status = await service.get_project_status(content_pid)
+        if project_status is not None and project_status is not ProjectStatus.ACTIVE:
+            method = request.headers.get("X-Forwarded-Method", "GET").upper()
+            blocked = project_status is ProjectStatus.INACTIVE or (
+                project_status is ProjectStatus.ARCHIVED
+                and method in _MUTATING_METHODS
+            )
+            if blocked:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"project is {project_status.value}",
+                )
+
     response.headers["X-User-Id"] = claims.sub
     response.headers["X-User-Roles"] = _forward_auth_roles(claims, request)
     response.headers["X-Platform-Auth-Mode"] = claims.auth_mode
@@ -190,20 +277,23 @@ async def logout(
 @router.post("/users", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreateRequest,
-    _claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
     service: AuthService = Depends(get_service),
 ) -> UserPublic:
-    """Create a new user (local mode only). R-100-034."""
-    return await service.create_user(body)
+    """Create a new user (local mode only). R-100-034. E-100-002 v7: the new
+    user is FORCED into the caller's tenant — an admin cannot provision users
+    in another tenant."""
+    scoped = body.model_copy(update={"tenant_id": claims.tenant_id})
+    return await service.create_user(scoped)
 
 
 @router.get("/users/{user_id}", response_model=UserPublic)
 async def get_user(
     user_id: str,
-    _claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    _claims: JWTClaims = Depends(_require_same_tenant_user),
     service: AuthService = Depends(get_service),
 ) -> UserPublic:
-    """Retrieve user by ID. Hash excluded. R-100-012."""
+    """Retrieve user by ID. Hash excluded. R-100-012. Own-tenant only (v7)."""
     return await service.get_user(user_id)
 
 
@@ -211,20 +301,20 @@ async def get_user(
 async def update_user(
     user_id: str,
     body: UserUpdateRequest,
-    _claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    _claims: JWTClaims = Depends(_require_same_tenant_user),
     service: AuthService = Depends(get_service),
 ) -> UserPublic:
-    """Update user roles, status, or display fields."""
+    """Update user roles, status, or display fields. Own-tenant only (v7)."""
     return await service.update_user(user_id, body)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def disable_user(
     user_id: str,
-    _claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    _claims: JWTClaims = Depends(_require_same_tenant_user),
     service: AuthService = Depends(get_service),
 ) -> None:
-    """Soft-delete user (sets status=disabled). Irreversible via API in v1."""
+    """Soft-delete user (sets status=disabled). Own-tenant only (v7)."""
     await service.disable_user(user_id)
 
 
@@ -232,10 +322,11 @@ async def disable_user(
 async def reset_password(
     user_id: str,
     body: ResetPasswordRequest,
-    _claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
+    _claims: JWTClaims = Depends(_require_same_tenant_user),
     service: AuthService = Depends(get_service),
 ) -> None:
-    """Admin-triggered password reset. No self-service in v1. R-100-035."""
+    """Admin-triggered password reset. No self-service in v1. R-100-035.
+    Own-tenant only (v7)."""
     await service.reset_password(user_id, body)
 
 

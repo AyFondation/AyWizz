@@ -2,7 +2,7 @@
 // File: page.tsx
 // Version: 4
 // Path: ay_platform_ui/app/(protected)/admin/llm-registry/page.tsx
-// Description: Platform LLM MODEL registry admin surface (tenant_manager only).
+// Description: Platform LLM MODEL registry admin surface (platform_manager only).
 //              v4 (provider normalisation + stable ids): a model references a
 //              PROVIDER (endpoint + key, managed on the Providers page) and is
 //              addressed by a stable model_id — renaming the alias never breaks
@@ -57,7 +57,7 @@ export default function LlmRegistryPage() {
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
-    return (authState.claims.roles ?? []).includes("tenant_manager");
+    return (authState.claims.roles ?? []).includes("platform_manager");
   }, [authState]);
 
   const reload = useCallback(() => {
@@ -137,7 +137,7 @@ export default function LlmRegistryPage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="registry-forbidden"
         >
-          The platform LLM registry is restricted to platform administrators (tenant_manager).
+          The platform LLM registry is restricted to platform administrators (platform_manager).
         </p>
       </main>
     );

@@ -153,7 +153,7 @@ def render() -> str:
     lines.append("**Global roles**:")
     lines.append("")
     for role in ALL_GLOBAL_ROLES:
-        if role == "tenant_manager":
+        if role == "platform_manager":
             note = "super-root, content-blind. Tenant lifecycle ONLY."
         elif role in ("admin", "tenant_admin"):
             note = "tenant-scoped admin (synonyms in v2)."

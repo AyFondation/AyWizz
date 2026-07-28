@@ -8,7 +8,7 @@
 #
 #              v4 (2026-06-05): LLM-governance demo seed — registers the 3
 #              Claude tiers in the platform registry (as `superroot` /
-#              tenant_manager), catalogues them for `tenant-test`, and sets
+#              platform_manager), catalogues them for `tenant-test`, and sets
 #              `model_quality=medium` on `project-test` so the registry /
 #              catalogue / picker surfaces render populated and an upload
 #              resolves a concrete model. No API key is set (dev c8-admin has
@@ -55,7 +55,7 @@ DOCGEN_PROJECT_ID = "project-docgen"
 DOCGEN_PROJECT_NAME = "Demo DocGen Project"
 ADMIN_USERNAME = "tenant-admin"
 ADMIN_PASSWORD = "dev-tenant"
-# tenant_manager super-root — owns the platform LLM registry.
+# platform_manager super-root — owns the platform LLM registry.
 SUPERROOT_USERNAME = "superroot"
 SUPERROOT_PASSWORD = "dev-superroot"
 
@@ -285,7 +285,7 @@ DEMO_SOURCES: list[dict[str, str]] = [
             "with pluggable production domains. v1 ships the `code`\n"
             "profile only ; future profiles (data, doc, etc.) will\n"
             "plug into the same shell without UX rebuilds.\n\n"
-            "The auth model has 5 roles : tenant_manager (super-root,\n"
+            "The auth model has 5 roles : platform_manager (super-root,\n"
             "content-blind), admin / tenant_admin, project_owner,\n"
             "project_editor, project_viewer.\n"
         ),
@@ -331,7 +331,7 @@ async def obtain_token(
 ) -> str:
     """Login and return the access token. Defaults to the demo `tenant-admin`
     (`admin` role, full r/w in `tenant-test`); pass `superroot` for the
-    tenant_manager-gated platform registry."""
+    platform_manager-gated platform registry."""
     resp = await client.post(
         f"{base_url}/auth/login",
         json={"username": username, "password": password},
@@ -347,7 +347,7 @@ async def obtain_token(
 
 
 async def ensure_provider(client: httpx.AsyncClient, base_url: str, token: str) -> str:
-    """Ensure the platform PROVIDER exists (tenant_manager). Idempotent by name.
+    """Ensure the platform PROVIDER exists (platform_manager). Idempotent by name.
     Returns the stable provider_id."""
     headers = {"Authorization": f"Bearer {token}"}
     listing = await client.get(f"{base_url}/admin/v1/llm/providers", headers=headers)
@@ -366,7 +366,7 @@ async def ensure_provider(client: httpx.AsyncClient, base_url: str, token: str) 
 async def ensure_registry_model(
     client: httpx.AsyncClient, base_url: str, token: str, provider_id: str, model: dict[str, Any]
 ) -> str:
-    """Ensure a model exists in the PLATFORM registry (tenant_manager),
+    """Ensure a model exists in the PLATFORM registry (platform_manager),
     referencing `provider_id`. Idempotent by alias. Returns the model_id."""
     headers = {"Authorization": f"Bearer {token}"}
     listing = await client.get(f"{base_url}/admin/v1/llm/registry", headers=headers)
@@ -571,7 +571,7 @@ async def seed_governance(
     client: httpx.AsyncClient, base_url: str, admin_token: str
 ) -> list[str]:
     """Seed the LLM-governance demo data: the platform registry (as
-    tenant_manager super-root) + the tenant catalogue + the project's
+    platform_manager super-root) + the tenant catalogue + the project's
     model_quality. Best-effort — a failure leaves the rest of the demo intact.
     Returns the list of created descriptors for the run summary."""
     created: list[str] = []

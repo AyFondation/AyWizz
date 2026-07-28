@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_admin_endpoints.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c2_auth/test_admin_endpoints.py
 # Description: Integration tests for the C2 admin endpoints (user management
 #              + session management). These paths were flagged as uncovered
@@ -35,12 +35,15 @@ def _client(app: httpx.ASGITransport) -> httpx.AsyncClient:
 
 
 async def _seed_admin(service: AuthService) -> str:
-    """Create an admin user and return a valid bearer token for it."""
+    """Create an admin user and return a valid bearer token for it. The admin
+    lives in `t-1` — the SAME tenant as the target-user fixtures below — since
+    E-100-002 v7 confines an admin's user CRUD to its own tenant (cross-tenant
+    isolation is covered by test_admin_governance)."""
     await service.create_user(
         UserCreateRequest(
             username="root-admin",
             password="admin-pass-12!",
-            tenant_id="t-root",
+            tenant_id="t-1",
             roles=[RBACGlobalRole.ADMIN],
         )
     )
@@ -287,17 +290,17 @@ async def test_service_reset_password_idempotent(
 
 
 # ---------------------------------------------------------------------------
-# Platform-operator surface (tenant_manager — E-100-002 v3, Lot 2)
+# Platform-operator surface (platform_manager — E-100-002 v3, Lot 2)
 # ---------------------------------------------------------------------------
 
 
-async def _seed_tenant_manager(service: AuthService) -> str:
+async def _seed_platform_manager(service: AuthService) -> str:
     await service.create_user(
         UserCreateRequest(
             username="root-operator",
             password="operator-pass-12!",
             tenant_id="t-platform",
-            roles=[RBACGlobalRole.TENANT_MANAGER],
+            roles=[RBACGlobalRole.PLATFORM_MANAGER],
         )
     )
     token = await service.issue_token(
@@ -311,7 +314,7 @@ async def _seed_tenant_manager(service: AuthService) -> str:
 async def test_deactivate_tenant_blocks_member_login(
     local_app: httpx.ASGITransport, auth_service_local: AuthService
 ) -> None:
-    tm_token = await _seed_tenant_manager(auth_service_local)
+    tm_token = await _seed_platform_manager(auth_service_local)
     # A managed tenant + a member of it.
     await auth_service_local.create_tenant(
         TenantCreate(tenant_id="acme", name="Acme")
@@ -326,7 +329,7 @@ async def test_deactivate_tenant_blocks_member_login(
         )
         assert ok.status_code == 200, ok.text
 
-        # tenant_manager deactivates the tenant.
+        # platform_manager deactivates the tenant.
         deact = await client.post(
             "/admin/tenants/acme/deactivate",
             headers={"Authorization": f"Bearer {tm_token}"},
@@ -354,10 +357,10 @@ async def test_deactivate_tenant_blocks_member_login(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_tenant_lifecycle_requires_tenant_manager(
+async def test_tenant_lifecycle_requires_platform_manager(
     local_app: httpx.ASGITransport, auth_service_local: AuthService
 ) -> None:
-    admin_token = await _seed_admin(auth_service_local)  # admin, NOT tenant_manager
+    admin_token = await _seed_admin(auth_service_local)  # admin, NOT platform_manager
     async with _client(local_app) as client:
         resp = await client.post(
             "/admin/tenants/whatever/deactivate",
@@ -371,7 +374,7 @@ async def test_tenant_lifecycle_requires_tenant_manager(
 async def test_cross_tenant_user_list_and_deactivate(
     local_app: httpx.ASGITransport, auth_service_local: AuthService
 ) -> None:
-    tm_token = await _seed_tenant_manager(auth_service_local)
+    tm_token = await _seed_platform_manager(auth_service_local)
     await auth_service_local.create_user(
         UserCreateRequest(username="u-a", password="u-a-pass-12!", tenant_id="tenant-a")
     )
@@ -411,10 +414,30 @@ async def test_cross_tenant_user_list_and_deactivate(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_user_oversight_requires_tenant_manager(
+async def test_user_oversight_requires_operator(
     local_app: httpx.ASGITransport, auth_service_local: AuthService
 ) -> None:
+    """E-100-002 v7: user oversight is an OPERATOR surface. `admin` (tenant
+    operator) is now accepted — scoped to its own tenant — whereas a baseline
+    `user` with no operator role is still refused 403."""
     admin_token = await _seed_admin(auth_service_local)
+    await auth_service_local.create_user(
+        UserCreateRequest(
+            username="plain-user", password="plain-pass-12!", tenant_id="t-1"
+        )
+    )
+    plain = await auth_service_local.issue_token(
+        LoginRequest(username="plain-user", password="plain-pass-12!")
+    )
     async with _client(local_app) as client:
-        resp = await client.get("/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
-    assert resp.status_code == 403
+        # Tenant operator `admin` → accepted (scoped, v7).
+        ok = await client.get(
+            "/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        assert ok.status_code == 200, ok.text
+        # Baseline user (no operator role) → refused.
+        denied = await client.get(
+            "/admin/users",
+            headers={"Authorization": f"Bearer {plain.access_token}"},
+        )
+    assert denied.status_code == 403

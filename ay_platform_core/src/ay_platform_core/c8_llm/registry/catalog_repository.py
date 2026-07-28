@@ -1,12 +1,17 @@
 # =============================================================================
 # File: catalog_repository.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/catalog_repository.py
 # Description: ArangoDB repository for the per-tenant LLM catalogue
 #              (`tenant_llm_catalog`, `_key = {tenant_id}:{model_id}`).
 #              Same sync-wrapped, lock-guarded pattern as the registry repo.
 #              Carries no secret — catalogue rows are pure (tenant, alias,
 #              enable flag, optional rate-card).
+#              v2 (800 v10): a per-tenant `initialized` marker
+#              (`tenant_llm_catalog_meta`, `_key = tenant_id`) records that a
+#              tenant's catalogue has been lazily materialised from the platform
+#              registry (opt-out default), so an admin who removes every model
+#              is NOT re-populated on the next read.
 # =============================================================================
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from typing import Any, Protocol, TypeVar, cast
 
 COLL_CATALOG = "tenant_llm_catalog"
 COLL_PROJECT_MODELS = "project_llm_models"
+COLL_CATALOG_META = "tenant_llm_catalog_meta"
 
 _T = TypeVar("_T")
 
@@ -29,6 +35,8 @@ class CatalogStore(Protocol):
     async def get(self, tenant_id: str, model_id: str) -> dict[str, Any] | None: ...
     async def delete(self, tenant_id: str, model_id: str) -> bool: ...
     async def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]: ...
+    async def is_initialized(self, tenant_id: str) -> bool: ...
+    async def mark_initialized(self, tenant_id: str) -> None: ...
     async def get_project_models(
         self, tenant_id: str, project_id: str
     ) -> dict[str, Any] | None: ...
@@ -64,9 +72,27 @@ class TenantCatalogRepository:
         )
         if COLL_PROJECT_MODELS not in existing:
             self._db.create_collection(COLL_PROJECT_MODELS)
+        if COLL_CATALOG_META not in existing:
+            self._db.create_collection(COLL_CATALOG_META)
 
     async def ensure_collections(self) -> None:
         await self._run(self._ensure_collections_sync)
+
+    # ---- Per-tenant initialisation marker (opt-out lazy materialisation) --
+
+    def _is_initialized_sync(self, tenant_id: str) -> bool:
+        return bool(self._db.collection(COLL_CATALOG_META).has(tenant_id))
+
+    async def is_initialized(self, tenant_id: str) -> bool:
+        return await self._run(self._is_initialized_sync, tenant_id)
+
+    def _mark_initialized_sync(self, tenant_id: str) -> None:
+        self._db.collection(COLL_CATALOG_META).insert(
+            {"_key": tenant_id, "initialized": True}, overwrite=True
+        )
+
+    async def mark_initialized(self, tenant_id: str) -> None:
+        await self._run(self._mark_initialized_sync, tenant_id)
 
     # ---- Per-project model associations (`{tenant}:{project}`) ------------
 

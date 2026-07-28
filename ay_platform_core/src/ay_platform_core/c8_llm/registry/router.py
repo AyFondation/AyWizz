@@ -4,7 +4,7 @@
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/router.py
 # Description: FastAPI APIRouter for the platform LLM MODEL registry admin
 #              surface. Identity arrives via Traefik forward-auth headers
-#              (X-User-Id, X-User-Roles); gated to `tenant_manager`. v2: models
+#              (X-User-Id, X-User-Roles); gated to `platform_manager`. v2: models
 #              are addressed by their STABLE `model_id` — POST creates (mints
 #              the id), PUT/{model_id} updates (alias + every attribute may
 #              change), DELETE/{model_id} removes. The API key NO LONGER lives
@@ -36,7 +36,7 @@ from ay_platform_core.c8_llm.registry.service import (
 
 router = APIRouter(tags=["llm-registry"])
 
-_REGISTRY_ROLES: tuple[str, ...] = ("tenant_manager",)
+_REGISTRY_ROLES: tuple[str, ...] = ("platform_manager",)
 
 
 def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
@@ -121,7 +121,7 @@ async def delete_registry_model(
     x_user_roles: str | None = Header(default=None),
     service: LLMRegistryService = Depends(get_registry_service),
 ) -> None:
-    """Delete a model by id. tenant_manager only. 404 if unknown."""
+    """Delete a model by id. platform_manager only. 404 if unknown."""
     _require_role(x_user_roles, _REGISTRY_ROLES)
     if not await service.delete_model(model_id):
         raise HTTPException(

@@ -1,10 +1,13 @@
 # =============================================================================
 # File: minio-init.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_init/minio-init.yaml
 # Description: One-shot Job creating MinIO buckets + app user with a
 #              readwrite policy (R-100-118 v2). Idempotent: existing
 #              buckets / users / policy are skipped or updated in place.
+#              v2: adds the C13 extractor artifact bucket
+#              (`c13-extractor-artifacts`) to the bucket set + policy, so a
+#              C13-enabled overlay has a writable target (R-100-125).
 # =============================================================================
 apiVersion: batch/v1
 kind: Job
@@ -45,7 +48,7 @@ spec:
                 sleep 2
               done
               echo "Ensuring buckets"
-              for b in orchestrator requirements validation memory; do
+              for b in orchestrator requirements validation memory c13-extractor-artifacts; do
                 mc mb --ignore-existing "local/$b"
               done
               echo "Ensuring policy ay-app-readwrite"
@@ -59,7 +62,9 @@ spec:
                       "arn:aws:s3:::orchestrator", "arn:aws:s3:::orchestrator/*",
                       "arn:aws:s3:::requirements", "arn:aws:s3:::requirements/*",
                       "arn:aws:s3:::validation",   "arn:aws:s3:::validation/*",
-                      "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*"
+                      "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*",
+                      "arn:aws:s3:::c13-extractor-artifacts",
+                      "arn:aws:s3:::c13-extractor-artifacts/*"
                     ]
                   }
                 ]

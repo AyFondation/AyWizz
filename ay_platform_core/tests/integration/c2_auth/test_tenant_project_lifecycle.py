@@ -4,7 +4,7 @@
 # Path: ay_platform_core/tests/integration/c2_auth/test_tenant_project_lifecycle.py
 # Description: Phase A integration tests — tenant + project lifecycle and
 #              membership grants. Round-trip through real ArangoDB:
-#              tenant_manager creates a tenant, admin creates a project
+#              platform_manager creates a tenant, admin creates a project
 #              in it, project_owner grants project_editor on a user,
 #              that user's JWT issued at next login carries the
 #              project_scopes.
@@ -134,12 +134,12 @@ def _forward_auth(user_id: str, tenant_id: str, roles: tuple[str, ...]) -> dict[
 # ---------------------------------------------------------------------------
 
 
-async def test_tenant_manager_creates_lists_deletes_tenant(
+async def test_platform_manager_creates_lists_deletes_tenant(
     c2_stack: tuple[FastAPI, AuthService],
 ) -> None:
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     tenant_id = f"tenant-{uuid.uuid4().hex[:6]}"
 
@@ -181,7 +181,7 @@ async def test_tenant_manager_creates_lists_deletes_tenant(
 async def test_admin_cannot_create_tenant(
     c2_stack: tuple[FastAPI, AuthService],
 ) -> None:
-    """Tenant creation is reserved for `tenant_manager`. `admin` (tenant
+    """Tenant creation is reserved for `platform_manager`. `admin` (tenant
     admin) must be rejected with 403."""
     app, service = c2_stack
     admin_headers = await _bearer_for(
@@ -194,7 +194,7 @@ async def test_admin_cannot_create_tenant(
             json={"tenant_id": "blocked", "name": "blocked"},
         )
     assert response.status_code == 403
-    assert "tenant_manager" in response.json()["detail"]
+    assert "platform_manager" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ async def test_admin_cannot_create_tenant(
 async def test_full_lifecycle_tenant_project_member_grant(
     c2_stack: tuple[FastAPI, AuthService],
 ) -> None:
-    """End-to-end: tenant_manager → tenant; admin → project; admin →
+    """End-to-end: platform_manager → tenant; admin → project; admin →
     grant project_editor to a fresh user; user logs in (via
     issue_token); their JWT carries the project_scopes claim — proving
     the grant is reflected in the auth flow."""
@@ -215,9 +215,9 @@ async def test_full_lifecycle_tenant_project_member_grant(
     member_username = f"editor-{uuid.uuid4().hex[:6]}@phase-a.test"
     member_password = "PhaseAEditor1!"
 
-    # 1. tenant_manager creates the tenant.
+    # 1. platform_manager creates the tenant.
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     async with _client(app) as c:
         create_t = await c.post(
@@ -278,7 +278,7 @@ async def test_project_listing_filtered_by_tenant(
     projects SHALL NOT leak into the response."""
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     async with _client(app) as c:
         for tid in ("tenant-iso-a", "tenant-iso-b"):
@@ -311,18 +311,18 @@ async def test_project_listing_filtered_by_tenant(
     assert "p-only-b" in b_ids and "p-only-a" not in b_ids
 
 
-async def test_tenant_manager_cannot_list_tenant_projects(
+async def test_platform_manager_cannot_list_tenant_projects(
     c2_stack: tuple[FastAPI, AuthService],
 ) -> None:
-    """E-100-002 v2: tenant_manager is content-blind. The
-    GET /api/v1/projects endpoint SHALL reject tenant_manager even
+    """E-100-002 v2: platform_manager is content-blind. The
+    GET /api/v1/projects endpoint SHALL reject platform_manager even
     though it would normally accept any authenticated user."""
     app, _service = c2_stack
-    tm_fa = _forward_auth("u-tm", "anytenant", ("tenant_manager",))
+    tm_fa = _forward_auth("u-tm", "anytenant", ("platform_manager",))
     async with _client(app) as c:
         response = await c.get("/api/v1/projects", headers=tm_fa)
     assert response.status_code == 403
-    assert "tenant_manager" in response.json()["detail"]
+    assert "platform_manager" in response.json()["detail"]
 
 
 async def test_grant_user_in_other_tenant_returns_400(
@@ -332,7 +332,7 @@ async def test_grant_user_in_other_tenant_returns_400(
     project in their own tenant — 400 with a clear error."""
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     async with _client(app) as c:
         for tid in ("tenant-grant-a", "tenant-grant-b"):
@@ -376,7 +376,7 @@ async def test_delete_project_cascades_member_grants_and_404s_on_re_delete(
 ) -> None:
     """End-to-end DELETE /api/v1/projects/{pid} :
 
-    - tenant_manager → tenant ; admin → projet + grant editor sur un user.
+    - platform_manager → tenant ; admin → projet + grant editor sur un user.
     - admin DELETE le projet (204).
     - re-DELETE → 404 (no leak via repeated deletes).
     - cross-tenant DELETE (other tenant's admin) → 404.
@@ -386,7 +386,7 @@ async def test_delete_project_cascades_member_grants_and_404s_on_re_delete(
     """
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     tenant_id = f"tenant-del-{uuid.uuid4().hex[:6]}"
     other_tenant_id = f"tenant-del-other-{uuid.uuid4().hex[:6]}"
@@ -491,7 +491,7 @@ async def test_get_project_returns_effective_system_prompt(
     `system_prompt_is_default` SHALL be True."""
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     async with _client(app) as c:
         await c.post(
@@ -522,7 +522,7 @@ async def test_patch_project_sets_and_clears_system_prompt(
     state and the `is_default` flag tracks accordingly."""
     app, service = c2_stack
     tm_headers = await _bearer_for(
-        service, "u-tm", "platform", [RBACGlobalRole.TENANT_MANAGER],
+        service, "u-tm", "platform", [RBACGlobalRole.PLATFORM_MANAGER],
     )
     async with _client(app) as c:
         await c.post(

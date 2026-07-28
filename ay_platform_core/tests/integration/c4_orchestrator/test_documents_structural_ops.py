@@ -30,10 +30,10 @@ _HEADERS = {
     "X-Tenant-Id": "tenant-doc",
     "X-User-Roles": "project_editor,admin",
 }
-_HEADERS_TENANT_MANAGER = {
+_HEADERS_PLATFORM_MANAGER = {
     "X-User-Id": "tm",
     "X-Tenant-Id": "tenant-doc",
-    "X-User-Roles": "tenant_manager",
+    "X-User-Roles": "platform_manager",
 }
 
 
@@ -118,14 +118,14 @@ async def test_mkdir_rejects_bad_path(
             assert resp.status_code == 400, f"expected 400 for {bad!r}: {resp.text}"
 
 
-async def test_mkdir_rejected_for_tenant_manager(
+async def test_mkdir_rejected_for_platform_manager(
     documents_app: tuple[FastAPI, _FakeGiteaClient],
 ) -> None:
     app, _ = documents_app
     async with _client(app) as c:
         resp = await c.post(
             "/api/v1/projects/proj-tm/documents/mkdir",
-            headers=_HEADERS_TENANT_MANAGER,
+            headers=_HEADERS_PLATFORM_MANAGER,
             json={"path": "notes"},
         )
         assert resp.status_code == 403

@@ -43,7 +43,7 @@
 #              below the response (#5 / R-200-147).
 #
 #              Forward-auth identity model identical to artifacts_router
-#              (X-User-Id / X-Tenant-Id / X-User-Roles). `tenant_manager`
+#              (X-User-Id / X-Tenant-Id / X-User-Roles). `platform_manager`
 #              is rejected — documents are tenant content (E-100-002 v2).
 #
 # @relation implements:R-200-153
@@ -64,7 +64,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ay_platform_core.c4_orchestrator.artifacts_router import (
     _get_service,
-    _reject_tenant_manager,
+    _reject_platform_manager,
     _require_actor,
     _require_tenant,
 )
@@ -186,7 +186,7 @@ async def create_document(
     """Create or overwrite a document. Idempotent on the same path
     (overwrites). Triggers an incremental Gitea push (one commit).
     `X-Turn-Id` (the C3 response id) batches the per-file version."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     result = await service.write_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -215,7 +215,7 @@ async def update_document(
     with that path — separate verb so the conversation tool surface
     can distinguish create vs update intent in its audit trail.
     `X-Turn-Id` (the C3 response id) batches the per-file version."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     result = await service.write_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -239,7 +239,7 @@ async def list_documents(
 ) -> DocumentList:
     """List every document path in the project's live-docs corpus.
     Empty list when no document has been created yet."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     rows = await service.list_documents(
         project_id=project_id, tenant_id=tenant_id,
     )
@@ -260,7 +260,7 @@ async def read_document(
     malformed path. `ref` (optional commit SHA) returns the document as
     it existed at that revision (R-200-147 history viewer) ; absent →
     the current content from MinIO."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     if ref:
         blob = await service.read_document_at_ref(
             project_id=project_id, tenant_id=tenant_id, path=path, ref=ref,
@@ -294,7 +294,7 @@ async def delete_document(
 ) -> Response:
     """Delete a document from MinIO. 404 when the path is unknown.
     Gitea history is intentionally retained (audit ; D-015)."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     await service.delete_document(
         project_id=project_id, tenant_id=tenant_id, path=path,
     )
@@ -316,7 +316,7 @@ async def mkdir_document(
 ) -> DocumentStructuralOpResult:
     """Materialise an empty directory by writing a `.keep` marker
     (R-200-161). 409 if the path already exists."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     result = await service.mkdir_document(
         project_id=project_id, tenant_id=tenant_id, path=body.path,
     )
@@ -338,7 +338,7 @@ async def rename_document(
     """Rename a file or directory atomically at the service-method
     level (R-200-162). 404 on missing source, 409 on existing target,
     400 on self-rename or traversal cycle."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     result = await service.rename_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -362,7 +362,7 @@ async def move_document(
 ) -> DocumentStructuralOpResult:
     """Move a file or directory under a different directory. Reduces
     to `rename` with target = `<to_dir>/<basename(from_path)>`."""
-    _reject_tenant_manager(x_user_roles)
+    _reject_platform_manager(x_user_roles)
     result = await service.move_document(
         project_id=project_id,
         tenant_id=tenant_id,

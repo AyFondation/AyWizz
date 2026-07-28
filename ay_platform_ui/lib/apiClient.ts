@@ -1,6 +1,6 @@
 // =============================================================================
 // File: apiClient.ts
-// Version: 11
+// Version: 12
 // Path: ay_platform_ui/lib/apiClient.ts
 // Description: Thin wrapper over `fetch` that prepends the runtime-config
 //              `apiBaseUrl` to every call and (optionally) attaches the
@@ -56,6 +56,7 @@ import type {
   ArtifactRunList,
   ArtifactTree,
   ChunkContent,
+  ConsumptionReport,
   Conversation,
   ConversationList,
   ConversationResponse,
@@ -80,12 +81,14 @@ import type {
   PlatformConfig,
   Project,
   ProjectList,
+  ProjectMemberList,
   ProjectModelsResponse,
   ProjectUpdate,
   PromptReference,
   QuotaPolicy,
   QuotaStatus,
   QuotaWindow,
+  RBACProjectRole,
   RequirementDocumentDetail,
   RequirementDocumentList,
   RequirementEntityList,
@@ -257,7 +260,7 @@ export class ApiClient {
   }
 
   /** GET /api/v1/projects — list projects in the caller's tenant.
-   *  `tenant_manager` callers are rejected server-side (content-blind
+   *  `platform_manager` callers are rejected server-side (content-blind
    *  per E-100-002 v2) ; every other authenticated user receives the
    *  full list. The UI applies per-user filtering via
    *  `JWTClaims.project_scopes` when needed. */
@@ -438,11 +441,11 @@ export class ApiClient {
   }
 
   // -------------------------------------------------------------------------
-  // LLM governance — platform registry (tenant_manager)
+  // LLM governance — platform registry (platform_manager)
   // -------------------------------------------------------------------------
 
   /** GET /admin/v1/llm/registry — list every platform model. The API key is
-   *  never returned (only key_status + masked hint). tenant_manager only. */
+   *  never returned (only key_status + masked hint). platform_manager only. */
   async listLlmRegistry(): Promise<LLMRegistryListResponse> {
     return this.request<LLMRegistryListResponse>("/admin/v1/llm/registry", {
       method: "GET",
@@ -473,7 +476,7 @@ export class ApiClient {
   }
 
   // -------------------------------------------------------------------------
-  // LLM governance — providers (endpoint + write-only credential, tenant_manager)
+  // LLM governance — providers (endpoint + write-only credential, platform_manager)
   // -------------------------------------------------------------------------
 
   /** GET /admin/v1/llm/providers — list every provider (key write-only). */
@@ -526,6 +529,14 @@ export class ApiClient {
     });
   }
 
+  /** GET /api/v1/llm/catalog/available — platform-registry models NOT yet in the
+   *  tenant catalogue (the re-add picker). Public projection, no provider key. */
+  async listAvailableLlmCatalogModels(): Promise<LLMRegistryListResponse> {
+    return this.request<LLMRegistryListResponse>("/api/v1/llm/catalog/available", {
+      method: "GET",
+    });
+  }
+
   /** PUT /api/v1/llm/catalog/{model_id} — enable/configure a registry model for
    *  the tenant (404 if the model_id is unknown to the platform registry). */
   async putLlmCatalogModel(
@@ -563,7 +574,7 @@ export class ApiClient {
   }
 
   // -------------------------------------------------------------------------
-  // Platform operator — tenants (tenant_manager, E-100-002 v3)
+  // Platform operator — tenants (platform_manager, E-100-002 v3)
   // -------------------------------------------------------------------------
 
   /** GET /admin/tenants — list every tenant on the platform. */
@@ -601,7 +612,7 @@ export class ApiClient {
   }
 
   // -------------------------------------------------------------------------
-  // Platform operator — cross-tenant user oversight (tenant_manager)
+  // Platform operator — cross-tenant user oversight (platform_manager)
   // -------------------------------------------------------------------------
 
   /** GET /admin/users — list users across all tenants (optionally filtered). */
@@ -624,6 +635,68 @@ export class ApiClient {
     });
   }
 
+  // -------------------------------------------------------------------------
+  // Platform operator — cross-tenant project governance (platform_manager)
+  // E-100-002 v4. Governance object only (metadata / status / ACL) — never
+  // project CONTENT.
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/projects — every project across all tenants (metadata only),
+   *  optionally narrowed to one tenant. */
+  async listAllProjects(tenantId?: string): Promise<ProjectList> {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<ProjectList>(`/admin/projects${q}`, { method: "GET" });
+  }
+
+  /** POST /admin/projects/{pid}/activate — restore a project to `active`. */
+  async activateProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/admin/projects/${encodeURIComponent(projectId)}/activate`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /admin/projects/{pid}/deactivate — refuse member access to content. */
+  async deactivateProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/admin/projects/${encodeURIComponent(projectId)}/deactivate`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /admin/projects/{pid}/archive — read-only freeze. */
+  async archiveProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/admin/projects/${encodeURIComponent(projectId)}/archive`, {
+      method: "POST",
+    });
+  }
+
+  /** GET /admin/projects/{pid}/members — the project's access-control list. */
+  async getProjectMembers(projectId: string): Promise<ProjectMemberList> {
+    return this.request<ProjectMemberList>(
+      `/admin/projects/${encodeURIComponent(projectId)}/members`,
+      { method: "GET" },
+    );
+  }
+
+  /** POST /admin/projects/{pid}/members/{uid} — grant a project role (cross-tenant). */
+  async grantProjectAccess(
+    projectId: string,
+    userId: string,
+    role: RBACProjectRole,
+  ): Promise<ProjectMemberList> {
+    return this.request<ProjectMemberList>(
+      `/admin/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+      { method: "POST", body: JSON.stringify({ role }) },
+    );
+  }
+
+  /** DELETE /admin/projects/{pid}/members/{uid} — revoke a user's project access. */
+  async revokeProjectAccess(projectId: string, userId: string): Promise<ProjectMemberList> {
+    return this.request<ProjectMemberList>(
+      `/admin/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  }
+
   /** GET /admin/v1/quota/policy — the single global quota policy. */
   async getQuotaPolicy(): Promise<QuotaPolicy> {
     return this.request<QuotaPolicy>("/admin/v1/quota/policy", { method: "GET" });
@@ -637,12 +710,22 @@ export class ApiClient {
     });
   }
 
-  /** GET /admin/v1/quota/status?tenant_id=… — evaluate a tenant vs the policy. */
-  async getQuotaStatus(tenantId: string): Promise<QuotaStatus> {
+  /** GET /admin/v1/quota/status?tenant_id=…[&project_id=…] — evaluate a tenant
+   *  vs the policy. When `projectId` is given, each window's `levels` also
+   *  carries that project's consumption (cost / tokens) — the project
+   *  governance consumption view (E-100-002 v4). */
+  async getQuotaStatus(tenantId: string, projectId?: string): Promise<QuotaStatus> {
+    const proj = projectId ? `&project_id=${encodeURIComponent(projectId)}` : "";
     return this.request<QuotaStatus>(
-      `/admin/v1/quota/status?tenant_id=${encodeURIComponent(tenantId)}`,
+      `/admin/v1/quota/status?tenant_id=${encodeURIComponent(tenantId)}${proj}`,
       { method: "GET" },
     );
+  }
+
+  /** GET /admin/v1/quota/consumption — per-tenant consumption across the
+   *  reporting windows (session/week/month/quarter/semester/year). */
+  async getConsumption(): Promise<ConsumptionReport> {
+    return this.request<ConsumptionReport>("/admin/v1/quota/consumption", { method: "GET" });
   }
 
   /** GET /api/v1/quota/me — the caller's OWN tenant quota status (any user). */

@@ -509,7 +509,7 @@ status: draft
 category: functional
 ```
 
-The orchestrator SHALL expose `POST /api/v1/orchestrator/runs/{run_id}/steer` with body `RunSteer` (entity E-200-007) `{ message: str }`. The endpoint SHALL append the message to a per-run `pending_steer: list[str]` queue persisted on `c4_runs`. The endpoint SHALL return 200 with the updated `RunPublic`. It SHALL return 409 when `status != "running"`. RBAC SHALL match `/feedback` (project_owner / project_editor / admin per E-100-002 v2 — tenant_manager rejected on content endpoints).
+The orchestrator SHALL expose `POST /api/v1/orchestrator/runs/{run_id}/steer` with body `RunSteer` (entity E-200-007) `{ message: str }`. The endpoint SHALL append the message to a per-run `pending_steer: list[str]` queue persisted on `c4_runs`. The endpoint SHALL return 200 with the updated `RunPublic`. It SHALL return 409 when `status != "running"`. RBAC SHALL match `/feedback` (project_owner / project_editor / admin per E-100-002 v2 — platform_manager rejected on content endpoints).
 
 **Rationale.** A side-band channel for live operator guidance ("focus the spec on REST not gRPC", "skip the README"). Separates steering from `/feedback` which is gate-bound (Gate A approval, interactive-phase user input) — `steer` is a hint accepted between phases, NOT a precondition to advancement.
 
@@ -635,7 +635,7 @@ GET /api/v1/projects/{pid}/artifacts/runs/{rid}/tree       → flat list of `Art
 GET /api/v1/projects/{pid}/artifacts/runs/{rid}/blob?path  → file content (Content-Type detected, Content-Disposition: inline)
 ```
 
-Authentication SHALL follow the platform forward-auth pattern (X-User-Id / X-Tenant-Id / X-User-Roles). RBAC SHALL accept any tenant member for reads ; `tenant_manager` SHALL be REJECTED (per E-100-002 v2, content-blind). The blob endpoint SHALL accept an optional `download=1` query parameter that flips the `Content-Disposition` to `attachment`.
+Authentication SHALL follow the platform forward-auth pattern (X-User-Id / X-Tenant-Id / X-User-Roles). RBAC SHALL accept any tenant member for reads ; `platform_manager` SHALL be REJECTED (per E-100-002 v2, content-blind). The blob endpoint SHALL accept an optional `download=1` query parameter that flips the `Content-Disposition` to `attachment`.
 
 **Rationale.** Three minimal endpoints cover both the in-app preview path (tree + inline blob) and the download path, without exposing MinIO directly to the operator. Profile-agnostic : the same surface serves `codegen` (source code) and `docgen` (rendered documents) projects.
 
@@ -775,7 +775,7 @@ status: draft
 category: functional
 ```
 
-The platform SHALL expose `GET /api/v1/projects/{project_id}/git/commits` as a read-only proxy over the project's Gitea repo, returning a list of `ArtifactCommit` (`sha`, `message`, `author_name`, `author_email`, `committed_at`). Pagination is page-based (`?page=N`, default 1, server-side cap at 50 per page). The endpoint SHALL be tenant-scoped (X-Tenant-Id guard ; mismatched tenant → 404). RBAC follows the artifacts surface : any tenant member ; `tenant_manager` rejected per E-100-002 v2.
+The platform SHALL expose `GET /api/v1/projects/{project_id}/git/commits` as a read-only proxy over the project's Gitea repo, returning a list of `ArtifactCommit` (`sha`, `message`, `author_name`, `author_email`, `committed_at`). Pagination is page-based (`?page=N`, default 1, server-side cap at 50 per page). The endpoint SHALL be tenant-scoped (X-Tenant-Id guard ; mismatched tenant → 404). RBAC follows the artifacts surface : any tenant member ; `platform_manager` rejected per E-100-002 v2.
 
 **Rationale.** A simple paginated list covers the v1 UX need (browse commits in chronological order). Diff inspection and per-commit file content are deferred to future passes — not required for the initial "Versions" section UX.
 
@@ -833,7 +833,7 @@ status: draft
 category: functional
 ```
 
-The platform SHALL expose a document CRUD surface under `/api/v1/projects/{project_id}/documents` : `POST` (create/overwrite, 201), `PUT /{path}` (overwrite, 200), `GET` (list, 200), `GET /{path}` (read, 200), `DELETE /{path}` (delete, 204). The surface is tenant-scoped (X-Tenant-Id guard) and project-scoped ; RBAC follows the artifacts surface — any tenant member, `tenant_manager` rejected (E-100-002 v2). Paths follow the R-200-130 convention (POSIX relative, no `..`, no leading `/`, no backslashes) ; violations map to 400.
+The platform SHALL expose a document CRUD surface under `/api/v1/projects/{project_id}/documents` : `POST` (create/overwrite, 201), `PUT /{path}` (overwrite, 200), `GET` (list, 200), `GET /{path}` (read, 200), `DELETE /{path}` (delete, 204). The surface is tenant-scoped (X-Tenant-Id guard) and project-scoped ; RBAC follows the artifacts surface — any tenant member, `platform_manager` rejected (E-100-002 v2). Paths follow the R-200-130 convention (POSIX relative, no `..`, no leading `/`, no backslashes) ; violations map to 400.
 
 **Rationale.** A minimal REST surface the conversation tool layer drives. Reuses the existing MinIO + Gitea artifact backend (R-200-130..147) so v1 chat-direct and v2 pipeline paths share one mutation surface.
 
@@ -889,7 +889,7 @@ status: draft
 category: functional
 ```
 
-The platform SHALL expose three additional endpoints under the live-docs surface : `POST /api/v1/projects/{project_id}/documents/mkdir` body `{ path: str }`, `POST .../documents/rename` body `{ from_path: str, to_path: str }`, and `POST .../documents/move` body `{ from_path: str, to_dir: str }`. RBAC SHALL match `R-200-153` (any project member, tenant_manager rejected). Paths SHALL follow the R-200-130 validation (POSIX relative, no `..`, no leading `/`, no backslashes) ; violations map to 400.
+The platform SHALL expose three additional endpoints under the live-docs surface : `POST /api/v1/projects/{project_id}/documents/mkdir` body `{ path: str }`, `POST .../documents/rename` body `{ from_path: str, to_path: str }`, and `POST .../documents/move` body `{ from_path: str, to_dir: str }`. RBAC SHALL match `R-200-153` (any project member, platform_manager rejected). Paths SHALL follow the R-200-130 validation (POSIX relative, no `..`, no leading `/`, no backslashes) ; violations map to 400.
 
 **Rationale.** Operator-driven file management without round-tripping through the LLM. The semantic split (`rename` = pure path change, `move` = relocate under a different directory) maps cleanly onto the UX right-click menu — even if both reduce to the same primitive operation server-side.
 
@@ -1010,7 +1010,7 @@ status: draft
 category: functional
 ```
 
-The auth matrix catalog (`tests/e2e/auth_matrix/_catalog.py` per §13 of CLAUDE.md) SHALL include one entry per new endpoint introduced by §5.17 and §5.18, declaring the accepted-role set, the excluded-global-roles set (always including `tenant_manager` on content endpoints), and the backend persistence flag (MinIO, optionally Gitea).
+The auth matrix catalog (`tests/e2e/auth_matrix/_catalog.py` per §13 of CLAUDE.md) SHALL include one entry per new endpoint introduced by §5.17 and §5.18, declaring the accepted-role set, the excluded-global-roles set (always including `platform_manager` on content endpoints), and the backend persistence flag (MinIO, optionally Gitea).
 
 **Rationale.** Catalog is the SOT for the test matrix (§13) ; missing an entry is caught as a build break by the coherence test.
 

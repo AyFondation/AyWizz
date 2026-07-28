@@ -98,7 +98,7 @@ async def test_seed_creates_tenant_users_project_grants(
 
     # Users — 4 distinct entries, correct global roles
     expected_users = {
-        "superroot": RBACGlobalRole.TENANT_MANAGER,
+        "superroot": RBACGlobalRole.PLATFORM_MANAGER,
         "tenant-admin": RBACGlobalRole.ADMIN,
         "project-editor": RBACGlobalRole.USER,
         "project-viewer": RBACGlobalRole.USER,

@@ -160,10 +160,10 @@ def test_no_role_user_cannot_upload() -> None:
     assert _can_upload(claims, "project-docgen") is False
 
 
-def test_tenant_manager_cannot_upload_content() -> None:
-    """tenant_manager is content-blind (E-100-002): a global role that is NOT
+def test_platform_manager_cannot_upload_content() -> None:
+    """platform_manager is content-blind (E-100-002): a global role that is NOT
     in the upload gate, with no project scopes."""
-    claims = _claims(roles=[RBACGlobalRole.TENANT_MANAGER])
+    claims = _claims(roles=[RBACGlobalRole.PLATFORM_MANAGER])
     assert _can_upload(claims, "project-docgen") is False
 
 

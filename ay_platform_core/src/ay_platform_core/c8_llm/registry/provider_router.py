@@ -3,7 +3,7 @@
 # Version: 1
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/provider_router.py
 # Description: FastAPI APIRouter for the LLM PROVIDER registry (endpoint +
-#              credential layer), tenant_manager only, forward-auth gated. A
+#              credential layer), platform_manager only, forward-auth gated. A
 #              provider is addressed by its stable `provider_id`. The API key is
 #              WRITE-ONLY on its own dedicated endpoint (encrypted, never echoed;
 #              503 without a master key). Mounted by the c8_admin app factory.
@@ -35,7 +35,7 @@ from ay_platform_core.c8_llm.registry.provider_service import (
 
 router = APIRouter(tags=["llm-provider"])
 
-_PROVIDER_ROLES: tuple[str, ...] = ("tenant_manager",)
+_PROVIDER_ROLES: tuple[str, ...] = ("platform_manager",)
 
 
 def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
@@ -145,7 +145,7 @@ async def delete_provider(
     x_user_roles: str | None = Header(default=None),
     service: LLMProviderService = Depends(get_provider_service),
 ) -> None:
-    """Delete a provider by id. tenant_manager only. 404 if unknown."""
+    """Delete a provider by id. platform_manager only. 404 if unknown."""
     _require_role(x_user_roles, _PROVIDER_ROLES)
     if not await service.delete_provider(provider_id):
         raise HTTPException(

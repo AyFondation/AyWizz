@@ -70,6 +70,13 @@ class _FakeStore:
             if v.get("tenant_id") == tenant_id and "model_ids" not in v
         ]
 
+    async def is_initialized(self, tenant_id: str) -> bool:
+        return f"init:{tenant_id}" in self.store
+
+    async def mark_initialized(self, tenant_id: str) -> None:
+        # No `tenant_id` field → invisible to `list_for_tenant`.
+        self.store[f"init:{tenant_id}"] = {"init": True}
+
     async def get_project_models(
         self, tenant_id: str, project_id: str
     ) -> dict[str, Any] | None:
@@ -115,8 +122,16 @@ async def _seed_registry(
     return public.model_id
 
 
-def _service(reg: LLMRegistryService) -> tuple[TenantCatalogService, _FakeStore]:
+def _service(
+    reg: LLMRegistryService, *, initialized: tuple[str, ...] = (_TENANT,)
+) -> tuple[TenantCatalogService, _FakeStore]:
+    """Build a catalogue service over a fresh in-memory store. By default the
+    tenant(s) are pre-marked initialised so resolution-focused tests control
+    their catalogue explicitly (no opt-out auto-populate). Pass
+    `initialized=()` to exercise the 800-v10 lazy materialisation."""
     cat_store = _FakeStore()
+    for t in initialized:
+        cat_store.store[f"init:{t}"] = {"init": True}
     return TenantCatalogService(cat_store, reg), cat_store
 
 
@@ -242,11 +257,56 @@ async def test_resolve_capability_filter_vision() -> None:
 
 
 async def test_resolve_isolated_per_tenant() -> None:
+    # 800 v10 opt-out: both tenants lazily materialise the SAME registry
+    # baseline, but one tenant's CUSTOMISATION does not leak to the other.
     reg = _registry()
     h = await _seed_registry(reg, "haiku", quality=ModelQuality.LOW, cost_in=0.8)
-    svc, _ = _service(reg)
-    await svc.upsert_model(_TENANT, h, TenantCatalogUpsert())
-    assert await svc.resolve("tenant-other", ModelQuality.LOW) is None
+    svc, _ = _service(reg, initialized=())
+    # tenant-x disables the shared model; tenant-other is untouched.
+    await svc.upsert_model(_TENANT, h, TenantCatalogUpsert(enabled=False))
+    assert await svc.resolve(_TENANT, ModelQuality.LOW) is None
+    other = await svc.resolve("tenant-other", ModelQuality.LOW)
+    assert other is not None and other.model_id == h
+
+
+# ---- Opt-out lazy materialisation (800 v10) ----------------------------------
+
+
+async def test_first_touch_materialises_whole_registry() -> None:
+    reg = _registry()
+    a = await _seed_registry(reg, "a", quality=ModelQuality.LOW, cost_in=0.5)
+    b = await _seed_registry(reg, "b", quality=ModelQuality.MEDIUM, cost_in=1.0)
+    c = await _seed_registry(reg, "c", quality=ModelQuality.HIGH, cost_in=2.0)
+    svc, _ = _service(reg, initialized=())
+    catalogue = await svc.list_catalog(_TENANT)
+    assert {m.model_id for m in catalogue} == {a, b, c}
+    assert all(m.enabled for m in catalogue)
+
+
+async def test_remove_all_is_not_repopulated() -> None:
+    reg = _registry()
+    a = await _seed_registry(reg, "a", quality=ModelQuality.LOW, cost_in=0.5)
+    b = await _seed_registry(reg, "b", quality=ModelQuality.MEDIUM, cost_in=1.0)
+    svc, _ = _service(reg, initialized=())
+    await svc.list_catalog(_TENANT)  # materialises a, b + marks initialised
+    assert await svc.remove_model(_TENANT, a) is True
+    assert await svc.remove_model(_TENANT, b) is True
+    # The marker persists → an emptied catalogue stays empty (no re-populate).
+    assert await svc.list_catalog(_TENANT) == []
+
+
+async def test_available_models_excludes_catalogued() -> None:
+    reg = _registry()
+    a = await _seed_registry(reg, "a", quality=ModelQuality.LOW, cost_in=0.5)
+    b = await _seed_registry(reg, "b", quality=ModelQuality.MEDIUM, cost_in=1.0)
+    svc, _ = _service(reg, initialized=())
+    # Fresh tenant: everything is catalogued → nothing left to add.
+    assert await svc.list_available_models(_TENANT) == []
+    # Remove one → it becomes available to re-add.
+    await svc.remove_model(_TENANT, a)
+    available = await svc.list_available_models(_TENANT)
+    assert [m.model_id for m in available] == [a]
+    assert b not in {m.model_id for m in available}
 
 
 # ---- Per-project model associations + scoped resolution ----------------------

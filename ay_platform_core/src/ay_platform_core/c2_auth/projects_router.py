@@ -9,7 +9,7 @@
 #              `X-Tenant-Id`, `X-User-Roles`) — same convention as
 #              C3/C5/C6/C7 — NOT Bearer JWT. Traefik propagates these
 #              from the JWT in production. Project lifecycle is content
-#              of a tenant, so `tenant_manager` is EXCLUDED.
+#              of a tenant, so `platform_manager` is EXCLUDED.
 #
 #              v2: adds `GET /{pid}` (any tenant member) and
 #              `PATCH /{pid}` (admin / tenant_admin / project_owner)
@@ -72,13 +72,13 @@ def _require_role_intersect(
     x_user_roles: str | None, accepted: tuple[str, ...]
 ) -> None:
     roles = _parse_roles(x_user_roles)
-    if "tenant_manager" in roles and not roles.intersection(accepted):
-        # Explicit content-blindness assertion: tenant_manager-only callers
+    if "platform_manager" in roles and not roles.intersection(accepted):
+        # Explicit content-blindness assertion: platform_manager-only callers
         # SHALL be rejected even if they happen to be in `accepted` (they
         # never are, but the intent is enforced here).
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="tenant_manager has no access to tenant content (E-100-002 v2)",
+            detail="platform_manager has no access to tenant content (E-100-002 v2)",
         )
     if not roles.intersection(accepted):
         raise HTTPException(
@@ -116,12 +116,12 @@ async def list_projects(
     service: AuthService = Depends(get_service),
 ) -> ProjectList:
     """List projects in the caller's tenant. Any authenticated user can
-    call this; results are scoped to the X-Tenant-Id header. tenant_manager
+    call this; results are scoped to the X-Tenant-Id header. platform_manager
     is rejected — listing tenant projects is tenant content."""
-    if "tenant_manager" in _parse_roles(x_user_roles):
+    if "platform_manager" in _parse_roles(x_user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="tenant_manager has no access to tenant content (E-100-002 v2)",
+            detail="platform_manager has no access to tenant content (E-100-002 v2)",
         )
     return ProjectList(items=await service.list_projects(tenant_id))
 
@@ -137,12 +137,12 @@ async def get_project(
     """Read a single project (any tenant member). The response carries
     the EFFECTIVE `system_prompt` (override OR C2 default) plus
     `system_prompt_is_default`, so the UX has everything it needs in
-    one round-trip. tenant_manager is rejected as project content
+    one round-trip. platform_manager is rejected as project content
     is out of scope per E-100-002 v2."""
-    if "tenant_manager" in _parse_roles(x_user_roles):
+    if "platform_manager" in _parse_roles(x_user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="tenant_manager has no access to tenant content (E-100-002 v2)",
+            detail="platform_manager has no access to tenant content (E-100-002 v2)",
         )
     return await service.get_project(project_id, tenant_id)
 

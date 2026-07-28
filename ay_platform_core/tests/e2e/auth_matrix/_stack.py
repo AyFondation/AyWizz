@@ -357,7 +357,7 @@ def _build_c8_admin(
     db_name: str,
     password: str,
 ) -> FastAPI:
-    """C8 admin app — platform LLM registry, gated by `tenant_manager`. Uses a
+    """C8 admin app — platform LLM registry, gated by `platform_manager`. Uses a
     SecretCipher built from the test env master key (set in the root conftest)
     so the encrypt/decrypt path is real, not mocked."""
     db = client.db(db_name, username="root", password=password)

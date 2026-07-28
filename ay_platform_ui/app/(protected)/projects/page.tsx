@@ -35,12 +35,12 @@ export default function ProjectsPage() {
   const { state: authState } = useAuth();
   const [state, setState] = useState<ListState>({ status: "loading" });
 
-  // tenant_manager is content-blind (E-100-002): it cannot list project
+  // platform_manager is content-blind (E-100-002): it cannot list project
   // content and gets a 403 here. Rather than a raw error, route it to its
   // admin home (the platform LLM registry).
   const isTenantManager =
     authState.status === "authenticated" &&
-    (authState.claims.roles ?? []).includes("tenant_manager");
+    (authState.claims.roles ?? []).includes("platform_manager");
 
   const apiClient = useMemo(() => {
     if (configState.status !== "ready") return null;
@@ -80,16 +80,26 @@ export default function ProjectsPage() {
         <main className="mx-auto max-w-7xl px-6 py-10" data-testid="projects-admin-home">
           <h1 className="text-2xl font-semibold">Platform administration</h1>
           <p className="mt-4 text-sm text-neutral-600">
-            As a platform administrator (tenant_manager) you manage platform configuration, not
-            project content. Start with the LLM registry.
+            As a platform operator (platform_manager) you manage platform governance, not project
+            content. To oversee projects across all tenants — status, access, and consumption — open
+            project governance.
           </p>
-          <Link
-            href="/admin/llm-registry"
-            className="mt-4 inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            data-testid="projects-admin-registry-link"
-          >
-            Open LLM registry
-          </Link>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/operator/projects"
+              className="inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              data-testid="projects-admin-governance-link"
+            >
+              Open project governance
+            </Link>
+            <Link
+              href="/admin/llm-registry"
+              className="inline-block rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+              data-testid="projects-admin-registry-link"
+            >
+              Open LLM registry
+            </Link>
+          </div>
         </main>
       );
     }

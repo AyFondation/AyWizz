@@ -7,7 +7,7 @@
 #              model references a provider by stable id; the WRITE-ONLY key lives
 #              on the PROVIDER; models/catalogue are addressed by `model_id`
 #              (rename-safe). Exercises the full router→service→repo→Arango path
-#              + the tenant_manager / admin role gates.
+#              + the platform_manager / admin role gates.
 # =============================================================================
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from tests.fixtures.containers import ArangoEndpoint, cleanup_arango_database
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio(loop_scope="function")]
 
-_TMGR_HEADERS = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager"}
+_TMGR_HEADERS = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager"}
 _USER_HEADERS = {"X-User-Id": "u-plain", "X-User-Roles": "user"}
 _ADMIN_HEADERS = {"X-User-Id": "u-admin", "X-User-Roles": "admin", "X-Tenant-Id": "tenant-1"}
 
@@ -166,7 +166,7 @@ async def test_provider_duplicate_name_409(admin_app: FastAPI) -> None:
     assert dup.status_code == 409
 
 
-async def test_provider_requires_tenant_manager(admin_app: FastAPI) -> None:
+async def test_provider_requires_platform_manager(admin_app: FastAPI) -> None:
     async with _client(admin_app) as c:
         forbid = await c.get("/admin/v1/llm/providers", headers=_USER_HEADERS)
         anon = await c.get("/admin/v1/llm/providers")
@@ -216,7 +216,7 @@ async def test_duplicate_alias_409(admin_app: FastAPI) -> None:
     assert clash.status_code == 409
 
 
-async def test_registry_requires_tenant_manager(admin_app: FastAPI) -> None:
+async def test_registry_requires_platform_manager(admin_app: FastAPI) -> None:
     async with _client(admin_app) as c:
         forbid = await c.get("/admin/v1/llm/registry", headers=_USER_HEADERS)
         anon = await c.get("/admin/v1/llm/registry")
@@ -234,8 +234,8 @@ async def test_catalog_requires_admin_or_tenant_admin(admin_app: FastAPI) -> Non
     assert resp.status_code == 403
 
 
-async def test_catalog_tenant_manager_is_excluded(admin_app: FastAPI) -> None:
-    headers = {"X-User-Id": "u-tmgr", "X-User-Roles": "tenant_manager", "X-Tenant-Id": "tenant-1"}
+async def test_catalog_platform_manager_is_excluded(admin_app: FastAPI) -> None:
+    headers = {"X-User-Id": "u-tmgr", "X-User-Roles": "platform_manager", "X-Tenant-Id": "tenant-1"}
     async with _client(admin_app) as c:
         resp = await c.get("/api/v1/llm/catalog", headers=headers)
     assert resp.status_code == 403
@@ -278,8 +278,33 @@ async def test_catalog_upsert_list_resolve_and_isolation(admin_app: FastAPI) -> 
     assert miss.status_code == 404  # no silent downgrade
     assert anon.status_code == 401
     assert first.status_code == 204 and second.status_code == 404
-    # Cross-tenant isolation (service level).
-    assert await admin_app.state.catalog_service.resolve("tenant-other", ModelQuality.LOW) is None
+    # Cross-tenant isolation (800 v10 opt-out, service level): tenant-1 deleted
+    # its only model → resolves nothing; a FRESH tenant still inherits the
+    # shared registry baseline (tenant-1's deletion did not leak).
+    svc = admin_app.state.catalog_service
+    assert await svc.resolve("tenant-1", ModelQuality.LOW) is None
+    other = await svc.resolve("tenant-other", ModelQuality.LOW)
+    assert other is not None and other.model_alias == "cat-haiku"
+
+
+async def test_catalog_available_reflects_removals(admin_app: FastAPI) -> None:
+    """800 v10: a fresh tenant is opt-out materialised (nothing left to add);
+    removing a model surfaces it in the /available re-add picker."""
+    async with _client(admin_app) as c:
+        pid = await _new_provider(c)
+        a = await _new_model(c, pid, "av-a", quality="low")
+        b = await _new_model(c, pid, "av-b", quality="medium")
+
+        # First catalogue touch materialises both → nothing available to add.
+        listing = await c.get("/api/v1/llm/catalog", headers=_ADMIN_HEADERS)
+        assert {m["model_id"] for m in listing.json()["models"]} == {a, b}
+        avail0 = await c.get("/api/v1/llm/catalog/available", headers=_ADMIN_HEADERS)
+        assert avail0.json()["models"] == []
+
+        # Remove one → it becomes available to re-add.
+        await c.delete(f"/api/v1/llm/catalog/{a}", headers=_ADMIN_HEADERS)
+        avail1 = await c.get("/api/v1/llm/catalog/available", headers=_ADMIN_HEADERS)
+    assert [m["model_id"] for m in avail1.json()["models"]] == [a]
 
 
 async def test_project_models_default_and_explicit(admin_app: FastAPI) -> None:

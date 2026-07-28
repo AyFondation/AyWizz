@@ -74,14 +74,14 @@ function renderPage() {
 beforeEach(() => window.localStorage.clear());
 
 describe("LlmProvidersPage", () => {
-  it("forbids a non-tenant_manager", async () => {
+  it("forbids a non-platform_manager", async () => {
     seedToken(["admin"]);
     renderPage();
     await waitFor(() => expect(screen.getByTestId("providers-forbidden")).toBeInTheDocument());
   });
 
   it("lists providers with key status", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(
       http.get(PROV, () =>
         HttpResponse.json({
@@ -95,7 +95,7 @@ describe("LlmProvidersPage", () => {
   });
 
   it("creates a provider AND stores its key in one submit", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     let body: Record<string, unknown> | null = null;
     const post = vi.fn(async ({ request }) => {
       body = (await request.json()) as Record<string, unknown>;
@@ -128,7 +128,7 @@ describe("LlmProvidersPage", () => {
   });
 
   it("reports a partial success when key storage is unavailable (503)", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(
       http.get(PROV, () => HttpResponse.json({ providers: [] })),
       http.put(`${PROV}/:id/api-key`, () =>
@@ -149,7 +149,7 @@ describe("LlmProvidersPage", () => {
   });
 
   it("edits then deletes a provider by id", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const put = vi.fn(() => HttpResponse.json(provider({ base_url: "https://new" })));
     const del = vi.fn(() => new HttpResponse(null, { status: 204 }));
     server.use(

@@ -1,12 +1,16 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/admin/llm-catalogue/page.tsx
 // Description: Per-tenant LLM catalogue admin surface (LLM-governance HMI,
 //              admin / tenant_admin). Curates which platform-registry models
 //              the tenant's projects may use: enable/disable, set an optional
-//              chargeback markup, remove, or add a model by alias. No API key
-//              is ever handled here (keys are platform secrets).
+//              chargeback markup, remove, or (re-)add a model. No API key is
+//              ever handled here (keys are platform secrets).
+//              v2 (800 v10): the catalogue is OPT-OUT — a tenant starts with
+//              every registry model. The blind "add by id" input is replaced by
+//              a PICKER populated from GET /catalog/available (models the admin
+//              removed and can re-add).
 // =============================================================================
 
 "use client";
@@ -15,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { TenantCatalogModelPublic } from "@/lib/types";
+import type { LLMRegistryPublic, TenantCatalogModelPublic } from "@/lib/types";
 
 const ADMIN_ROLES = new Set(["admin", "tenant_admin"]);
 
@@ -25,9 +29,10 @@ export default function LlmCataloguePage() {
   const apiClient = useMemo(() => new ApiClient(cfg), [cfg]);
 
   const [models, setModels] = useState<TenantCatalogModelPublic[] | null>(null);
+  const [available, setAvailable] = useState<LLMRegistryPublic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [newAlias, setNewAlias] = useState("");
+  const [pickModelId, setPickModelId] = useState("");
 
   const canEdit = useMemo(() => {
     if (authState.status !== "authenticated") return false;
@@ -37,9 +42,12 @@ export default function LlmCataloguePage() {
   }, [authState]);
 
   const reload = useCallback(() => {
-    apiClient
-      .listLlmCatalog()
-      .then((r) => setModels(r.models))
+    Promise.all([apiClient.listLlmCatalog(), apiClient.listAvailableLlmCatalogModels()])
+      .then(([cat, avail]) => {
+        setModels(cat.models);
+        setAvailable(avail.models);
+        setPickModelId("");
+      })
       .catch((err) =>
         setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
       );
@@ -108,8 +116,9 @@ export default function LlmCataloguePage() {
     <main className="mx-auto max-w-5xl px-6 py-10" data-testid="llm-catalogue">
       <h2 className="text-lg font-semibold text-neutral-800">Tenant LLM catalogue</h2>
       <p className="mt-2 text-sm text-neutral-600">
-        Models your projects may use, curated from the platform registry. Keys stay on the platform
-        — none are handled here.
+        Models your projects may use. Your tenant starts with every platform model; disable or
+        remove the ones you don't want, and re-add them from the picker. Keys stay on the platform —
+        none are handled here.
       </p>
 
       {error && (
@@ -124,20 +133,28 @@ export default function LlmCataloguePage() {
       )}
 
       <div className="mt-4 flex gap-2" data-testid="catalogue-add">
-        <input
-          type="text"
-          value={newAlias}
-          onChange={(e) => setNewAlias(e.target.value)}
-          placeholder="add model by id (from your platform admin)"
-          className="w-72 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
-          data-testid="catalogue-add-input"
-        />
+        <select
+          value={pickModelId}
+          onChange={(e) => setPickModelId(e.target.value)}
+          disabled={available.length === 0}
+          className="w-72 rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50"
+          data-testid="catalogue-add-select"
+        >
+          <option value="">
+            {available.length === 0 ? "all registry models catalogued" : "re-add a model…"}
+          </option>
+          {available.map((m) => (
+            <option key={m.model_id} value={m.model_id}>
+              {m.alias} ({m.default_model_quality})
+            </option>
+          ))}
+        </select>
         <button
           type="button"
-          disabled={!newAlias}
+          disabled={!pickModelId}
           onClick={() => {
-            onPut(newAlias.trim(), { enabled: true }, `Added ${newAlias.trim()}.`);
-            setNewAlias("");
+            const picked = available.find((m) => m.model_id === pickModelId);
+            onPut(pickModelId, { enabled: true }, `Added ${picked?.alias ?? pickModelId}.`);
           }}
           className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           data-testid="catalogue-add-button"
@@ -150,7 +167,8 @@ export default function LlmCataloguePage() {
         <p className="mt-4 text-sm text-neutral-500">Loading catalogue…</p>
       ) : models.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-500" data-testid="catalogue-empty">
-          No models catalogued yet — add one by its id above.
+          No models in this tenant's catalogue — projects cannot resolve a model. Re-add one from
+          the picker above.
         </p>
       ) : (
         <table className="mt-4 w-full border-collapse text-sm" data-testid="catalogue-table">

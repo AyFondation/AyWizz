@@ -5,7 +5,7 @@
 # Description: Pydantic v2 models for C2 Auth Service public contracts.
 #              JWTClaims implements E-100-001.
 #              RBACGlobalRole / RBACProjectRole implement E-100-002 v2 —
-#              5-role hierarchy: tenant_manager (super-root, no content),
+#              5-role hierarchy: platform_manager (super-root, no content),
 #              admin (tenant-scoped admin, alias of tenant_admin),
 #              project_owner / project_editor / project_viewer.
 #
@@ -22,7 +22,7 @@
 #              must remain `None` in production).
 #
 #              v3: Tenant + Project lifecycle models added (Phase A of the
-#              v1 functional plan). Tenants are owned by `tenant_manager`;
+#              v1 functional plan). Tenants are owned by `platform_manager`;
 #              projects are owned by `admin` / `tenant_admin` of the
 #              hosting tenant.
 #
@@ -43,23 +43,30 @@ class RBACGlobalRole(StrEnum):
     """Global platform roles embedded in JWT claims.roles. E-100-002 v2.
 
     Hierarchy (top to bottom):
-      - TENANT_MANAGER: super-root. Cross-tenant operations (create/list/
-        delete tenants, grant/revoke tenant admins). SHALL NOT have access
-        to tenant content (conversations, projects, requirements, etc.).
-      - ADMIN / TENANT_ADMIN: tenant-scoped admin. Creates projects in
-        their tenant, grants project_owner roles, full read/write within
-        their tenant boundary. ADMIN and TENANT_ADMIN are synonyms;
-        ADMIN is the canonical name in spec, TENANT_ADMIN is retained
-        for backwards-compat with v1 code.
+      - PLATFORM_MANAGER: super-root / platform operator. Cross-tenant
+        operations (create/list/delete tenants, grant/revoke tenant admins,
+        platform LLM registry + global quotas, cross-tenant project
+        governance). SHALL NOT have access to tenant content
+        (conversations, projects, requirements, etc.) — content-blind.
+      - ADMIN / TENANT_ADMIN: tenant operator (E-100-002 v7). The tenant-scoped
+        mirror of PLATFORM_MANAGER: full GOVERNANCE of its OWN tenant
+        (create/delete users, create projects, project lifecycle status,
+        ACL grant/revoke, consumption view). **CONTENT-BLIND** — SHALL NOT
+        read or write any project CONTENT (conversations, sources,
+        requirements, runs, artifacts); content is reached ONLY via the
+        project-scoped roles below. Never crosses tenants; never touches
+        platform configuration. ADMIN and TENANT_ADMIN are synonyms; ADMIN
+        is the canonical name, TENANT_ADMIN is retained for v1 code paths.
       - USER: baseline authenticated user (no special grants).
 
     Project-scoped roles (project_owner / project_editor / project_viewer)
     live in `RBACProjectRole`, embedded under `JWTClaims.project_scopes`.
+    ALL project content access flows through these (E-100-002 v7).
 
     @relation implements:E-100-002
     """
 
-    TENANT_MANAGER = "tenant_manager"
+    PLATFORM_MANAGER = "platform_manager"
     ADMIN = "admin"
     TENANT_ADMIN = "tenant_admin"
     USER = "user"
@@ -81,6 +88,26 @@ class UserStatus(StrEnum):
 
     ACTIVE = "active"
     DISABLED = "disabled"
+
+
+class ProjectStatus(StrEnum):
+    """Lifecycle status of a project GOVERNANCE object (E-100-002 v4).
+
+    Governs access to the project's CONTENT, not its metadata:
+    - ``active``: normal operation.
+    - ``inactive``: members are refused access to the project's content
+      (data retained); mirrors tenant deactivation.
+    - ``archived``: a read-only freeze — content retained, but no writes,
+      uploads, or pipeline runs are accepted.
+
+    Managed cross-tenant by the ``platform_manager`` platform operator;
+    content endpoints reject a non-``active`` project with 403 regardless
+    of the caller's role.
+    """
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    ARCHIVED = "archived"
 
 
 class JWTClaims(BaseModel):
@@ -288,7 +315,7 @@ class SessionInfo(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tenant lifecycle models — owned by `tenant_manager`
+# Tenant lifecycle models — owned by `platform_manager`
 # ---------------------------------------------------------------------------
 
 
@@ -318,7 +345,7 @@ class TenantList(BaseModel):
 
 
 class UserList(BaseModel):
-    """Cross-tenant user list for the platform operator (tenant_manager)."""
+    """Cross-tenant user list for the platform operator (platform_manager)."""
 
     items: list[UserPublic]
 
@@ -380,6 +407,11 @@ class ProjectPublic(BaseModel):
     tenant_id: str
     name: str
     profile: str = "code"
+    status: ProjectStatus = Field(
+        default=ProjectStatus.ACTIVE,
+        description="Governance lifecycle status (E-100-002 v4). A "
+        "non-`active` project blocks member access to its content.",
+    )
     created_at: datetime
     created_by: str
     system_prompt: str = Field(
@@ -402,6 +434,25 @@ class ProjectPublic(BaseModel):
 
 class ProjectList(BaseModel):
     items: list[ProjectPublic]
+
+
+class ProjectMember(BaseModel):
+    """One entry of a project's access-control list (E-100-002 v4 governance
+    view). `role` is the caller's `project_*` role on this project; `username`
+    is resolved best-effort for display (empty if the user record is gone)."""
+
+    user_id: str
+    username: str = ""
+    role: RBACProjectRole
+
+
+class ProjectMemberList(BaseModel):
+    """A project's ACL — the members and their project roles. Metadata only;
+    exposes NO project content (E-100-002 v4 governance object)."""
+
+    project_id: str
+    tenant_id: str
+    members: list[ProjectMember]
 
 
 class ProjectMemberGrant(BaseModel):

@@ -6,6 +6,6 @@
 #              platform-wide QuotaPolicy (parametrable rolling windows, limits in
 #              cost AND/OR tokens) applied uniformly to every tenant; usage is
 #              summed from the `llm_calls` ledger. Soft (warn) → hard (429 block)
-#              enforcement at the C8 gateway. Owned by tenant_manager (E-100-002
+#              enforcement at the C8 gateway. Owned by platform_manager (E-100-002
 #              v3 platform operator).
 # =============================================================================

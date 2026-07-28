@@ -122,7 +122,7 @@ class QuotaPolicy(BaseModel):
 
 
 class QuotaPolicyUpdate(BaseModel):
-    """PUT body — replaces the window set wholesale (tenant_manager)."""
+    """PUT body — replaces the window set wholesale (platform_manager)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -181,3 +181,45 @@ class QuotaStatus(BaseModel):
     windows: list[QuotaWindowStatus]
     warned: bool
     blocked: bool
+
+
+# Reporting windows for the per-tenant consumption table (R-800-144). These are
+# REPORTING-only calendar windows — the ENFORCED QuotaPolicy windows are
+# unchanged.
+CONSUMPTION_WINDOWS: tuple[str, ...] = (
+    "session",
+    "week",
+    "month",
+    "quarter",
+    "semester",
+    "year",
+)
+
+
+class ConsumptionCell(BaseModel):
+    """One (window x tenant) consumption cell: cost in the platform currency +
+    total tokens."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cost: float
+    tokens: int
+
+
+class TenantConsumption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str
+    # window key (CONSUMPTION_WINDOWS) → cell
+    windows: dict[str, ConsumptionCell]
+
+
+class ConsumptionReport(BaseModel):
+    """Per-tenant LLM consumption across the reporting windows (R-800-144).
+    `currency` is the single platform currency (config, default EUR)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str
+    windows: list[str]
+    tenants: list[TenantConsumption]

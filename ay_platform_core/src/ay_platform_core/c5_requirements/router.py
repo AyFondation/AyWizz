@@ -65,6 +65,10 @@ def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
     return x_user_id
 
 
+# E-100-002 v7: content-blind global roles — stripped before a content gate.
+_CONTENT_BLIND_GLOBAL_ROLES = frozenset({"admin", "tenant_admin"})
+
+
 def _require_role(
     x_user_roles: str | None = Header(default=None),
     required: tuple[str, ...] = ("project_editor", "project_owner", "admin"),
@@ -76,6 +80,7 @@ def _require_role(
     platform-level writes, project_owner for document deletion.
     """
     roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    roles -= _CONTENT_BLIND_GLOBAL_ROLES
     if not roles.intersection(required):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

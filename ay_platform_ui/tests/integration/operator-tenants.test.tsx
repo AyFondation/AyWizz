@@ -2,7 +2,7 @@
 // File: operator-tenants.test.tsx
 // Path: ay_platform_ui/tests/integration/operator-tenants.test.tsx
 // Description: Tests for the tenant management console (platform operator,
-//              tenant_manager). Covers: forbidden for non-tenant_manager;
+//              platform_manager). Covers: forbidden for non-platform_manager;
 //              list render with active/deactivated status; create; deactivate;
 //              reactivate; delete.
 // =============================================================================
@@ -72,14 +72,14 @@ function renderPage() {
 beforeEach(() => window.localStorage.clear());
 
 describe("TenantsAdminPage", () => {
-  it("forbids a non-tenant_manager", async () => {
+  it("forbids a non-platform_manager", async () => {
     seedToken(["admin"]);
     renderPage();
     await waitFor(() => expect(screen.getByTestId("tenants-forbidden")).toBeInTheDocument());
   });
 
   it("lists tenants with status", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     server.use(
       http.get(TENANTS_URL, () =>
         HttpResponse.json({ items: [tenant(), tenant({ tenant_id: "off", active: false })] }),
@@ -92,7 +92,7 @@ describe("TenantsAdminPage", () => {
   });
 
   it("creates a tenant", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const post = vi.fn(() => HttpResponse.json(tenant({ tenant_id: "newco" })));
     server.use(
       http.get(TENANTS_URL, () => HttpResponse.json({ items: [] })),
@@ -107,7 +107,7 @@ describe("TenantsAdminPage", () => {
   });
 
   it("deactivates then deletes a tenant", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const deact = vi.fn(() => HttpResponse.json(tenant({ active: false })));
     const del = vi.fn(() => new HttpResponse(null, { status: 204 }));
     server.use(
@@ -125,7 +125,7 @@ describe("TenantsAdminPage", () => {
   });
 
   it("reactivates a deactivated tenant", async () => {
-    seedToken(["tenant_manager"]);
+    seedToken(["platform_manager"]);
     const react = vi.fn(() => HttpResponse.json(tenant({ active: true })));
     server.use(
       http.get(TENANTS_URL, () => HttpResponse.json({ items: [tenant({ active: false })] })),

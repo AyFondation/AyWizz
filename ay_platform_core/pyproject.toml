@@ -140,6 +140,7 @@ test = [
     "pytest-xdist>=3.8,<4.0",
     "testcontainers[arangodb,minio]>=4.14,<5.0",
     "libcst>=1.8,<2.0",
+    "hypothesis>=6.155.2,<7.0"
 ]
 
 dev = [
@@ -269,6 +270,8 @@ select = [
 ]
 ignore = [
     "PLR0913",  # too many arguments (often legitimate in factories)
+    "PLR0917",  # too many positional args — same category as PLR0913, legitimate
+                # on builder-style DB inserts and FastAPI endpoints (many Depends)
     "PLR2004",  # magic values (often legitimate in tests)
 ]
 

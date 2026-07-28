@@ -32,7 +32,7 @@ class RoleProfile:
     user_id: str
     tenant_id: str
     global_roles: tuple[str, ...] = ()
-    """e.g. ('tenant_manager',), ('admin',), () for plain user."""
+    """e.g. ('platform_manager',), ('admin',), () for plain user."""
 
     project_id: str | None = None
     project_role: str | None = None
@@ -135,7 +135,7 @@ def needs_bearer(spec: EndpointSpec) -> bool:
     Bearer JWT (validated server-side via Depends):
       - `/auth/verify`, `/auth/logout`
       - `/auth/users/*`, `/auth/sessions/*`
-      - `/admin/tenants/*` (Phase A — tenant_manager)
+      - `/admin/tenants/*` (Phase A — platform_manager)
 
     Forward-auth headers (X-User-Id / X-Tenant-Id / X-User-Roles):
       - `/api/v1/projects/*` (Phase A — admin / project_owner)
