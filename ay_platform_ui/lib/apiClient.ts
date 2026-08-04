@@ -80,9 +80,12 @@ import type {
   OrchestratorRunSteer,
   PlatformConfig,
   Project,
+  ProjectConsumptionReport,
   ProjectList,
   ProjectMemberList,
   ProjectModelsResponse,
+  ProjectStorageReport,
+  ProjectStorageSeries,
   ProjectUpdate,
   PromptReference,
   QuotaPolicy,
@@ -100,16 +103,20 @@ import type {
   SourceRunListing,
   SourceStructuralOpResult,
   SourceTreeResponse,
+  StorageSnapshotResult,
   TenantCatalogListResponse,
   TenantCatalogModelPublic,
   TenantCatalogUpsert,
   TenantList,
   TenantPublic,
+  TenantStorageReport,
   TraceEvent,
   UserAdminList,
   UserAdminView,
+  UserConsumptionReport,
   UserPreferencesResponse,
   UserPreferencesUpdate,
+  UserProjectAccessList,
   ValidationPlugin,
   ValidationRun,
 } from "./types";
@@ -635,6 +642,15 @@ export class ApiClient {
     });
   }
 
+  /** GET /admin/users/{id}/projects — the reverse ACL view: every project the
+   *  user can access + the role on each (E-100-002 v7 user oversight). */
+  async listUserProjectAccess(userId: string): Promise<UserProjectAccessList> {
+    return this.request<UserProjectAccessList>(
+      `/admin/users/${encodeURIComponent(userId)}/projects`,
+      { method: "GET" },
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Platform operator — cross-tenant project governance (platform_manager)
   // E-100-002 v4. Governance object only (metadata / status / ACL) — never
@@ -726,6 +742,76 @@ export class ApiClient {
    *  reporting windows (session/week/month/quarter/semester/year). */
   async getConsumption(): Promise<ConsumptionReport> {
     return this.request<ConsumptionReport>("/admin/v1/quota/consumption", { method: "GET" });
+  }
+
+  /** GET /admin/v1/quota/consumption/projects — per-project cost across
+   *  day / week / month / quarter / semester / year (E-100-002 v7). Scoped by
+   *  the backend: platform_manager cross-tenant (optional `tenantId` filter);
+   *  admin / tenant_admin forced to its own tenant. */
+  async listProjectConsumption(tenantId?: string): Promise<ProjectConsumptionReport> {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<ProjectConsumptionReport>(`/admin/v1/quota/consumption/projects${q}`, {
+      method: "GET",
+    });
+  }
+
+  /** GET /admin/v1/quota/consumption/tenants — per-tenant cost across day..year
+   *  (platform_manager, cross-tenant). */
+  async listTenantConsumption(): Promise<ConsumptionReport> {
+    return this.request<ConsumptionReport>("/admin/v1/quota/consumption/tenants", {
+      method: "GET",
+    });
+  }
+
+  /** GET /admin/v1/quota/consumption/users — per-user cost across day..year.
+   *  Backend-scoped (admin own tenant; platform_manager all or `tenantId`). */
+  async listUserConsumption(tenantId?: string): Promise<UserConsumptionReport> {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<UserConsumptionReport>(`/admin/v1/quota/consumption/users${q}`, {
+      method: "GET",
+    });
+  }
+
+  /** GET /admin/v1/storage/projects — current disk occupation per project
+   *  (E-100-002 v7). Backend-scoped (admin = own tenant; platform_manager all
+   *  or `tenantId` filter). */
+  async listProjectStorage(tenantId?: string): Promise<ProjectStorageReport> {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request<ProjectStorageReport>(`/admin/v1/storage/projects${q}`, {
+      method: "GET",
+    });
+  }
+
+  /** GET /admin/v1/storage/tenants — current disk occupation per tenant (sum of
+   *  its projects). platform_manager only. */
+  async listTenantStorage(): Promise<TenantStorageReport> {
+    return this.request<TenantStorageReport>("/admin/v1/storage/tenants", {
+      method: "GET",
+    });
+  }
+
+  /** GET /admin/v1/storage/projects/{id}/series — a project's storage
+   *  time-series over `window` + its current occupation. `tenantId` is the
+   *  project's tenant (a tenant operator may only query its own). */
+  async getProjectStorageSeries(
+    projectId: string,
+    tenantId: string,
+    window = "month",
+  ): Promise<ProjectStorageSeries> {
+    const q = `?tenant_id=${encodeURIComponent(tenantId)}&window=${encodeURIComponent(window)}`;
+    return this.request<ProjectStorageSeries>(
+      `/admin/v1/storage/projects/${encodeURIComponent(projectId)}/series${q}`,
+      { method: "GET" },
+    );
+  }
+
+  /** POST /admin/v1/storage/snapshot — run a metering pass now (measure every
+   *  project + append one snapshot). platform_manager only; also driven by the
+   *  periodic CronJob. Returns how many snapshots were written. */
+  async triggerStorageSnapshot(): Promise<StorageSnapshotResult> {
+    return this.request<StorageSnapshotResult>("/admin/v1/storage/snapshot", {
+      method: "POST",
+    });
   }
 
   /** GET /api/v1/quota/me — the caller's OWN tenant quota status (any user). */

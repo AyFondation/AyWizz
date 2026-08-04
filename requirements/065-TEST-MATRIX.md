@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**144 endpoints** across 8 components. Order: by component, method, path.
+**152 endpoints** across 8 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -67,6 +67,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/admin/users` | role_gated | — | `platform_manager` | — | — | 200 |
 | `POST` | `/admin/users/{user_id}/deactivate` | role_gated | — | `platform_manager` | — | arango · `c2_users` | 200 |
 | `POST` | `/admin/users/{user_id}/reactivate` | role_gated | — | `platform_manager` | — | arango · `c2_users` | 200 |
+| `GET` | `/admin/users/{user_id}/projects` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/projects` | role_gated | — | `platform_manager` | — | — | 200 |
 | `POST` | `/admin/projects/{project_id}/activate` | role_gated | — | `platform_manager` | — | arango · `c2_projects` | 200 |
 | `POST` | `/admin/projects/{project_id}/deactivate` | role_gated | — | `platform_manager` | — | arango · `c2_projects` | 200 |
@@ -203,6 +204,13 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `PUT` | `/admin/v1/quota/policy` | role_gated | — | `platform_manager` | — | arango · `llm_quota_policy` | 200 |
 | `GET` | `/admin/v1/quota/status` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/quota/consumption` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/quota/consumption/projects` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/quota/consumption/tenants` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/quota/consumption/users` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/storage/projects` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/storage/tenants` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/storage/projects/{project_id}/series` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/storage/snapshot` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/api/v1/quota/me` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/llm/catalog` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/llm/catalog/available` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |

@@ -73,6 +73,16 @@ class _UsageStore:
     ) -> list[tuple[str, float, int]]:
         return []
 
+    async def consumption_by_project(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        return []
+
+    async def consumption_by_user(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        return []
+
 
 def _window(limits: dict[str, QuotaLimits]) -> QuotaWindow:
     # calendar_week → deterministic (no anchor) so usage is summed as-is.

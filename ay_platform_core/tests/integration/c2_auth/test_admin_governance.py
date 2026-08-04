@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_admin_governance.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/integration/c2_auth/test_admin_governance.py
 # Description: Integration tests for the TENANT operator role `admin`
 #              (= tenant_admin, E-100-002 v7) on the project governance surface.
@@ -179,6 +179,35 @@ async def test_admin_user_crud_is_tenant_isolated(
         assert r.status_code == 403, r.text
         r = await c.delete(f"/auth/users/{other.user_id}", headers=h)
         assert r.status_code == 403, r.text
+
+
+async def test_admin_sees_user_project_access(
+    local_app: httpx.ASGITransport, auth_service_local: AuthService
+) -> None:
+    """E-100-002 v7 reverse ACL view: an admin can list a tenant user's project
+    grants (project_id + role), scoped to its own tenant."""
+    token, dev_id = await _seed(auth_service_local)
+    # Grant the seeded member an editor role on the tenant's project.
+    await auth_service_local.grant_project_access(
+        "proj-acme", dev_id, RBACProjectRole.EDITOR, actor_id="system"
+    )
+    h = {"Authorization": f"Bearer {token}"}
+    async with _client(local_app) as c:
+        r = await c.get(f"/admin/users/{dev_id}/projects", headers=h)
+        assert r.status_code == 200, r.text
+        items = r.json()["items"]
+        assert [(i["project_id"], i["role"]) for i in items] == [
+            ("proj-acme", "project_editor")
+        ]
+
+        # A user in another tenant → 403 (scoped).
+        other = await auth_service_local.create_user(
+            UserCreateRequest(
+                username="dev-elsewhere", password="dev-pass-12!", tenant_id="t-other"
+            )
+        )
+        denied = await c.get(f"/admin/users/{other.user_id}/projects", headers=h)
+        assert denied.status_code == 403, denied.text
 
 
 async def test_admin_cannot_reach_platform_surface(

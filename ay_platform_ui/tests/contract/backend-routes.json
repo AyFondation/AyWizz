@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 144,
+  "route_count": 152,
   "routes": [
     {
       "method": "GET",
@@ -87,6 +87,12 @@
       "auth": "role_gated"
     },
     {
+      "method": "GET",
+      "path": "/admin/users/{user_id}/projects",
+      "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
       "method": "POST",
       "path": "/admin/users/{user_id}/reactivate",
       "component": "c2_auth",
@@ -154,6 +160,24 @@
     },
     {
       "method": "GET",
+      "path": "/admin/v1/quota/consumption/projects",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/quota/consumption/tenants",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/quota/consumption/users",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
       "path": "/admin/v1/quota/policy",
       "component": "c8_admin",
       "auth": "role_gated"
@@ -167,6 +191,30 @@
     {
       "method": "GET",
       "path": "/admin/v1/quota/status",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/storage/projects",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/storage/projects/{project_id}/series",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/storage/snapshot",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/storage/tenants",
       "component": "c8_admin",
       "auth": "role_gated"
     },

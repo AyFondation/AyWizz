@@ -1,11 +1,11 @@
 // =============================================================================
 // File: operator-projects.test.tsx
 // Path: ay_platform_ui/tests/integration/operator-projects.test.tsx
-// Description: Tests for the project governance console (platform operator,
-//              platform_manager — E-100-002 v4). Covers: forbidden for
-//              non-platform_manager; cross-tenant list with lifecycle status;
-//              deactivate / archive / activate; access-control list expand,
-//              grant, and revoke.
+// Description: Tests for the project governance console (operator — E-100-002
+//              v7). Covers: forbidden for a baseline user; cross-tenant list
+//              with lifecycle status; deactivate / archive / activate; ACL
+//              expand / grant / deactivate-access; per-project cost columns +
+//              6-window cost table (Inc B); disk-storage column + series (Inc C).
 // =============================================================================
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -37,6 +37,17 @@ vi.mock("@/app/providers", () => ({ useReadyConfig: () => READY_CONFIG }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 const PROJECTS_URL = "/admin/projects";
+const COST_URL = "/admin/v1/quota/consumption/projects";
+const STORAGE_URL = "/admin/v1/storage/projects";
+
+function emptyCost() {
+  return {
+    currency: "EUR",
+    windows: ["day", "week", "month", "quarter", "semester", "year"],
+    tenant_id: null,
+    projects: [],
+  };
+}
 
 function project(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -75,7 +86,30 @@ function renderPage() {
   );
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  // Default cost/storage handlers so reload() never hits an unhandled request.
+  // Tests that assert on cost/storage override these.
+  server.use(
+    http.get(COST_URL, () => HttpResponse.json(emptyCost())),
+    http.get(STORAGE_URL, () =>
+      HttpResponse.json({
+        tenant_id: null,
+        measured_at: "2026-07-29T00:00:00+00:00",
+        projects: [],
+      }),
+    ),
+    http.get(`${STORAGE_URL}/:pid/series`, () =>
+      HttpResponse.json({
+        project_id: "proj-alpha",
+        tenant_id: "t-acme",
+        window: "month",
+        current_bytes: 0,
+        points: [],
+      }),
+    ),
+  );
+});
 
 describe("ProjectsGovernancePage", () => {
   it("forbids a non-operator (baseline user)", async () => {
@@ -174,6 +208,71 @@ describe("ProjectsGovernancePage", () => {
 
     await user.click(screen.getByTestId("project-revoke-proj-alpha-u9"));
     await waitFor(() => expect(revoke).toHaveBeenCalled());
+  });
+
+  it("shows per-project cost columns and disk storage", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(PROJECTS_URL, () => HttpResponse.json({ items: [project()] })),
+      http.get(COST_URL, () =>
+        HttpResponse.json({
+          currency: "EUR",
+          windows: ["day", "week", "month", "quarter", "semester", "year"],
+          tenant_id: null,
+          projects: [
+            {
+              project_id: "proj-alpha",
+              windows: {
+                day: { cost: 1.5, tokens: 100 },
+                week: { cost: 4, tokens: 400 },
+                month: { cost: 12, tokens: 1200 },
+                quarter: { cost: 30, tokens: 3000 },
+                semester: { cost: 60, tokens: 6000 },
+                year: { cost: 120, tokens: 12000 },
+              },
+            },
+          ],
+        }),
+      ),
+      http.get(STORAGE_URL, () =>
+        HttpResponse.json({
+          tenant_id: null,
+          measured_at: "2026-07-29T00:00:00+00:00",
+          projects: [{ project_id: "proj-alpha", tenant_id: "t-acme", bytes: 2 * 1024 * 1024 }],
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("projects-table")).toBeInTheDocument());
+    // Day cost cell + storage cell in the list.
+    await waitFor(() =>
+      expect(screen.getByTestId("project-cost-day-proj-alpha")).toHaveTextContent("1.50 EUR"),
+    );
+    expect(screen.getByTestId("project-storage-proj-alpha")).toHaveTextContent("2.0 MB");
+  });
+
+  it("lets a platform_manager trigger a storage snapshot", async () => {
+    seedToken(["platform_manager"]);
+    const snap = vi.fn(() =>
+      HttpResponse.json({ snapshots_written: 2, measured_at: "2026-07-29T12:00:00+00:00" }),
+    );
+    server.use(
+      http.get(PROJECTS_URL, () => HttpResponse.json({ items: [project()] })),
+      http.post("/admin/v1/storage/snapshot", snap),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("projects-table")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("storage-snapshot-now"));
+    await waitFor(() => expect(snap).toHaveBeenCalled());
+    expect(screen.getByTestId("projects-notice")).toHaveTextContent("2 project(s) measured");
+  });
+
+  it("hides the storage snapshot trigger from a tenant admin", async () => {
+    seedToken(["admin"]);
+    server.use(http.get(PROJECTS_URL, () => HttpResponse.json({ items: [project()] })));
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("projects-table")).toBeInTheDocument());
+    expect(screen.queryByTestId("storage-snapshot-now")).not.toBeInTheDocument();
   });
 
   it("shows the project's per-window consumption on expand", async () => {

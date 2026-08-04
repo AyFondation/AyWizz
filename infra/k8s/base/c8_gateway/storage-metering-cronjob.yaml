@@ -1,0 +1,68 @@
+# =============================================================================
+# File: storage-metering-cronjob.yaml
+# Version: 1
+# Path: infra/k8s/base/c8_gateway/storage-metering-cronjob.yaml
+# Description: Periodic per-project disk-storage metering pass (E-100-002 v7).
+#              Runs the shared aywizz-api image with the storage snapshot
+#              entrypoint, measuring every project's MinIO occupation and
+#              appending one `storage_snapshots` row each. Out of band — talks to
+#              MinIO + Arango directly (no HTTP, no forward-auth), so it never
+#              depends on C1. Every 6h → the storage dashboards' day/week/month/
+#              quarter/semester/year series. Absent MinIO endpoint → no-op.
+# =============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: c8-storage-metering
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c8-storage-metering
+    app.kubernetes.io/component: c8
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: c8-storage-metering
+            app.kubernetes.io/component: c8
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: metering
+              image: ghcr.io/ayfondation/aywizz-api:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - -m
+                - ay_platform_core.c8_llm.storage.snapshot_job
+              env:
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+                - name: MINIO_ENDPOINT
+                  value: minio:9000
+                - name: MINIO_BUCKET
+                  value: orchestrator
+                - name: MINIO_SECURE
+                  value: "false"
+              envFrom:
+                # aywizz-config: ARANGO_URL / ARANGO_DB / ARANGO_USERNAME.
+                # aywizz-secrets: ARANGO_PASSWORD + MINIO_ACCESS_KEY/SECRET_KEY.
+                - configMapRef:
+                    name: aywizz-config
+                - secretRef:
+                    name: aywizz-secrets
+              resources:
+                limits:
+                  cpu: "300m"
+                  memory: "256Mi"
+                requests:
+                  cpu: "50m"
+                  memory: "96Mi"

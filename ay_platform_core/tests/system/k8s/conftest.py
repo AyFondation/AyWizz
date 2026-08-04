@@ -1,6 +1,6 @@
 # =============================================================================
 # File: conftest.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/k8s/conftest.py
 # Description: Fixtures for the `system_k8s` test tier. The tests verify
 #              that the platform's K8s manifests bring up a working
@@ -132,3 +132,8 @@ def k8s_base_url() -> Iterator[str]:
         except subprocess.TimeoutExpired:
             port_fwd.kill()
             port_fwd.wait(timeout=2)
+        # Close the stderr PIPE so its BufferedReader fd is released — an
+        # unclosed pipe raises a ResourceWarning that `filterwarnings = error`
+        # escalates to a teardown error.
+        if port_fwd.stderr is not None:
+            port_fwd.stderr.close()

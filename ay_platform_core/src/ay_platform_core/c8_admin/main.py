@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/main.py
 # Description: FastAPI app factory for the C8 admin tier (R-100-114). Hosts the
 #              platform LLM registry admin surface behind Traefik forward-auth.
@@ -39,6 +39,10 @@ from ay_platform_core.c8_llm.registry.repository import LLMRegistryRepository
 from ay_platform_core.c8_llm.registry.router import router as registry_router
 from ay_platform_core.c8_llm.registry.seed import seed_missing
 from ay_platform_core.c8_llm.registry.service import LLMRegistryService
+from ay_platform_core.c8_llm.storage.metering import StorageMeter
+from ay_platform_core.c8_llm.storage.repository import StorageSnapshotRepository
+from ay_platform_core.c8_llm.storage.router import router as storage_router
+from ay_platform_core.c8_llm.storage.service import StorageService
 from ay_platform_core.crypto.secret_cipher import SecretCipher, SecretCipherError
 from ay_platform_core.observability import (
     TraceContextMiddleware,
@@ -101,11 +105,30 @@ def create_app(
     catalog_service = TenantCatalogService(catalog_repo, service)
     quota_service = QuotaService(QuotaRepository(db))
 
+    # Storage metering (E-100-002 v7) — optional: only when a MinIO endpoint is
+    # configured. Absent → the storage endpoints answer 503, nothing else
+    # changes. Uses the same bucket + credentials as C4's artifact store.
+    storage_repo = StorageSnapshotRepository(db)
+    storage_service: StorageService | None = None
+    if cfg.minio_endpoint:
+        from minio import Minio  # noqa: PLC0415 — optional dependency, cold path
+
+        minio_client = Minio(
+            cfg.minio_endpoint,
+            access_key=cfg.minio_access_key,
+            secret_key=cfg.minio_secret_key,
+            secure=cfg.minio_secure,
+        )
+        storage_service = StorageService(
+            StorageMeter(minio_client, cfg.minio_bucket), storage_repo
+        )
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await repo.ensure_collections()
         await provider_repo.ensure_collections()
         await catalog_repo.ensure_collections()
+        await storage_repo.ensure_collections()
         if cfg.seed_on_start:
             litellm_cfg = _load_litellm_config(cfg.litellm_config_path)
             if litellm_cfg is not None:
@@ -123,10 +146,12 @@ def create_app(
     app.include_router(provider_router)
     app.include_router(catalog_router)
     app.include_router(quota_router)
+    app.include_router(storage_router)
     app.state.registry_service = service
     app.state.provider_service = provider_service
     app.state.catalog_service = catalog_service
     app.state.quota_service = quota_service
+    app.state.storage_service = storage_service
 
     @app.get("/health")
     async def health() -> dict[str, str]:

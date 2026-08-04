@@ -160,6 +160,74 @@ export interface ProjectMemberList {
   members: ProjectMember[];
 }
 
+/** Per-project LLM consumption across the project reporting windows
+ *  (day / week / month / quarter / semester / year). */
+export interface ProjectConsumption {
+  project_id: string;
+  windows: Record<string, ConsumptionCell>;
+}
+
+/** Response of `GET /admin/v1/quota/consumption/projects` — per-project cost
+ *  across day..year, scoped to a tenant (admin) or the platform (superuser). */
+export interface ProjectConsumptionReport {
+  currency: string;
+  windows: string[];
+  tenant_id: string | null;
+  projects: ProjectConsumption[];
+}
+
+/** Current disk occupation of one project (bytes), from the MinIO measure. */
+export interface ProjectStorage {
+  project_id: string;
+  tenant_id: string;
+  bytes: number;
+}
+
+/** Response of `GET /admin/v1/storage/projects` — current per-project disk
+ *  occupation, scoped to a tenant (admin) or the platform (superuser). */
+export interface ProjectStorageReport {
+  tenant_id: string | null;
+  measured_at: string;
+  projects: ProjectStorage[];
+}
+
+export interface StorageSeriesPoint {
+  measured_at: string;
+  bytes: number;
+}
+
+/** Result of `POST /admin/v1/storage/snapshot` — a metering pass. */
+export interface StorageSnapshotResult {
+  snapshots_written: number;
+  measured_at: string;
+}
+
+/** Response of `GET /admin/v1/storage/projects/{id}/series` — a project's
+ *  storage time-series over a window + its current occupation. */
+export interface ProjectStorageSeries {
+  project_id: string;
+  tenant_id: string;
+  window: string;
+  current_bytes: number;
+  points: StorageSeriesPoint[];
+}
+
+/** One project a user can access + the role granted there (reverse ACL view,
+ *  E-100-002 v7 user oversight). Metadata only, exposes NO content. */
+export interface UserProjectAccess {
+  project_id: string;
+  project_name: string;
+  tenant_id: string;
+  role: RBACProjectRole;
+}
+
+/** Response of `GET /admin/users/{uid}/projects` — every project a user can
+ *  access + the role on each. */
+export interface UserProjectAccessList {
+  user_id: string;
+  items: UserProjectAccess[];
+}
+
 /** Body of `PATCH /api/v1/projects/{pid}`. Per-field semantics :
  *  - omitted / `undefined`     → no change.
  *  - `null`                    → equivalent to omitted (server treats
@@ -633,6 +701,32 @@ export interface ConsumptionReport {
   currency: string;
   windows: string[];
   tenants: TenantConsumption[];
+}
+
+/** Per-user LLM consumption across day..year (E-100-002 v7 user cost view). */
+export interface UserConsumption {
+  user_id: string;
+  windows: Record<string, ConsumptionCell>;
+}
+
+/** Response of `GET /admin/v1/quota/consumption/users`. */
+export interface UserConsumptionReport {
+  currency: string;
+  windows: string[];
+  tenant_id: string | null;
+  users: UserConsumption[];
+}
+
+/** Current disk occupation of one tenant (sum of its projects), in bytes. */
+export interface TenantStorage {
+  tenant_id: string;
+  bytes: number;
+}
+
+/** Response of `GET /admin/v1/storage/tenants` — per-tenant disk occupation. */
+export interface TenantStorageReport {
+  measured_at: string;
+  tenants: TenantStorage[];
 }
 
 // ===========================================================================

@@ -1,9 +1,10 @@
 // =============================================================================
 // File: operator-users.test.tsx
 // Path: ay_platform_ui/tests/integration/operator-users.test.tsx
-// Description: Tests for the cross-tenant user oversight page (platform
-//              operator, platform_manager). Covers: forbidden; cross-tenant
-//              list; tenant filter; deactivate; reactivate.
+// Description: Tests for the user oversight page. Covers: forbidden (baseline
+//              user); platform_manager cross-tenant list + tenant filter +
+//              deactivate; admin tenant-scoped chrome (no filter, tenant title);
+//              per-user project-access expand (E-100-002 v7).
 // =============================================================================
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -35,6 +36,7 @@ vi.mock("@/app/providers", () => ({ useReadyConfig: () => READY_CONFIG }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 const USERS_URL = "/admin/users";
+const UCOST_URL = "/admin/v1/quota/consumption/users";
 
 function user_(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -72,7 +74,20 @@ function renderPage() {
   );
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  // Default per-user cost handler so reload() never hits an unhandled request.
+  server.use(
+    http.get(UCOST_URL, () =>
+      HttpResponse.json({
+        currency: "EUR",
+        windows: ["day", "week", "month", "quarter", "semester", "year"],
+        tenant_id: null,
+        users: [],
+      }),
+    ),
+  );
+});
 
 describe("UsersAdminPage", () => {
   it("forbids a non-operator (baseline user)", async () => {
@@ -114,6 +129,75 @@ describe("UsersAdminPage", () => {
     await user.type(screen.getByTestId("users-filter-input"), "tenant-b");
     await user.click(screen.getByTestId("users-filter-apply"));
     await waitFor(() => expect(screen.getByTestId("user-row-u-b")).toBeInTheDocument());
+  });
+
+  it("shows tenant-scoped chrome (no filter) for a tenant admin", async () => {
+    seedToken(["admin"]); // tenant_id = t-platform (from seedToken)
+    server.use(http.get(USERS_URL, () => HttpResponse.json({ items: [user_()] })));
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("users-table")).toBeInTheDocument());
+    // No cross-tenant filter for a tenant-scoped operator.
+    expect(screen.queryByTestId("users-filter")).not.toBeInTheDocument();
+    expect(screen.getByText(/Users — t-platform/)).toBeInTheDocument();
+  });
+
+  it("shows per-user LLM cost", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(USERS_URL, () => HttpResponse.json({ items: [user_()] })),
+      http.get(UCOST_URL, () =>
+        HttpResponse.json({
+          currency: "EUR",
+          windows: ["day", "week", "month", "quarter", "semester", "year"],
+          tenant_id: null,
+          users: [
+            {
+              user_id: "u-a",
+              windows: {
+                day: { cost: 0.75, tokens: 70 },
+                week: { cost: 2, tokens: 200 },
+                month: { cost: 8, tokens: 800 },
+                quarter: { cost: 0, tokens: 0 },
+                semester: { cost: 0, tokens: 0 },
+                year: { cost: 0, tokens: 0 },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("users-table")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("user-cost-day-u-a")).toHaveTextContent("0.75 EUR"),
+    );
+  });
+
+  it("expands a user's project access", async () => {
+    seedToken(["admin"]);
+    server.use(
+      http.get(USERS_URL, () => HttpResponse.json({ items: [user_()] })),
+      http.get(`${USERS_URL}/u-a/projects`, () =>
+        HttpResponse.json({
+          user_id: "u-a",
+          items: [
+            {
+              project_id: "proj-1",
+              project_name: "Proj One",
+              tenant_id: "tenant-a",
+              role: "project_editor",
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("users-table")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("user-access-toggle-u-a"));
+    await waitFor(() =>
+      expect(screen.getByTestId("user-access-u-a")).toHaveTextContent("Proj One"),
+    );
+    expect(screen.getByTestId("user-access-u-a")).toHaveTextContent("editor");
   });
 
   it("deactivates then reactivates a user", async () => {

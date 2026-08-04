@@ -1,6 +1,6 @@
 # =============================================================================
 # File: containers.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/tests/fixtures/containers.py
 # Description: Testcontainers fixtures for ArangoDB, MinIO, and Ollama.
 #              Session-scoped by default; function-scoped variants available
@@ -30,9 +30,21 @@ import httpx
 import pytest
 from arango import ArangoClient  # type: ignore[attr-defined]
 from minio import Minio
-from testcontainers.arangodb import ArangoDbContainer
 from testcontainers.core.container import DockerContainer
-from testcontainers.minio import MinioContainer
+
+# testcontainers ≥ 4.9 moved the per-technology containers under
+# `testcontainers.community.*`; the old top-level modules still work but emit a
+# DeprecationWarning which our strict `filterwarnings = error` escalates to a
+# collection error. Prefer the new path, fall back to the old one so both the
+# pinned local version and the newer CI runner import cleanly.
+try:
+    from testcontainers.community.arangodb import ArangoDbContainer
+except ImportError:  # pragma: no cover - version-dependent import
+    from testcontainers.arangodb import ArangoDbContainer
+try:
+    from testcontainers.community.minio import MinioContainer
+except ImportError:  # pragma: no cover - version-dependent import
+    from testcontainers.minio import MinioContainer
 
 ARANGO_IMAGE = "arangodb/arangodb:3.12"
 MINIO_IMAGE = "minio/minio:RELEASE.2025-01-20T14-49-07Z"

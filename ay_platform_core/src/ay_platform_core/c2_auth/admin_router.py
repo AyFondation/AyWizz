@@ -1,6 +1,6 @@
 # =============================================================================
 # File: admin_router.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/admin_router.py
 # Description: Platform-operator endpoints. Mounted under `/admin/*` by the C2
 #              app factory; gated by `platform_manager` (E-100-002 v3/v4,
@@ -38,6 +38,7 @@ from ay_platform_core.c2_auth.models import (
     TenantList,
     TenantPublic,
     UserList,
+    UserProjectAccessList,
     UserPublic,
 )
 from ay_platform_core.c2_auth.service import AuthService, get_service
@@ -236,6 +237,20 @@ async def reactivate_user(
 ) -> UserPublic:
     """Reactivate a user. platform_manager = any user; admin = own tenant only."""
     return await service.set_user_active(user_id, active=True)
+
+
+@router.get("/users/{user_id}/projects", response_model=UserProjectAccessList)
+async def list_user_projects(
+    user_id: str,
+    claims: JWTClaims = Depends(_require_user_operator),
+    service: AuthService = Depends(get_service),
+) -> UserProjectAccessList:
+    """The reverse ACL view — every project this user can access + the role on
+    each (E-100-002 v7 user oversight). platform_manager = any tenant; admin =
+    confined to its own tenant. Governance object; exposes NO project content."""
+    return await service.list_user_project_access(
+        user_id, tenant_scope=_operator_tenant_scope(claims)
+    )
 
 
 # ---------------------------------------------------------------------------

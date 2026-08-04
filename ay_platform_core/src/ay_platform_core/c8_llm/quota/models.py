@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 2
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/models.py
 # Description: Pydantic contracts for the LLM quota subsystem. v2 generalises the
 #              Lot 3 single-per-tenant policy into a FOUR-LEVEL model: every
@@ -223,3 +223,61 @@ class ConsumptionReport(BaseModel):
     currency: str
     windows: list[str]
     tenants: list[TenantConsumption]
+
+
+# Per-PROJECT reporting windows (E-100-002 v7 project cost dashboards). Same
+# calendar anchors as the tenant table, but `day` replaces `session` — projects
+# are reported by calendar day, not the enforcement session block.
+PROJECT_CONSUMPTION_WINDOWS: tuple[str, ...] = (
+    "day",
+    "week",
+    "month",
+    "quarter",
+    "semester",
+    "year",
+)
+
+
+class ProjectConsumption(BaseModel):
+    """Per-project LLM consumption across the project reporting windows. The
+    project's display name is resolved UI-side from the governance project list
+    (c8 only holds `tags.project_id`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str
+    windows: dict[str, ConsumptionCell]
+
+
+class ProjectConsumptionReport(BaseModel):
+    """Per-project LLM consumption across day / week / month / quarter /
+    semester / year. `tenant_id` is the scope: a concrete tenant for a tenant
+    operator (or a platform_manager filter), None for the whole platform."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str
+    windows: list[str]
+    tenant_id: str | None = None
+    projects: list[ProjectConsumption]
+
+
+class UserConsumption(BaseModel):
+    """Per-user LLM consumption across the project reporting windows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    windows: dict[str, ConsumptionCell]
+
+
+class UserConsumptionReport(BaseModel):
+    """Per-user LLM consumption across day..year. `tenant_id` is the scope
+    (a tenant operator's own tenant, or a platform_manager filter / None)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str
+    windows: list[str]
+    tenant_id: str | None = None
+    users: list[UserConsumption]

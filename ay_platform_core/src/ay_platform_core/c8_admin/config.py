@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/config.py
 # Description: Runtime settings for the C8 admin app. Shared infra params
 #              (Arango) are read un-prefixed via validation_alias like the
@@ -36,3 +36,19 @@ class C8AdminConfig(BaseSettings):
     # Whether to seed missing models from `litellm_config_path` on startup.
     # Idempotent; never clobbers existing rows/keys.
     seed_on_start: bool = True
+
+    # MinIO — for the per-project storage dashboards (E-100-002 v7). When
+    # `minio_endpoint` is blank the storage metering is DISABLED (the storage
+    # endpoints return 503); the rest of the admin surface is unaffected. Same
+    # bucket + credentials as C4's artifact store.
+    minio_endpoint: str = Field(default="", validation_alias="MINIO_ENDPOINT")
+    minio_access_key: str = Field(
+        default="minioadmin", validation_alias="MINIO_ACCESS_KEY"
+    )
+    minio_secret_key: str = Field(
+        default="minioadmin", validation_alias="MINIO_SECRET_KEY"
+    )
+    minio_secure: bool = Field(default=False, validation_alias="MINIO_SECURE")
+    minio_bucket: str = Field(
+        default="orchestrator", validation_alias="MINIO_BUCKET"
+    )

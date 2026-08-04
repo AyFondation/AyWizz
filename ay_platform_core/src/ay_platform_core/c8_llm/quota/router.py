@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py
 # Description: FastAPI APIRouter for the global LLM quota policy (Lot 3),
 #              platform_manager only (E-100-002 v3 platform operator). Identity
@@ -8,6 +8,9 @@
 #              X-User-Roles), same pattern as the registry surface. Exposes
 #              GET/PUT of the single global policy and a per-tenant status
 #              read for the oversight HMI. Mounted by the c8_admin app factory.
+#              v3 (E-100-002 v7): adds GET /admin/v1/quota/consumption/projects
+#              — per-project cost across day..year, an OPERATOR surface
+#              (platform_manager cross-tenant; admin/tenant_admin own tenant).
 # =============================================================================
 
 from __future__ import annotations
@@ -16,15 +19,20 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from ay_platform_core.c8_llm.quota.models import (
     ConsumptionReport,
+    ProjectConsumptionReport,
     QuotaPolicy,
     QuotaPolicyUpdate,
     QuotaStatus,
+    UserConsumptionReport,
 )
 from ay_platform_core.c8_llm.quota.service import QuotaService
 
 router = APIRouter(tags=["llm-quota"])
 
 _QUOTA_ROLES: tuple[str, ...] = ("platform_manager",)
+# Project cost reporting is an OPERATOR surface: platform_manager (cross-tenant)
+# OR the tenant operator admin/tenant_admin (own tenant only, E-100-002 v7).
+_QUOTA_OPERATOR_ROLES: tuple[str, ...] = ("platform_manager", "admin", "tenant_admin")
 
 
 def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
@@ -43,6 +51,23 @@ def _require_role(x_user_roles: str | None, required: tuple[str, ...]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"requires one of: {', '.join(required)}",
         )
+
+
+def _operator_tenant_scope(
+    x_user_roles: str | None, x_tenant_id: str | None, query_tenant_id: str | None
+) -> str | None:
+    """The tenant a project-cost report is confined to. platform_manager is
+    cross-tenant (uses the optional `?tenant_id=` filter, else all); a tenant
+    operator is FORCED to its own `X-Tenant-Id` (401 if absent)."""
+    roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    if "platform_manager" in roles:
+        return query_tenant_id
+    if not x_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-Tenant-Id header missing for a tenant-scoped operator",
+        )
+    return x_tenant_id
 
 
 def get_quota_service(request: Request) -> QuotaService:
@@ -106,6 +131,58 @@ async def get_consumption(
     untouched. Amounts are in the platform currency."""
     _require_role(x_user_roles, _QUOTA_ROLES)
     return await service.consumption_report()
+
+
+@router.get(
+    "/admin/v1/quota/consumption/projects",
+    response_model=ProjectConsumptionReport,
+)
+async def get_project_consumption(
+    tenant_id: str | None = None,
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    x_tenant_id: str | None = Header(default=None),
+    service: QuotaService = Depends(get_quota_service),
+) -> ProjectConsumptionReport:
+    """Per-project LLM cost across day / week / month / quarter / semester /
+    year (E-100-002 v7 project cost dashboards). platform_manager sees ALL
+    tenants (optional `?tenant_id=` filter); admin / tenant_admin is confined to
+    its own tenant (`X-Tenant-Id`). Reporting only."""
+    _require_role(x_user_roles, _QUOTA_OPERATOR_ROLES)
+    scope = _operator_tenant_scope(x_user_roles, x_tenant_id, tenant_id)
+    return await service.project_consumption_report(tenant_id=scope)
+
+
+@router.get(
+    "/admin/v1/quota/consumption/tenants", response_model=ConsumptionReport
+)
+async def get_tenant_consumption_days(
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    service: QuotaService = Depends(get_quota_service),
+) -> ConsumptionReport:
+    """Per-tenant LLM cost across day..year (E-100-002 v7 tenant cost
+    dashboards). platform_manager only (tenants are platform-wide)."""
+    _require_role(x_user_roles, _QUOTA_ROLES)
+    return await service.tenant_consumption_report_days()
+
+
+@router.get(
+    "/admin/v1/quota/consumption/users", response_model=UserConsumptionReport
+)
+async def get_user_consumption(
+    tenant_id: str | None = None,
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    x_tenant_id: str | None = Header(default=None),
+    service: QuotaService = Depends(get_quota_service),
+) -> UserConsumptionReport:
+    """Per-user LLM cost across day..year (E-100-002 v7 user cost dashboards).
+    platform_manager sees ALL tenants (optional `?tenant_id=`); admin /
+    tenant_admin is confined to its own tenant (`X-Tenant-Id`)."""
+    _require_role(x_user_roles, _QUOTA_OPERATOR_ROLES)
+    scope = _operator_tenant_scope(x_user_roles, x_tenant_id, tenant_id)
+    return await service.user_consumption_report(tenant_id=scope)
 
 
 @router.get("/api/v1/quota/me", response_model=QuotaStatus)

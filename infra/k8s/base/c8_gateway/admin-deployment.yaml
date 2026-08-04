@@ -1,6 +1,6 @@
 # =============================================================================
 # File: admin-deployment.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c8_gateway/admin-deployment.yaml
 # Description: C8 admin app Deployment (LLM-governance: platform registry +
 #              tenant catalogue + model-quality resolver). Shared `aywizz-api`
@@ -49,6 +49,17 @@ spec:
               value: c8_admin
             - name: PYTHONUNBUFFERED
               value: "1"
+            # MinIO — enables the per-project storage dashboards (E-100-002 v7).
+            # Credentials (MINIO_ACCESS_KEY / MINIO_SECRET_KEY) come from
+            # aywizz-secrets via envFrom; only the endpoint + bucket are set
+            # here (same artifact store as C4). Absent endpoint → storage
+            # metering disabled (endpoints answer 503), nothing else changes.
+            - name: MINIO_ENDPOINT
+              value: minio:9000
+            - name: MINIO_BUCKET
+              value: orchestrator
+            - name: MINIO_SECURE
+              value: "false"
           envFrom:
             - configMapRef:
                 name: aywizz-config

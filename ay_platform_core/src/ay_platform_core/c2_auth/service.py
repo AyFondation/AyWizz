@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/service.py
 # Description: C2 Auth Service facade. Orchestrates pluggable auth modes,
 #              JWT issuance/verification, and user management.
@@ -58,6 +58,8 @@ from ay_platform_core.c2_auth.models import (
     UserInternal,
     UserPreferencesResponse,
     UserPreferencesUpdate,
+    UserProjectAccess,
+    UserProjectAccessList,
     UserPublic,
     UserStatus,
     UserUpdateRequest,
@@ -575,6 +577,34 @@ class AuthService:
         return ProjectMemberList(
             project_id=project_id, tenant_id=doc["tenant_id"], members=members
         )
+
+    async def list_user_project_access(
+        self, user_id: str, tenant_scope: str | None = None
+    ) -> UserProjectAccessList:
+        """The reverse ACL view: every project `user_id` can access + the role
+        on each (E-100-002 v7 user oversight). Joined with the project's name /
+        tenant for display. When `tenant_scope` is given (a tenant operator),
+        only projects in that tenant are returned (defence in depth — a user's
+        grants are same-tenant by construction, but we filter regardless)."""
+        repo = self._require_repo()
+        scopes = await repo.get_project_scopes(user_id)  # {project_id: [role]}
+        items: list[UserProjectAccess] = []
+        for project_id, roles in scopes.items():
+            doc = await repo.get_project(project_id)
+            project_tenant = doc["tenant_id"] if doc else ""
+            if tenant_scope is not None and project_tenant != tenant_scope:
+                continue
+            for role in roles:
+                items.append(
+                    UserProjectAccess(
+                        project_id=project_id,
+                        project_name=(doc.get("name") if doc else "") or "",
+                        tenant_id=project_tenant,
+                        role=RBACProjectRole(role),
+                    )
+                )
+        items.sort(key=lambda a: (a.project_id, a.role.value))
+        return UserProjectAccessList(user_id=user_id, items=items)
 
     async def grant_project_access(
         self,

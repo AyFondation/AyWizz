@@ -36,6 +36,8 @@ vi.mock("@/app/providers", () => ({ useReadyConfig: () => READY_CONFIG }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 const TENANTS_URL = "/admin/tenants";
+const TCOST_URL = "/admin/v1/quota/consumption/tenants";
+const TSTORAGE_URL = "/admin/v1/storage/tenants";
 
 function tenant(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -69,7 +71,21 @@ function renderPage() {
   );
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  server.use(
+    http.get(TCOST_URL, () =>
+      HttpResponse.json({
+        currency: "EUR",
+        windows: ["day", "week", "month", "quarter", "semester", "year"],
+        tenants: [],
+      }),
+    ),
+    http.get(TSTORAGE_URL, () =>
+      HttpResponse.json({ measured_at: "2026-07-29T00:00:00+00:00", tenants: [] }),
+    ),
+  );
+});
 
 describe("TenantsAdminPage", () => {
   it("forbids a non-platform_manager", async () => {
@@ -89,6 +105,44 @@ describe("TenantsAdminPage", () => {
     await waitFor(() => expect(screen.getByTestId("tenants-table")).toBeInTheDocument());
     expect(screen.getByTestId("tenant-status-acme")).toHaveTextContent("active");
     expect(screen.getByTestId("tenant-status-off")).toHaveTextContent("deactivated");
+  });
+
+  it("shows per-tenant cost and storage", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(TENANTS_URL, () => HttpResponse.json({ items: [tenant()] })),
+      http.get(TCOST_URL, () =>
+        HttpResponse.json({
+          currency: "EUR",
+          windows: ["day", "week", "month", "quarter", "semester", "year"],
+          tenants: [
+            {
+              tenant_id: "acme",
+              windows: {
+                day: { cost: 3.25, tokens: 300 },
+                week: { cost: 9, tokens: 900 },
+                month: { cost: 20, tokens: 2000 },
+                quarter: { cost: 0, tokens: 0 },
+                semester: { cost: 0, tokens: 0 },
+                year: { cost: 0, tokens: 0 },
+              },
+            },
+          ],
+        }),
+      ),
+      http.get(TSTORAGE_URL, () =>
+        HttpResponse.json({
+          measured_at: "2026-07-29T00:00:00+00:00",
+          tenants: [{ tenant_id: "acme", bytes: 5 * 1024 * 1024 }],
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("tenants-table")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("tenant-cost-day-acme")).toHaveTextContent("3.25 EUR"),
+    );
+    expect(screen.getByTestId("tenant-storage-acme")).toHaveTextContent("5.0 MB");
   });
 
   it("creates a tenant", async () => {

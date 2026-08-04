@@ -1,13 +1,13 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 6
 // Path: ay_platform_ui/app/(protected)/operator/projects/page.tsx
-// Description: Project governance console (platform operator, platform_manager —
-//              E-100-002 v4). Cross-tenant, metadata-only: list every project,
-//              manage its lifecycle status (activate / deactivate / archive),
-//              and read + edit its access-control list (grant / revoke a
-//              project role). Exposes NO project CONTENT — content-blind by
-//              construction (the operator has no content endpoints).
+// Description: Project governance console (operator — E-100-002 v7).
+//              platform_manager cross-tenant; admin/tenant_admin own tenant
+//              (backend-scoped). Metadata-only: list projects, manage lifecycle
+//              status, read + edit the ACL (grant / deactivate access), and see
+//              per-project LLM COST across day..year (v7 cost dashboards, from
+//              c8 quota). Exposes NO project CONTENT — content-blind.
 // =============================================================================
 
 "use client";
@@ -17,12 +17,36 @@ import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type {
+  ConsumptionCell,
   Project,
   ProjectMember,
   ProjectStatus,
+  ProjectStorageSeries,
   QuotaWindowStatus,
   RBACProjectRole,
 } from "@/lib/types";
+
+function fmtBytes(n: number | undefined): string {
+  const b = n ?? 0;
+  if (b < 1024) return `${b} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = b / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+const COST_WINDOWS: { key: string; label: string }[] = [
+  { key: "day", label: "Today" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "quarter", label: "Quarter" },
+  { key: "semester", label: "Semester" },
+  { key: "year", label: "Year" },
+];
 
 const STATUS_COLOR: Record<ProjectStatus, string> = {
   active: "text-emerald-700",
@@ -43,8 +67,17 @@ export default function ProjectsGovernancePage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [members, setMembers] = useState<Record<string, ProjectMember[]>>({});
   const [consumption, setConsumption] = useState<Record<string, QuotaWindowStatus[]>>({});
+  const [cost, setCost] = useState<Record<string, Record<string, ConsumptionCell>>>({});
+  const [currency, setCurrency] = useState("EUR");
+  const [storage, setStorage] = useState<Record<string, number>>({});
+  const [series, setSeries] = useState<Record<string, ProjectStorageSeries>>({});
   const [grantUser, setGrantUser] = useState("");
   const [grantRole, setGrantRole] = useState<RBACProjectRole>("project_editor");
+
+  const money = useCallback(
+    (n: number | undefined) => `${(n ?? 0).toFixed(2)} ${currency}`,
+    [currency],
+  );
 
   // Operator gate (E-100-002 v7): platform_manager (cross-tenant) OR the
   // tenant operator admin/tenant_admin (backend scopes results + actions to
@@ -59,6 +92,12 @@ export default function ProjectsGovernancePage() {
     );
   }, [authState]);
 
+  // The storage metering trigger is platform_manager-only (mirrors the CronJob).
+  const isPlatformManager = useMemo(() => {
+    if (authState.status !== "authenticated") return false;
+    return (authState.claims.roles ?? []).includes("platform_manager");
+  }, [authState]);
+
   const reload = useCallback(() => {
     apiClient
       .listAllProjects()
@@ -66,6 +105,23 @@ export default function ProjectsGovernancePage() {
       .catch((err) =>
         setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
       );
+    // Per-project cost (day..year) — backend scopes to the caller's tenant
+    // (admin) or the whole platform (platform_manager).
+    apiClient
+      .listProjectConsumption()
+      .then((rep) => {
+        setCurrency(rep.currency);
+        setCost(Object.fromEntries(rep.projects.map((p) => [p.project_id, p.windows])));
+      })
+      .catch(() => setCost({}));
+    // Current per-project disk occupation (v7). 503 when metering is
+    // unconfigured — degrade quietly to "—".
+    apiClient
+      .listProjectStorage()
+      .then((rep) =>
+        setStorage(Object.fromEntries(rep.projects.map((p) => [p.project_id, p.bytes]))),
+      )
+      .catch(() => setStorage({}));
   }, [apiClient]);
 
   useEffect(() => {
@@ -86,6 +142,18 @@ export default function ProjectsGovernancePage() {
     },
     [reload],
   );
+
+  const snapshotNow = useCallback(async () => {
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await apiClient.triggerStorageSnapshot();
+      setNotice(`Storage snapshot: ${r.snapshots_written} project(s) measured.`);
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? `Snapshot failed (${err.status})` : "Snapshot failed.");
+    }
+  }, [apiClient, reload]);
 
   const loadMembers = useCallback(
     (projectId: string) => {
@@ -121,6 +189,16 @@ export default function ProjectsGovernancePage() {
     [apiClient],
   );
 
+  const loadSeries = useCallback(
+    (projectId: string, tenantId: string) => {
+      apiClient
+        .getProjectStorageSeries(projectId, tenantId, "month")
+        .then((s) => setSeries((m) => ({ ...m, [projectId]: s })))
+        .catch(() => {});
+    },
+    [apiClient],
+  );
+
   const toggleMembers = useCallback(
     (p: Project) => {
       setExpanded((cur) => {
@@ -128,13 +206,14 @@ export default function ProjectsGovernancePage() {
         if (next) {
           if (!members[next]) loadMembers(next);
           if (!consumption[next]) loadConsumption(next, p.tenant_id);
+          if (!series[next]) loadSeries(next, p.tenant_id);
         }
         return next;
       });
       setGrantUser("");
       setGrantRole("project_editor");
     },
-    [members, consumption, loadMembers, loadConsumption],
+    [members, consumption, series, loadMembers, loadConsumption, loadSeries],
   );
 
   const grant = useCallback(
@@ -177,7 +256,7 @@ export default function ProjectsGovernancePage() {
           className="rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
           data-testid="projects-forbidden"
         >
-          Project governance is restricted to platform operators (platform_manager).
+          Project governance is restricted to operators (platform_manager or admin).
         </p>
       </main>
     );
@@ -187,9 +266,22 @@ export default function ProjectsGovernancePage() {
     <main className="mx-auto max-w-5xl px-6 py-10" data-testid="projects-admin">
       <h2 className="text-lg font-semibold text-neutral-800">Projects</h2>
       <p className="mt-2 text-sm text-neutral-600">
-        Every project across all tenants. Deactivating or archiving a project blocks its members
-        from its content — governance only, no content is shown here.
+        Projects you govern (all tenants for a platform operator; your tenant for an admin).
+        Deactivating or archiving a project blocks its members from its content, and each row shows
+        the project&apos;s LLM cost — governance only, no content is shown here.
       </p>
+
+      {isPlatformManager && (
+        <button
+          type="button"
+          onClick={snapshotNow}
+          className="mt-3 rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+          data-testid="storage-snapshot-now"
+          title="Measure every project's disk usage now and record a storage snapshot (also runs periodically)."
+        >
+          Snapshot storage now
+        </button>
+      )}
 
       {error && (
         <p className="mt-3 text-sm text-red-700" role="alert" data-testid="projects-error">
@@ -211,6 +303,18 @@ export default function ProjectsGovernancePage() {
               <th className="px-3 py-2">Project</th>
               <th className="px-3 py-2">Tenant</th>
               <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2" title="LLM cost today">
+                Today
+              </th>
+              <th className="px-3 py-2" title="LLM cost this week">
+                Week
+              </th>
+              <th className="px-3 py-2" title="LLM cost this month">
+                Month
+              </th>
+              <th className="px-3 py-2" title="Current disk usage (artifacts)">
+                Storage
+              </th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -233,6 +337,24 @@ export default function ProjectsGovernancePage() {
                     >
                       {p.status}
                     </span>
+                  </td>
+                  <td
+                    className="px-3 py-2 text-neutral-700"
+                    data-testid={`project-cost-day-${p.project_id}`}
+                  >
+                    {money(cost[p.project_id]?.day?.cost)}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-700">
+                    {money(cost[p.project_id]?.week?.cost)}
+                  </td>
+                  <td className="px-3 py-2 text-neutral-700">
+                    {money(cost[p.project_id]?.month?.cost)}
+                  </td>
+                  <td
+                    className="px-3 py-2 text-neutral-700"
+                    data-testid={`project-storage-${p.project_id}`}
+                  >
+                    {p.project_id in storage ? fmtBytes(storage[p.project_id]) : "—"}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-2">
@@ -297,9 +419,60 @@ export default function ProjectsGovernancePage() {
                     className="border-b border-neutral-100 bg-neutral-50"
                     data-testid={`project-acl-${p.project_id}`}
                   >
-                    <td className="px-3 py-3" colSpan={4}>
+                    <td className="px-3 py-3" colSpan={8}>
                       <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                        Consumption
+                        Cost by period ({currency})
+                      </div>
+                      <table className="mt-1 text-sm" data-testid={`project-cost-${p.project_id}`}>
+                        <tbody>
+                          <tr>
+                            {COST_WINDOWS.map((w) => (
+                              <td key={w.key} className="pr-4 text-xs text-neutral-500">
+                                {w.label}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr>
+                            {COST_WINDOWS.map((w) => (
+                              <td key={w.key} className="pr-4 text-neutral-800">
+                                {money(cost[p.project_id]?.[w.key]?.cost)}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr>
+                            {COST_WINDOWS.map((w) => (
+                              <td key={w.key} className="pr-4 text-xs text-neutral-500">
+                                {(cost[p.project_id]?.[w.key]?.tokens ?? 0).toLocaleString()} tok
+                              </td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+
+                      <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                        Disk storage
+                      </div>
+                      {series[p.project_id] === undefined ? (
+                        <p className="mt-1 text-sm text-neutral-500">Loading storage…</p>
+                      ) : (
+                        <div
+                          className="mt-1 text-sm text-neutral-700"
+                          data-testid={`project-series-${p.project_id}`}
+                        >
+                          <span className="font-medium">
+                            {fmtBytes(series[p.project_id].current_bytes)}
+                          </span>{" "}
+                          <span className="text-xs text-neutral-500">
+                            now ·{" "}
+                            {series[p.project_id].points.length > 0
+                              ? `${series[p.project_id].points.length} snapshot(s) this month`
+                              : "no history yet (metering runs periodically)"}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                        Enforced quota windows
                       </div>
                       {consumption[p.project_id] === undefined ? (
                         <p className="mt-1 text-sm text-neutral-500">Loading consumption…</p>
@@ -349,8 +522,9 @@ export default function ProjectsGovernancePage() {
                                 onClick={() => revoke(p.project_id, m.user_id)}
                                 className="rounded border border-red-200 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50"
                                 data-testid={`project-revoke-${p.project_id}-${m.user_id}`}
+                                title="Remove this user's access. Re-grant below to reactivate."
                               >
-                                Revoke
+                                Deactivate access
                               </button>
                             </li>
                           ))}

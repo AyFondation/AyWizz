@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/models.py
 # Description: Pydantic v2 models for C2 Auth Service public contracts.
 #              JWTClaims implements E-100-001.
@@ -453,6 +453,24 @@ class ProjectMemberList(BaseModel):
     project_id: str
     tenant_id: str
     members: list[ProjectMember]
+
+
+class UserProjectAccess(BaseModel):
+    """One project a user can access, with the `project_*` role granted there
+    (E-100-002 v7 — the reverse view of the ACL, for user oversight). Metadata
+    only; exposes NO project content."""
+
+    project_id: str
+    project_name: str = ""
+    tenant_id: str = ""
+    role: RBACProjectRole
+
+
+class UserProjectAccessList(BaseModel):
+    """Every project a user can access + the role on each (governance object)."""
+
+    user_id: str
+    items: list[UserProjectAccess]
 
 
 class ProjectMemberGrant(BaseModel):

@@ -1,11 +1,13 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
-// Path: ay_platform_ui/app/(protected)/admin/tenants/page.tsx
+// Version: 2
+// Path: ay_platform_ui/app/(protected)/operator/tenants/page.tsx
 // Description: Tenant management console (platform operator, platform_manager —
 //              E-100-002 v3). List / create / delete tenants and
 //              deactivate / reactivate them (a deactivated tenant's members
-//              are refused login). No tenant CONTENT is exposed here.
+//              are refused login). v2 (E-100-002 v7): each tenant row shows its
+//              LLM cost (today/week/month) + current disk storage (sum of its
+//              projects). No tenant CONTENT is exposed here.
 // =============================================================================
 
 "use client";
@@ -14,7 +16,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { TenantPublic } from "@/lib/types";
+import type { ConsumptionCell, TenantPublic } from "@/lib/types";
+
+function fmtBytes(n: number | undefined): string {
+  const b = n ?? 0;
+  if (b < 1024) return `${b} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = b / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
 
 export default function TenantsAdminPage() {
   const cfg = useReadyConfig();
@@ -26,6 +41,14 @@ export default function TenantsAdminPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
+  const [cost, setCost] = useState<Record<string, Record<string, ConsumptionCell>>>({});
+  const [currency, setCurrency] = useState("EUR");
+  const [storage, setStorage] = useState<Record<string, number>>({});
+
+  const money = useCallback(
+    (n: number | undefined) => `${(n ?? 0).toFixed(2)} ${currency}`,
+    [currency],
+  );
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
@@ -39,6 +62,17 @@ export default function TenantsAdminPage() {
       .catch((err) =>
         setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
       );
+    apiClient
+      .listTenantConsumption()
+      .then((rep) => {
+        setCurrency(rep.currency);
+        setCost(Object.fromEntries(rep.tenants.map((t) => [t.tenant_id, t.windows])));
+      })
+      .catch(() => setCost({}));
+    apiClient
+      .listTenantStorage()
+      .then((rep) => setStorage(Object.fromEntries(rep.tenants.map((t) => [t.tenant_id, t.bytes]))))
+      .catch(() => setStorage({}));
   }, [apiClient]);
 
   useEffect(() => {
@@ -136,6 +170,18 @@ export default function TenantsAdminPage() {
             <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
               <th className="px-3 py-2">Tenant</th>
               <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2" title="LLM cost today">
+                Today
+              </th>
+              <th className="px-3 py-2" title="LLM cost this week">
+                Week
+              </th>
+              <th className="px-3 py-2" title="LLM cost this month">
+                Month
+              </th>
+              <th className="px-3 py-2" title="Current disk usage (all projects)">
+                Storage
+              </th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -157,6 +203,24 @@ export default function TenantsAdminPage() {
                   >
                     {t.active ? "active" : "deactivated"}
                   </span>
+                </td>
+                <td
+                  className="px-3 py-2 text-neutral-700"
+                  data-testid={`tenant-cost-day-${t.tenant_id}`}
+                >
+                  {money(cost[t.tenant_id]?.day?.cost)}
+                </td>
+                <td className="px-3 py-2 text-neutral-700">
+                  {money(cost[t.tenant_id]?.week?.cost)}
+                </td>
+                <td className="px-3 py-2 text-neutral-700">
+                  {money(cost[t.tenant_id]?.month?.cost)}
+                </td>
+                <td
+                  className="px-3 py-2 text-neutral-700"
+                  data-testid={`tenant-storage-${t.tenant_id}`}
+                >
+                  {t.tenant_id in storage ? fmtBytes(storage[t.tenant_id]) : "—"}
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">

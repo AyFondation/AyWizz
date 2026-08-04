@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c8_gateway/kustomization.yaml
 # Description: Kustomize entry for the C8 tier : the off-the-shelf LiteLLM
 #              proxy + the AyWizz cost receiver, plus the two generated
@@ -20,3 +20,4 @@ resources:
   - receiver-service.yaml
   - admin-deployment.yaml
   - admin-service.yaml
+  - storage-metering-cronjob.yaml

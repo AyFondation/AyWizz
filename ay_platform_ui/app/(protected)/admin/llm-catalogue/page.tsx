@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/admin/llm-catalogue/page.tsx
 // Description: Per-tenant LLM catalogue admin surface (LLM-governance HMI,
 //              admin / tenant_admin). Curates which platform-registry models
@@ -120,6 +120,11 @@ export default function LlmCataloguePage() {
         remove the ones you don't want, and re-add them from the picker. Keys stay on the platform —
         none are handled here.
       </p>
+      <p className="mt-1 text-xs text-neutral-500">
+        <span className="font-medium">Markup %</span> is an optional chargeback surcharge your
+        tenant adds on top of the provider cost when billing this model internally — it does not
+        change what is paid to the provider.
+      </p>
 
       {error && (
         <p className="mt-3 text-sm text-red-700" role="alert" data-testid="catalogue-error">
@@ -180,7 +185,12 @@ export default function LlmCataloguePage() {
               <th className="px-3 py-2" title="Auto-added to new projects">
                 Default for new projects
               </th>
-              <th className="px-3 py-2">Markup %</th>
+              <th
+                className="px-3 py-2"
+                title="Chargeback markup — a % your tenant adds on top of the provider cost when billing this model to your projects/teams (internal accounting only; it does NOT change what is paid to the provider). Blank = no markup."
+              >
+                Markup %
+              </th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_quota.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/unit/c8_llm/test_quota.py
 # Description: Unit tests for the FOUR-LEVEL LLM quota subsystem: the clamping
 #              validator (user <= project <= tenant <= global), per-subject
@@ -35,11 +35,20 @@ class _FakeStore:
         self,
         usage: dict[_Subject, tuple[float, int]] | None = None,
         oldest: dict[_Subject, str] | None = None,
+        project_rows: list[tuple[str, float, int]] | None = None,
     ) -> None:
         self.policy_doc: dict[str, Any] | None = None
         self.usage = usage or {}
         self.oldest = oldest or {}
         self.anchors: dict[str, str] = {}
+        # Returned verbatim by consumption_by_project for every window.
+        self.project_rows = project_rows or []
+        self.project_scope_calls: list[str | None] = []
+        # Returned verbatim by consumption_by_user for every window.
+        self.user_rows: list[tuple[str, float, int]] = []
+        self.user_scope_calls: list[str | None] = []
+        # Returned verbatim by consumption_by_tenant for every window.
+        self.tenant_rows: list[tuple[str, float, int]] = []
 
     async def get_policy(self) -> dict[str, Any] | None:
         return self.policy_doc
@@ -68,7 +77,19 @@ class _FakeStore:
     async def consumption_by_tenant(
         self, since_iso: str
     ) -> list[tuple[str, float, int]]:
-        return []
+        return self.tenant_rows
+
+    async def consumption_by_project(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        self.project_scope_calls.append(tenant_id)
+        return self.project_rows
+
+    async def consumption_by_user(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        self.user_scope_calls.append(tenant_id)
+        return self.user_rows
 
 
 def _svc(store: _FakeStore) -> QuotaService:
@@ -345,5 +366,56 @@ async def test_guard_is_best_effort_on_eval_error() -> None:
         ) -> list[tuple[str, float, int]]:
             return []
 
+        async def consumption_by_project(
+            self, since_iso: str, tenant_id: str | None = None
+        ) -> list[tuple[str, float, int]]:
+            return []
+
+        async def consumption_by_user(
+            self, since_iso: str, tenant_id: str | None = None
+        ) -> list[tuple[str, float, int]]:
+            return []
+
     guard = QuotaGuard(QuotaService(_Boom(), clock=lambda: _NOW))
     await guard("t1", user_id="u1")  # swallowed — never breaks an LLM call
+
+
+async def test_project_consumption_report_windows_and_scope() -> None:
+    store = _FakeStore(project_rows=[("proj-1", 2.5, 1000), ("proj-2", 0.5, 200)])
+    report = await _svc(store).project_consumption_report(tenant_id="t-acme")
+    assert report.tenant_id == "t-acme"
+    assert report.windows == ["day", "week", "month", "quarter", "semester", "year"]
+    assert {p.project_id for p in report.projects} == {"proj-1", "proj-2"}
+    p1 = next(p for p in report.projects if p.project_id == "proj-1")
+    assert p1.windows["day"].cost == 2.5
+    assert p1.windows["year"].tokens == 1000
+    assert set(p1.windows) == {"day", "week", "month", "quarter", "semester", "year"}
+    # The tenant scope is forwarded to the store for EVERY window (6 calls).
+    assert store.project_scope_calls == ["t-acme"] * 6
+
+
+async def test_project_consumption_report_platform_wide_scope_is_none() -> None:
+    store = _FakeStore(project_rows=[("proj-1", 1.0, 10)])
+    report = await _svc(store).project_consumption_report(tenant_id=None)
+    assert report.tenant_id is None
+    assert store.project_scope_calls == [None] * 6
+
+
+async def test_tenant_consumption_report_days_windows() -> None:
+    store = _FakeStore()
+    store.tenant_rows = [("t-a", 3.0, 30), ("t-b", 1.0, 10)]
+    report = await _svc(store).tenant_consumption_report_days()
+    assert report.windows == ["day", "week", "month", "quarter", "semester", "year"]
+    assert {t.tenant_id for t in report.tenants} == {"t-a", "t-b"}
+    ta = next(t for t in report.tenants if t.tenant_id == "t-a")
+    assert ta.windows["day"].cost == 3.0
+
+
+async def test_user_consumption_report_scoped() -> None:
+    store = _FakeStore()
+    store.user_rows = [("u-1", 2.0, 20)]
+    report = await _svc(store).user_consumption_report(tenant_id="t-acme")
+    assert report.tenant_id == "t-acme"
+    assert [u.user_id for u in report.users] == ["u-1"]
+    assert report.users[0].windows["year"].tokens == 20
+    assert store.user_scope_calls == ["t-acme"] * 6

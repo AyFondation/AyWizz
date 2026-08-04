@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 2
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py
 # Description: QuotaService — the global LLM quota policy + FOUR-LEVEL per-subject
 #              evaluation. For a call attributed to (tenant, project, user) it
@@ -22,8 +22,11 @@ from pydantic import ValidationError
 from ay_platform_core.c8_llm.quota.models import (
     CONSUMPTION_WINDOWS,
     LEVELS_WIDE_TO_NARROW,
+    PROJECT_CONSUMPTION_WINDOWS,
     ConsumptionCell,
     ConsumptionReport,
+    ProjectConsumption,
+    ProjectConsumptionReport,
     QuotaLevel,
     QuotaLevelStatus,
     QuotaLimits,
@@ -33,6 +36,8 @@ from ay_platform_core.c8_llm.quota.models import (
     QuotaWindow,
     QuotaWindowStatus,
     TenantConsumption,
+    UserConsumption,
+    UserConsumptionReport,
 )
 from ay_platform_core.c8_llm.quota.repository import QuotaStore
 
@@ -124,12 +129,29 @@ def _semester_start(now: datetime) -> datetime:
     return now.replace(month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def _day_start(now: datetime) -> datetime:
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def _consumption_since(now: datetime) -> dict[str, datetime]:
     """The start instant of each reporting window (R-800-144). `session` is a
     rolling 5-hour block (the default session duration); the rest anchor on the
     platform calendar."""
     return {
         "session": now - timedelta(hours=5),
+        "week": _week_start(now),
+        "month": _month_start(now),
+        "quarter": _quarter_start(now),
+        "semester": _semester_start(now),
+        "year": _year_start(now),
+    }
+
+
+def _project_consumption_since(now: datetime) -> dict[str, datetime]:
+    """Per-project reporting window starts — `day` (calendar midnight UTC) then
+    the same calendar anchors as the tenant table (E-100-002 v7)."""
+    return {
+        "day": _day_start(now),
         "week": _week_start(now),
         "month": _month_start(now),
         "quarter": _quarter_start(now),
@@ -182,6 +204,110 @@ class QuotaService:
             currency=self._currency,
             windows=list(CONSUMPTION_WINDOWS),
             tenants=report_tenants,
+        )
+
+    async def project_consumption_report(
+        self, tenant_id: str | None = None
+    ) -> ProjectConsumptionReport:
+        """Per-project LLM consumption across day / week / month / quarter /
+        semester / year (E-100-002 v7). `tenant_id` confines the report to one
+        tenant (a tenant operator, or a platform_manager filter); None = the
+        whole platform. Amounts are in the platform `currency`."""
+        now = self._clock()
+        since = _project_consumption_since(now)
+        per_window: dict[str, dict[str, tuple[float, int]]] = {}
+        projects: set[str] = set()
+        for key in PROJECT_CONSUMPTION_WINDOWS:
+            rows = await self._store.consumption_by_project(
+                since[key].isoformat(), tenant_id=tenant_id
+            )
+            per_window[key] = {p: (c, tok) for p, c, tok in rows}
+            projects.update(per_window[key].keys())
+        report_projects = [
+            ProjectConsumption(
+                project_id=pid,
+                windows={
+                    key: ConsumptionCell(
+                        cost=per_window[key].get(pid, (0.0, 0))[0],
+                        tokens=per_window[key].get(pid, (0.0, 0))[1],
+                    )
+                    for key in PROJECT_CONSUMPTION_WINDOWS
+                },
+            )
+            for pid in sorted(projects)
+        ]
+        return ProjectConsumptionReport(
+            currency=self._currency,
+            windows=list(PROJECT_CONSUMPTION_WINDOWS),
+            tenant_id=tenant_id,
+            projects=report_projects,
+        )
+
+    async def tenant_consumption_report_days(self) -> ConsumptionReport:
+        """Per-tenant LLM consumption across day / week / month / quarter /
+        semester / year (E-100-002 v7 tenant cost dashboards, platform_manager).
+        Same shape as `consumption_report` but day-anchored."""
+        now = self._clock()
+        since = _project_consumption_since(now)
+        per_window: dict[str, dict[str, tuple[float, int]]] = {}
+        tenants: set[str] = set()
+        for key in PROJECT_CONSUMPTION_WINDOWS:
+            rows = await self._store.consumption_by_tenant(since[key].isoformat())
+            per_window[key] = {t: (c, tok) for t, c, tok in rows}
+            tenants.update(per_window[key].keys())
+        report_tenants = [
+            TenantConsumption(
+                tenant_id=tid,
+                windows={
+                    key: ConsumptionCell(
+                        cost=per_window[key].get(tid, (0.0, 0))[0],
+                        tokens=per_window[key].get(tid, (0.0, 0))[1],
+                    )
+                    for key in PROJECT_CONSUMPTION_WINDOWS
+                },
+            )
+            for tid in sorted(tenants)
+        ]
+        return ConsumptionReport(
+            currency=self._currency,
+            windows=list(PROJECT_CONSUMPTION_WINDOWS),
+            tenants=report_tenants,
+        )
+
+    async def user_consumption_report(
+        self, tenant_id: str | None = None
+    ) -> UserConsumptionReport:
+        """Per-user LLM consumption across day..year (E-100-002 v7 user cost
+        dashboards). `tenant_id` confines the report to one tenant (a tenant
+        operator, or a platform_manager filter); None = the whole platform."""
+        now = self._clock()
+        since = _project_consumption_since(now)
+        per_window: dict[str, dict[str, tuple[float, int]]] = {}
+        users: set[str] = set()
+        for key in PROJECT_CONSUMPTION_WINDOWS:
+            rows = await self._store.consumption_by_user(
+                since[key].isoformat(), tenant_id=tenant_id
+            )
+            per_window[key] = {u: (c, tok) for u, c, tok in rows}
+            users.update(per_window[key].keys())
+        report_users = [
+            UserConsumption(
+                user_id=uid,
+                windows={
+                    key: ConsumptionCell(
+                        cost=per_window[key].get(uid, (0.0, 0))[0],
+                        tokens=per_window[key].get(uid, (0.0, 0))[1],
+                    )
+                    for key in PROJECT_CONSUMPTION_WINDOWS
+                },
+            )
+            for uid in sorted(users)
+        ]
+        return UserConsumptionReport(
+            currency=self._currency,
+            windows=list(PROJECT_CONSUMPTION_WINDOWS),
+            tenant_id=tenant_id,
+            users=report_users,
         )
 
     async def get_policy(self) -> QuotaPolicy:

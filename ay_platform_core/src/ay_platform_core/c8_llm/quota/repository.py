@@ -1,6 +1,6 @@
 # =============================================================================
 # File: repository.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/repository.py
 # Description: ArangoDB persistence for the quota subsystem. v2 supports the
 #              four-level model: usage is aggregated over `llm_calls` filtered by
@@ -46,6 +46,12 @@ class QuotaStore(Protocol):
     ) -> tuple[float, int, str | None]: ...
     async def consumption_by_tenant(
         self, since_iso: str
+    ) -> list[tuple[str, float, int]]: ...
+    async def consumption_by_project(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]: ...
+    async def consumption_by_user(
+        self, since_iso: str, tenant_id: str | None = None
     ) -> list[tuple[str, float, int]]: ...
 
 
@@ -202,3 +208,73 @@ class QuotaRepository:
         by `tags.tenant_id`. Reporting aggregation for the operator consumption
         table (R-800-144)."""
         return await self._run(self._consumption_by_tenant_sync, since_iso)
+
+    def _consumption_by_project_sync(
+        self, since_iso: str, tenant_id: str | None
+    ) -> list[tuple[str, float, int]]:
+        if not self._db.has_collection(COLL_CALLS):
+            return []
+        filters = ["c.timestamp_start >= @since", "c.tags.project_id != null"]
+        bind: dict[str, Any] = {"@col": COLL_CALLS, "since": since_iso}
+        if tenant_id is not None:
+            filters.append("c.tags.tenant_id == @tid")
+            bind["tid"] = tenant_id
+        query = (
+            "FOR c IN @@col "
+            f"  FILTER {' AND '.join(filters)} "
+            "  COLLECT project = c.tags.project_id "
+            "  AGGREGATE cost = SUM(c.cost_usd), "
+            "            toks = SUM(c.input_tokens + c.output_tokens) "
+            "  RETURN { project, cost, toks }"
+        )
+        rows = list(self._db.aql.execute(query, bind_vars=bind))
+        return [
+            (str(r["project"]), float(r.get("cost") or 0.0), int(r.get("toks") or 0))
+            for r in rows
+            if r.get("project")
+        ]
+
+    async def consumption_by_project(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        """Per-project (cost, tokens) of `llm_calls` since `since_iso`, grouped
+        by `tags.project_id`, optionally confined to one tenant. Reporting
+        aggregation for the project cost dashboards (E-100-002 v7)."""
+        return await self._run(
+            self._consumption_by_project_sync, since_iso, tenant_id
+        )
+
+    def _consumption_by_user_sync(
+        self, since_iso: str, tenant_id: str | None
+    ) -> list[tuple[str, float, int]]:
+        if not self._db.has_collection(COLL_CALLS):
+            return []
+        filters = ["c.timestamp_start >= @since", "c.tags.user_id != null"]
+        bind: dict[str, Any] = {"@col": COLL_CALLS, "since": since_iso}
+        if tenant_id is not None:
+            filters.append("c.tags.tenant_id == @tid")
+            bind["tid"] = tenant_id
+        query = (
+            "FOR c IN @@col "
+            f"  FILTER {' AND '.join(filters)} "
+            "  COLLECT user = c.tags.user_id "
+            "  AGGREGATE cost = SUM(c.cost_usd), "
+            "            toks = SUM(c.input_tokens + c.output_tokens) "
+            "  RETURN { user, cost, toks }"
+        )
+        rows = list(self._db.aql.execute(query, bind_vars=bind))
+        return [
+            (str(r["user"]), float(r.get("cost") or 0.0), int(r.get("toks") or 0))
+            for r in rows
+            if r.get("user")
+        ]
+
+    async def consumption_by_user(
+        self, since_iso: str, tenant_id: str | None = None
+    ) -> list[tuple[str, float, int]]:
+        """Per-user (cost, tokens) of `llm_calls` since `since_iso`, grouped by
+        `tags.user_id`, optionally confined to one tenant. Reporting aggregation
+        for the user cost dashboards (E-100-002 v7)."""
+        return await self._run(
+            self._consumption_by_user_sync, since_iso, tenant_id
+        )

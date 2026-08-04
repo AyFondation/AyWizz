@@ -335,6 +335,16 @@ _C2_AUTH: list[EndpointSpec] = [
         backend=Backend.ARANGO,
         backend_collection="c2_users",
     ),
+    # Reverse ACL view (E-100-002 v7) — same scoped-operator convention.
+    EndpointSpec(
+        component="c2_auth",
+        method="GET",
+        path="/admin/users/{user_id}/projects",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
     # Project GOVERNANCE (E-100-002 v4) — platform_manager platform operator,
     # cross-tenant. Governance object only (metadata / lifecycle status / ACL);
     # NOT project content. scope=NONE because these are operator endpoints.
@@ -1661,6 +1671,80 @@ _C8_ADMIN: list[EndpointSpec] = [
         component="c8_admin",
         method="GET",
         path="/admin/v1/quota/consumption",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-project cost dashboards (E-100-002 v7) — operator surface. Same
+    # scoped-operator convention as project governance: accept_global_roles
+    # lists platform_manager only (unconditional); the tenant-scoped admin path
+    # is covered by tests/integration/c8_admin/test_project_consumption_e2e.py.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/quota/consumption/projects",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-tenant cost (day..year) — platform-wide, platform_manager only.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/quota/consumption/tenants",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-user cost (day..year) — operator surface; scoped-admin covered by
+    # tests/integration/c8_admin/test_project_consumption_e2e.py.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/quota/consumption/users",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-project STORAGE dashboards (E-100-002 v7) — operator surface. Same
+    # scoped-operator convention (accept_global_roles = platform_manager only;
+    # the tenant-scoped admin path is covered by the storage service/router
+    # tests). The snapshot trigger is platform_manager-only (metering CronJob).
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/storage/projects",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/storage/tenants",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/storage/projects/{project_id}/series",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    EndpointSpec(
+        component="c8_admin",
+        method="POST",
+        path="/admin/v1/storage/snapshot",
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,
