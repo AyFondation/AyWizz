@@ -1,6 +1,6 @@
 # =============================================================================
 # File: cost_tracker.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py
 # Description: Cost-record construction + persistence for the `llm_calls`
 #              ledger (E-800-002 / R-800-070). Two entry points share the
@@ -236,6 +236,7 @@ def _extract_tags(request_data: dict[str, Any]) -> CallTags:
         sub_agent_id=_pick("X-Sub-Agent-Id", "sub_agent_id"),
         source_id=_pick("X-Source-Id", "source_id"),
         run_id=_pick("X-Run-Id", "run_id"),
+        turn_id=_pick("X-Turn-Id", "turn_id"),
     )
 
 

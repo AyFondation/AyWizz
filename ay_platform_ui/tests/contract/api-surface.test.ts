@@ -190,6 +190,7 @@ function invocations(client: ApiClient): Record<string, () => Promise<unknown> |
     deleteLlmProvider: () => client.deleteLlmProvider("p1"),
     listUserProjectAccess: () => client.listUserProjectAccess("u1"),
     listProjectConsumption: () => client.listProjectConsumption(),
+    getRequestBreakdown: () => client.getRequestBreakdown("r1", "run"),
     listTenantConsumption: () => client.listTenantConsumption(),
     listUserConsumption: () => client.listUserConsumption(),
     listProjectStorage: () => client.listProjectStorage(),
@@ -235,6 +236,8 @@ function invocations(client: ApiClient): Record<string, () => Promise<unknown> |
     updateConversation: () => client.updateConversation(CONV, { title: "t" }),
     listMessages: () => client.listMessages(CONV),
     sendMessageStream: () => client.sendMessageStream(CONV, "hi", () => {}),
+    streamOrchestratorEvents: () =>
+      client.streamOrchestratorEvents("r1", { onTrace: () => {} }).catch(() => {}),
     listRequirementDocuments: () => client.listRequirementDocuments(P),
     getRequirementDocument: () => client.getRequirementDocument(P, SLUG),
     listRequirementEntities: () => client.listRequirementEntities(P),

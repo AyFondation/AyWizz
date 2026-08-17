@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/models.py
 # Description: Pydantic v2 data contracts for C3 Conversation Service.
 #              ConversationPublic and MessagePublic are registered as
@@ -85,9 +85,15 @@ class InlineEvent(BaseModel):
 
     kind: str = Field(
         description="Discriminator : 'stage' (pipeline phase), "
-        "'tool_call' (DocGen tool), extensible.",
+        "'tool_call' (DocGen tool), 'reasoning' (model extended-thinking, "
+        "R-200-207), extensible.",
     )
     label: str = Field(description="Human-readable one-line summary.")
+    text: str | None = Field(
+        default=None,
+        description="Free text payload — for 'reasoning' events, a chunk of the "
+        "model's extended-thinking (verbose mode only).",
+    )
     status: Literal["running", "done"] = "done"
     name: str | None = Field(
         default=None,
@@ -225,6 +231,12 @@ class MessageRequest(BaseModel):
         description="Up to 10 prompt-attached references "
         "(R-200-180). 32K-token cap on combined resolved content "
         "(R-200-181) — over-cap requests SHALL return 413.",
+    )
+    reasoning_verbose: bool = Field(
+        default=False,
+        description="Verbose reasoning toggle (R-200-207) — when true the model's "
+        "extended thinking is requested and streamed as `reasoning` inline "
+        "events. Opt-in (extra thinking tokens billed).",
     )
 
 

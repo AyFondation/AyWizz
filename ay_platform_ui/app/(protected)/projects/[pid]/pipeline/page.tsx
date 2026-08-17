@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 3
+// Version: 5
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/pipeline/page.tsx
 // Description: Pipeline trigger page for the `code` profile. Lets the
 //              operator state a goal, fires a C4 orchestrator run,
@@ -40,7 +40,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useReadyConfig } from "@/app/providers";
-import { RunTrace, SteerComposer } from "@/components/run-trace";
+import { RunTrace, SteerComposer, SubAgentTree } from "@/components/run-trace";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type {
   OrchestratorPhase,
@@ -98,7 +98,13 @@ export default function PipelinePage() {
   // in display order (newest-first stays unchanged on top).
   const [olderTrace, setOlderTrace] = useState<TraceEvent[]>([]);
   const [loadingMoreTrace, setLoadingMoreTrace] = useState(false);
+  // Live SSE trace (R-200-206): while the run is RUNNING, the stream replays
+  // the full ledger then tails new events in real time. When present it is the
+  // authoritative trace source (supersedes the 2 s poll's `run.trace` window).
+  const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
   const [steerError, setSteerError] = useState<string | null>(null);
+  // R-200-208: flat chronological timeline vs. derived sub-agent tree.
+  const [traceView, setTraceView] = useState<"timeline" | "tree">("timeline");
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current !== null) {
@@ -139,6 +145,27 @@ export default function PipelinePage() {
   );
 
   useEffect(() => stopPolling, [stopPolling]);
+
+  // Live run-event stream (R-200-206). Opens while the run is RUNNING; the
+  // stream replays the ledger then pushes each new TraceEvent. Aborts on
+  // status change / unmount so we never leak a connection.
+  const activeRunId = runLoad.run?.run_id;
+  const activeRunStatus = runLoad.run?.status;
+  useEffect(() => {
+    if (!activeRunId || activeRunStatus !== "running") return;
+    const ctrl = new AbortController();
+    setLiveTrace([]);
+    apiClient
+      .streamOrchestratorEvents(
+        activeRunId,
+        { onTrace: (ev) => setLiveTrace((prev) => [...prev, ev]) },
+        ctrl.signal,
+      )
+      .catch(() => {
+        /* aborted on cleanup, or the run ended — the poll takes over */
+      });
+    return () => ctrl.abort();
+  }, [apiClient, activeRunId, activeRunStatus]);
 
   // Restore the run from the URL on mount (or when `?run=<id>` changes).
   // Pushed by `submitRun` AND by external navigation (e.g. operator
@@ -519,10 +546,38 @@ export default function PipelinePage() {
           <div className="mt-6 space-y-3">
             <div className="flex items-baseline justify-between">
               <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Run trace</h2>
-              <span className="text-[10px] text-zinc-400">
-                {runLoad.run.trace.length + olderTrace.length} event
-                {runLoad.run.trace.length + olderTrace.length === 1 ? "" : "s"} loaded
-              </span>
+              <div className="flex items-center gap-3">
+                <div className="flex overflow-hidden rounded border border-zinc-300 dark:border-zinc-600">
+                  <button
+                    type="button"
+                    data-testid="trace-view-timeline"
+                    onClick={() => setTraceView("timeline")}
+                    className={`px-2 py-0.5 text-[10px] ${
+                      traceView === "timeline"
+                        ? "bg-blue-600 text-white"
+                        : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    Timeline
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="trace-view-tree"
+                    onClick={() => setTraceView("tree")}
+                    className={`px-2 py-0.5 text-[10px] ${
+                      traceView === "tree"
+                        ? "bg-blue-600 text-white"
+                        : "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    Sub-agent tree
+                  </button>
+                </div>
+                <span className="text-[10px] text-zinc-400">
+                  {runLoad.run.trace.length + olderTrace.length} event
+                  {runLoad.run.trace.length + olderTrace.length === 1 ? "" : "s"} loaded
+                </span>
+              </div>
             </div>
             {runLoad.run.status === "running" && <SteerComposer onSubmit={submitSteer} />}
             {steerError && (
@@ -530,15 +585,29 @@ export default function PipelinePage() {
                 {steerError}
               </div>
             )}
-            <RunTrace
-              events={[...runLoad.run.trace, ...olderTrace]}
-              canLoadMore={
-                runLoad.run.trace.length >= 200 ||
-                (runLoad.run.trace.length > 0 && olderTrace.length > 0)
-              }
-              loadingMore={loadingMoreTrace}
-              onLoadMore={(beforeIso) => void loadMoreTrace(beforeIso)}
-            />
+            {traceView === "tree" ? (
+              <SubAgentTree
+                events={
+                  liveTrace.length ? liveTrace : [...runLoad.run.trace].reverse().concat(olderTrace)
+                }
+              />
+            ) : (
+              <RunTrace
+                events={
+                  liveTrace.length
+                    ? [...liveTrace].reverse() // stream is oldest-first → newest-first
+                    : [...runLoad.run.trace, ...olderTrace]
+                }
+                canLoadMore={
+                  liveTrace.length
+                    ? false // the live stream replays the full ledger — nothing older to fetch
+                    : runLoad.run.trace.length >= 200 ||
+                      (runLoad.run.trace.length > 0 && olderTrace.length > 0)
+                }
+                loadingMore={loadingMoreTrace}
+                onLoadMore={(beforeIso) => void loadMoreTrace(beforeIso)}
+              />
+            )}
           </div>
         </section>
       )}

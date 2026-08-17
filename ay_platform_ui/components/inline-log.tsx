@@ -1,6 +1,6 @@
 // =============================================================================
 // File: inline-log.tsx
-// Version: 4
+// Version: 5
 // Path: ay_platform_ui/components/inline-log.tsx
 //
 // v4 (2026-05-21): #5 — the per-tool "Open in Working area →" deep-link
@@ -270,11 +270,34 @@ function GenericFormatter({ events }: { events: InlineEvent[] }): ReactNode {
   );
 }
 
+/** kind="reasoning" formatter (R-200-207) — a collapsible panel showing the
+ *  model's extended thinking. Concatenates the streamed `text` fragments; the
+ *  final persisted `done` event carries the full text so it survives reload. */
+function ReasoningFormatter({ events }: { events: InlineEvent[] }): ReactNode {
+  const done = events.find((e) => e.status === "done" && e.text);
+  const text = done?.text ?? events.map((e) => e.text ?? "").join("");
+  if (!text.trim()) return null;
+  return (
+    <details
+      className="w-full rounded-md border border-violet-200 bg-violet-50/60 text-xs"
+      data-testid="inline-reasoning"
+    >
+      <summary className="cursor-pointer px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wide text-violet-700">
+        🧠 Reasoning
+      </summary>
+      <pre className="whitespace-pre-wrap px-2.5 pb-2 text-[11px] leading-relaxed text-violet-900">
+        {text}
+      </pre>
+    </details>
+  );
+}
+
 /** Per-kind formatter registry. THE extension point : a new inline
  *  event kind only needs an entry here. */
 const FORMATTERS: Record<string, (args: { events: InlineEvent[] }) => ReactNode> = {
   stage: ({ events }) => <StageFormatter events={events} />,
   tool_call: ({ events }) => <ToolCallFormatter events={events} />,
+  reasoning: ({ events }) => <ReasoningFormatter events={events} />,
 };
 
 /** Unified inline-activity renderer. Feed it the live-accumulated

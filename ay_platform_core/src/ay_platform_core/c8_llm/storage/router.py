@@ -9,6 +9,7 @@
 #              tenant. The snapshot trigger (metering pass) is platform_manager
 #              only (invoked by the periodic CronJob). Reporting/governance —
 #              exposes sizes only, never content.
+# @relation implements:R-100-140
 # =============================================================================
 
 from __future__ import annotations

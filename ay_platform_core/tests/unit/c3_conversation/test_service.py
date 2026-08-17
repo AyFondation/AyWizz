@@ -1,7 +1,9 @@
 # =============================================================================
 # File: test_service.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/unit/c3_conversation/test_service.py
+#
+# @relation validates:R-200-207
 # Description: Unit tests for ConversationService — mocked repository.
 #              Covers CRUD access control, soft-delete, SSE generation,
 #              and expert-mode stub.
@@ -389,6 +391,7 @@ def test_prompt_injects_docgen_directive_when_tools_active() -> None:
 
 
 from ay_platform_core.c3_conversation.service import (  # noqa: E402
+    _extract_delta_reasoning,
     _tool_result_path,
 )
 
@@ -491,3 +494,15 @@ def test_format_retrieved_chunks_omits_section_line_when_absent() -> None:
     out = _format_retrieved_chunks([_Hit(content="Body without sections.")])
     assert "section:" not in out
     assert "Body without sections." in out
+
+
+@pytest.mark.unit
+def test_extract_delta_reasoning() -> None:
+    """R-200-207: the thinking delta is read from `delta.reasoning_content`,
+    distinct from `content`; absent → ''."""
+    think = {"choices": [{"index": 0, "delta": {"reasoning_content": "let me think"}}]}
+    assert _extract_delta_reasoning(think) == "let me think"
+    # A normal content delta carries no reasoning.
+    assert _extract_delta_reasoning({"choices": [{"delta": {"content": "hi"}}]}) == ""
+    # Final usage event (no choices) → "".
+    assert _extract_delta_reasoning({}) == ""

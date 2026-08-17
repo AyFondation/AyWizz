@@ -7,6 +7,7 @@
 #              Arango directly — no HTTP, no forward-auth — appending one
 #              `storage_snapshots` row per project. Invoke:
 #                python -m ay_platform_core.c8_llm.storage.snapshot_job
+# @relation implements:R-100-140
 # =============================================================================
 
 from __future__ import annotations

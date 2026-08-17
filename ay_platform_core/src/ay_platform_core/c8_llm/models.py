@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/models.py
 # Description: Pydantic v2 models for C8's public surface. These are the
 #              wire-level payloads exchanged between internal components and
@@ -138,6 +138,9 @@ class CallTags(BaseModel):
     # the per-source / per-run cost can be aggregated from `llm_calls`.
     source_id: str | None = None
     run_id: str | None = None
+    # Chat-turn correlation (R-800-146) — one user message → one turn → possibly
+    # several LLM calls across different models. Minted by C3 (X-Turn-Id).
+    turn_id: str | None = None
 
 
 class CallRecord(BaseModel):

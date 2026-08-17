@@ -8,6 +8,7 @@
 #              project registry — and measured by summing object sizes under
 #              each project prefix. Pure of HTTP; the client is a thin seam so
 #              tests can inject a fake object store.
+# @relation implements:R-100-140
 # =============================================================================
 
 from __future__ import annotations

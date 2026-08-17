@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/operator/quotas/page.tsx
 // Description: Global LLM quota policy console (platform operator,
 //              platform_manager — Lot 3). Edit the single platform-wide policy
@@ -22,6 +22,7 @@ import type {
   QuotaState,
   QuotaStatus,
   QuotaWindow,
+  RequestCostBreakdown,
 } from "@/lib/types";
 
 function currencySymbol(code: string): string {
@@ -61,6 +62,23 @@ export default function QuotasAdminPage() {
   const [tenantId, setTenantId] = useState("");
   const [status, setStatus] = useState<QuotaStatus | null>(null);
   const [consumption, setConsumption] = useState<ConsumptionReport | null>(null);
+  const [breakdownId, setBreakdownId] = useState("");
+  const [breakdownBy, setBreakdownBy] = useState<"run" | "turn">("run");
+  const [breakdown, setBreakdown] = useState<RequestCostBreakdown | null>(null);
+
+  const checkBreakdown = useCallback(() => {
+    const id = breakdownId.trim();
+    if (!id) return;
+    setError(null);
+    apiClient
+      .getRequestBreakdown(id, breakdownBy)
+      .then(setBreakdown)
+      .catch((err) =>
+        setError(
+          err instanceof ApiError ? `Breakdown failed (${err.status})` : "Breakdown failed.",
+        ),
+      );
+  }, [apiClient, breakdownId, breakdownBy]);
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
@@ -362,6 +380,80 @@ export default function QuotasAdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-8" data-testid="breakdown-section">
+        <h3 className="text-sm font-semibold text-neutral-800">Per-request cost breakdown</h3>
+        <p className="mt-1 text-xs text-neutral-500">
+          The model-mix of ONE request (a pipeline run_id, or a chat turn_id). Shows how the harness
+          split the tokens/cost across models — e.g. 10 Mtok → opus 25% / haiku 75%.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2" data-testid="breakdown-form">
+          <input
+            className="w-72 rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+            placeholder="run_id or turn_id"
+            value={breakdownId}
+            onChange={(e) => setBreakdownId(e.target.value)}
+            data-testid="breakdown-id"
+          />
+          <select
+            className="rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
+            value={breakdownBy}
+            onChange={(e) => setBreakdownBy(e.target.value as "run" | "turn")}
+            data-testid="breakdown-by"
+          >
+            <option value="run">by run</option>
+            <option value="turn">by turn</option>
+          </select>
+          <button
+            type="button"
+            disabled={!breakdownId.trim()}
+            onClick={checkBreakdown}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            data-testid="breakdown-check"
+          >
+            Show
+          </button>
+        </div>
+
+        {breakdown && (
+          <div className="mt-4" data-testid="breakdown-result">
+            <div className="text-sm text-neutral-800">
+              Total{" "}
+              <span className="font-medium">{breakdown.total_tokens.toLocaleString()} tok</span> ·{" "}
+              {currencySymbol(breakdown.currency)}
+              {breakdown.total_cost.toFixed(2)}
+            </div>
+            {breakdown.models.length === 0 ? (
+              <p className="mt-2 text-sm text-neutral-500" data-testid="breakdown-empty">
+                No recorded LLM calls for this request.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-1">
+                {breakdown.models.map((m) => (
+                  <li
+                    key={m.model}
+                    className="flex items-center gap-3 text-sm"
+                    data-testid={`breakdown-model-${m.model}`}
+                  >
+                    <span className="w-40 truncate font-medium text-neutral-800">{m.model}</span>
+                    <span className="h-2 flex-1 overflow-hidden rounded bg-neutral-100">
+                      <span
+                        className="block h-2 rounded bg-blue-500"
+                        style={{ width: `${m.tokens_pct}%` }}
+                      />
+                    </span>
+                    <span className="w-40 text-right text-neutral-600">
+                      {m.tokens.toLocaleString()} tok ({m.tokens_pct}%) ·{" "}
+                      {currencySymbol(breakdown.currency)}
+                      {m.cost.toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </section>

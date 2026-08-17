@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/service.py
 # Description: C2 Auth Service facade. Orchestrates pluggable auth modes,
 #              JWT issuance/verification, and user management.
@@ -964,12 +964,16 @@ class AuthService:
         else:
             user_prompt = stored_user_prompt
             is_default = False
+        stored_verbosity = (doc or {}).get("reasoning_verbosity")
         return UserPreferencesResponse(
             trigram=stored_trigram if isinstance(stored_trigram, str) else None,
             user_prompt=user_prompt,
             user_prompt_is_default=is_default,
             user_color=(
                 stored_user_color if isinstance(stored_user_color, str) else None
+            ),
+            reasoning_verbosity=(
+                "verbose" if stored_verbosity == "verbose" else "normal"
             ),
         )
 
@@ -978,7 +982,7 @@ class AuthService:
         doc = await repo.get_user_preferences(user_id)
         return self._prefs_doc_to_response(doc)
 
-    async def update_user_preferences(
+    async def update_user_preferences(  # noqa: PLR0912 - linear per-field merge; branch count tracks the number of pref fields
         self, user_id: str, payload: UserPreferencesUpdate,
     ) -> UserPreferencesResponse:
         """Merge-update the user's prefs. Semantics per field :
@@ -1015,6 +1019,8 @@ class AuthService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="user_color must be a 7-char hex like '#3b82f6'",
                 )
+        if payload.reasoning_verbosity is not None:
+            patch["reasoning_verbosity"] = payload.reasoning_verbosity
         if patch:
             await repo.upsert_user_preferences(user_id, patch)
         refreshed = await repo.get_user_preferences(user_id)

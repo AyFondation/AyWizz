@@ -1,7 +1,9 @@
 # =============================================================================
 # File: test_prompt_cache.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/unit/c8_llm/test_prompt_cache.py
+#
+# @relation validates:R-800-147
 # Description: Unit tests for the PROVIDER-AWARE prompt-cache breakpoint
 #              injection (`_apply_static_prompt_cache`). Applied AFTER upstream
 #              resolution, it reads the rewritten `<wire_format>/<upstream>`
@@ -17,7 +19,26 @@ from typing import Any
 
 import pytest
 
-from ay_platform_core.c8_llm.client import _apply_static_prompt_cache
+from ay_platform_core.c8_llm.client import (
+    _apply_adaptive_thinking,
+    _apply_static_prompt_cache,
+)
+
+
+@pytest.mark.unit
+def test_adaptive_thinking_sets_marker() -> None:
+    """R-800-147: verbose reasoning requests adaptive extended thinking."""
+    body: dict[str, Any] = {"model": "anthropic/claude", "messages": []}
+    _apply_adaptive_thinking(body)
+    assert body["thinking"] == {"type": "adaptive"}
+
+
+@pytest.mark.unit
+def test_adaptive_thinking_does_not_clobber_explicit() -> None:
+    body: dict[str, Any] = {"thinking": {"type": "enabled"}}
+    _apply_adaptive_thinking(body)
+    assert body["thinking"] == {"type": "enabled"}
+
 
 _EPHEMERAL = {"type": "ephemeral"}
 

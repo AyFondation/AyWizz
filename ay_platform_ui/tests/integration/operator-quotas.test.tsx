@@ -103,6 +103,48 @@ describe("QuotasAdminPage", () => {
     await waitFor(() => expect(screen.getByTestId("quota-window-session")).toBeInTheDocument());
   });
 
+  it("shows a per-request model-mix breakdown", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(POLICY_URL, () => HttpResponse.json(policy())),
+      http.get("/admin/v1/quota/requests/run-1/breakdown", () =>
+        HttpResponse.json({
+          correlation: "run-1",
+          by: "run",
+          currency: "EUR",
+          total_tokens: 10_000_000,
+          total_cost: 8,
+          models: [
+            {
+              model: "haiku",
+              input_tokens: 6_000_000,
+              output_tokens: 1_500_000,
+              tokens: 7_500_000,
+              cost: 2,
+              tokens_pct: 75,
+            },
+            {
+              model: "opus",
+              input_tokens: 2_000_000,
+              output_tokens: 500_000,
+              tokens: 2_500_000,
+              cost: 6,
+              tokens_pct: 25,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("breakdown-form")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("breakdown-id"), "run-1");
+    await user.click(screen.getByTestId("breakdown-check"));
+    await waitFor(() => expect(screen.getByTestId("breakdown-result")).toBeInTheDocument());
+    expect(screen.getByTestId("breakdown-model-opus")).toHaveTextContent("25%");
+    expect(screen.getByTestId("breakdown-model-haiku")).toHaveTextContent("75%");
+  });
+
   it("edits a limit and saves the policy", async () => {
     seedToken(["platform_manager"]);
     let sent: Record<string, unknown> | null = null;

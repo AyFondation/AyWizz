@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/models.py
 # Description: Pydantic v2 models for the C4 Orchestrator. Mirrors the
 #              contract-critical entities E-200-001..008 from
@@ -113,6 +113,13 @@ class TraceEvent(BaseModel):
     duration_ms: int | None = Field(default=None, ge=0)
     ok: bool | None = None
     payload: dict[str, Any] | None = None
+    # R-200-208 : sub-agent tree. `sub_agent_id` names the (sub-)agent the
+    # event was emitted from; `parent_agent` names its dispatcher (None → the
+    # event is a direct child of the run). A consumer groups the flat ledger
+    # into the nested harness topology from these two fields.
+    # @relation implements:R-200-208
+    sub_agent_id: str | None = None
+    parent_agent: str | None = None
 
 
 # ---------------------------------------------------------------------------

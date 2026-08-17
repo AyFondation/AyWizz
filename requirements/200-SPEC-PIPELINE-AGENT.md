@@ -1,6 +1,6 @@
 ---
 document: 200-SPEC-PIPELINE-AGENT
-version: 3
+version: 4
 path: requirements/200-SPEC-PIPELINE-AGENT.md
 language: en
 status: draft
@@ -9,6 +9,8 @@ derives-from: [D-007, D-008, D-011, D-012, D-015]
 
 # Pipeline & Agent Specification
 
+> **STATUS: draft v4 — Real-time agentic transparency (2026-08-04).** Adds R-200-206 (live run-event **SSE** stream `GET /runs/{id}/events` — replay-then-tail over the persisted `TraceEvent` ledger, un-gating the D-008 push channel for the transparency feature), R-200-207 (`reasoning` inline/trace event kind carrying the model's extended-thinking, governed by a **verbosity toggle** — user pref `reasoning_verbosity ∈ {normal, verbose}`, opt-in; pairs with 800-SPEC R-800-147), R-200-208 (sub-agent **tree** derived from `sub_agent_id` on the event stream). Enables a Claude-Code-like exhaustive "watch the agent work" view (steps + tool calls + reasoning + sub-agent depth), on demand. Baseline (v3) unchanged.
+>
 > **STATUS: draft v3 — Tranche B expansion (2026-05-20).** Adds §4.10 (live tracing + operator steering of running pipelines), §5.17 (live-docs operator-driven CRUD beyond the LLM tool-loop), §5.18 (source-files tree projection + operator-driven dir/file rename/move), §5.19 (prompt-attached references — files and text excerpts inlined into LLM context). New contract entities E-200-006..008 in §6.3, new REST endpoints in §6.1, new questions Q-200-013..016 in §7. Earlier baseline (v2) unchanged.
 >
 > Derives from D-007 (staff-engineer pattern), D-008 (hybrid agent exposure), D-011 (multi-LLM via LiteLLM), D-012 (domain extensibility), D-015 (DocGen v1 chat-direct, extended in §5.17). Open questions in §7 MUST be resolved before C4 is considered production-ready.
@@ -551,6 +553,76 @@ category: nfr
 `POST /steer` SHALL persist the queued message in ≤ 100 ms p95 (Arango single-document append). `GET /trace?before=...` SHALL return in ≤ 200 ms p95 for the 200-event window. The trace append on `R-200-200` events SHALL add ≤ 5 ms p95 to phase-transition overhead — counted inside the R-200-100 budget (200 ms p95 total).
 
 **Rationale.** Polling at 2 s intervals (current UX cadence) makes trace fetch a hot path ; the latency budget must be small to keep the perceived cost of polling negligible.
+
+#### R-200-206
+
+```yaml
+id: R-200-206
+version: 1
+status: draft
+category: functional
+derives-from: [R-200-200]
+```
+
+The orchestrator SHALL expose a **live run-event stream**
+`GET /api/v1/orchestrator/runs/{run_id}/events` as Server-Sent Events
+(`text/event-stream`). The stream SHALL replay the TraceEvents already on the
+run (so a late subscriber sees full history), then push each newly-appended
+`TraceEvent` (R-200-200) in real time, terminating when the run reaches a
+terminal `status`. RBAC matches `GET /runs/{id}/trace`. This UN-GATES, for the
+transparency feature, the push channel that D-008 had scoped to expert mode: it
+is the real-time complement of the polled ledger (R-200-201), not a replacement
+— the ledger remains the durable source of truth and the reload path.
+
+**Rationale.** A Claude-Code-like "watch the agent work" feed needs push, not
+2 s polling. Reusing the persisted `TraceEvent` ledger as the stream source
+keeps a single source of truth and survives reconnects (replay-then-tail).
+
+#### R-200-207
+
+```yaml
+id: R-200-207
+version: 1
+status: draft
+category: functional
+derives-from: [R-200-200, D-008]
+impacts: [R-800-147]
+```
+
+An inline/trace event `kind = "reasoning"` SHALL carry the model's own
+reasoning (extended-thinking) content, distinct from the tool-call
+chain-of-thought already surfaced. Whether reasoning is captured, streamed and
+displayed SHALL be governed by a **verbosity toggle**: a user preference
+`reasoning_verbosity ∈ {"normal", "verbose"}` (C2 preferences, default
+`normal`), overridable per request. In `verbose` mode C8 is asked for adaptive
+thinking (R-800-147) and the thinking blocks are streamed as `reasoning` events
+(C3 chat SSE inline channel AND C4 run event stream) and rendered in a
+collapsible panel; in `normal` mode no thinking is requested (no extra tokens
+billed) and no `reasoning` event is emitted. Reasoning content, when captured,
+SHALL be persisted alongside the other inline/trace events.
+
+**Rationale.** Exhaustive reasoning is valuable on demand but costs thinking
+tokens and adds UI noise for the everyday user — so it is opt-in, not default.
+
+#### R-200-208
+
+```yaml
+id: R-200-208
+version: 1
+status: draft
+category: functional
+derives-from: [R-200-200]
+```
+
+Trace / inline events emitted from within a sub-agent SHALL carry the
+`sub_agent_id` and its parent agent so a consumer can render the **sub-agent
+tree** — the nested activity (which sub-agent is running, its own tool calls
+and reasoning) beneath the top-level run/turn. The tree is derived from the
+existing `TraceEvent` / `InlineEvent` stream; no separate endpoint is required.
+
+**Rationale.** Orchestration fans out to sub-agents (architect / implementer /
+reviewers); a flat feed hides that structure. Surfacing the tree makes the
+"exhaustive steps" view match the actual harness topology.
 
 ---
 

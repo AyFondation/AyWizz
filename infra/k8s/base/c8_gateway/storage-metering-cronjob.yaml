@@ -9,6 +9,8 @@
 #              MinIO + Arango directly (no HTTP, no forward-auth), so it never
 #              depends on C1. Every 6h → the storage dashboards' day/week/month/
 #              quarter/semester/year series. Absent MinIO endpoint → no-op.
+#
+# @relation implements:R-100-140
 # =============================================================================
 apiVersion: batch/v1
 kind: CronJob

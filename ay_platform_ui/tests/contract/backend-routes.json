@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 152,
+  "route_count": 154,
   "routes": [
     {
       "method": "GET",
@@ -185,6 +185,12 @@
     {
       "method": "PUT",
       "path": "/admin/v1/quota/policy",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/quota/requests/{correlation}/breakdown",
       "component": "c8_admin",
       "auth": "role_gated"
     },
@@ -491,6 +497,12 @@
     {
       "method": "GET",
       "path": "/api/v1/orchestrator/runs/{run_id}",
+      "component": "c4_orchestrator",
+      "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orchestrator/runs/{run_id}/events",
       "component": "c4_orchestrator",
       "auth": "authenticated"
     },

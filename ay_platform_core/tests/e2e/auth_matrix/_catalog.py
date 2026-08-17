@@ -1236,6 +1236,16 @@ _C4_ORCHESTRATOR: list[EndpointSpec] = [
         scope=Scope.TENANT,
         success_status=200,
     ),
+    # Live run-event SSE stream (R-200-206) — same authenticated content gate as
+    # /trace ; text/event-stream (replay-then-tail the trace ledger).
+    EndpointSpec(
+        component="c4_orchestrator",
+        method="GET",
+        path="/api/v1/orchestrator/runs/{run_id}/events",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.TENANT,
+        success_status=200,
+    ),
     # Tranche B — Operator steer queue (R-200-202). RBAC matches
     # /feedback per spec : authenticated content endpoint.
     EndpointSpec(
@@ -1705,6 +1715,16 @@ _C8_ADMIN: list[EndpointSpec] = [
         component="c8_admin",
         method="GET",
         path="/admin/v1/quota/consumption/users",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+    ),
+    # Per-request model-mix cost breakdown (R-800-146) — operator surface.
+    EndpointSpec(
+        component="c8_admin",
+        method="GET",
+        path="/admin/v1/quota/requests/{correlation}/breakdown",
         auth=Auth.ROLE_GATED,
         scope=Scope.NONE,
         success_status=200,

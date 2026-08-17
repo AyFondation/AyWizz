@@ -6,7 +6,7 @@
 //              in → DOM out, plus local interaction state) so no providers /
 //              MSW are needed. Covers : InlineLog + ModifiedDocsLinks,
 //              ReferenceTray, ComingSoonSection, FileTreeContextMenu,
-//              RunTrace + SteerComposer.
+//              RunTrace + SteerComposer + SubAgentTree (R-200-208).
 // =============================================================================
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -17,7 +17,7 @@ import { ComingSoonSection } from "@/components/coming-soon-section";
 import { FileTreeContextMenu } from "@/components/file-tree-context-menu";
 import { InlineLog, ModifiedDocsLinks } from "@/components/inline-log";
 import { ReferenceTray } from "@/components/reference-tray";
-import { RunTrace, SteerComposer } from "@/components/run-trace";
+import { buildSubAgentTree, RunTrace, SteerComposer, SubAgentTree } from "@/components/run-trace";
 
 vi.mock("next/link", () => ({
   default: ({
@@ -247,6 +247,50 @@ describe("RunTrace", () => {
     expect(screen.getByText("Agent")).toBeInTheDocument(); // kind label
     await userEvent.click(screen.getByRole("button", { name: "Load older events" }));
     expect(onLoadMore).toHaveBeenCalledWith("2026-01-01T00:00:00Z");
+  });
+});
+
+describe("SubAgentTree (R-200-208)", () => {
+  const disp = (agent: string, o: Record<string, unknown> = {}) =>
+    ev({
+      ts: "2026-01-01T00:00:00Z",
+      kind: "agent-dispatch",
+      phase: "generate",
+      label: `${agent} dispatched`,
+      sub_agent_id: agent,
+      ...o,
+    });
+
+  it("nests children under their parent and keeps run-level events aside", () => {
+    const { roots, runLevel } = buildSubAgentTree([
+      disp("architect", { ok: true, duration_ms: 1000 }),
+      disp("implementer", { parent_agent: "architect", ok: false }),
+      ev({ ts: "2026-01-01T00:00:01Z", kind: "gate-eval", phase: "spec", label: "gate A" }),
+    ]);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].agent).toBe("architect");
+    expect(roots[0].children.map((c) => c.agent)).toEqual(["implementer"]);
+    expect(runLevel).toHaveLength(1); // the untagged gate-eval
+  });
+
+  it("shows the empty placeholder when no sub-agent was dispatched", () => {
+    render(<SubAgentTree events={[]} />);
+    expect(screen.getByTestId("sub-agent-tree-empty")).toBeInTheDocument();
+  });
+
+  it("renders one node per sub-agent with a status label", () => {
+    render(
+      <SubAgentTree
+        events={[
+          disp("architect", { ok: true, duration_ms: 1200 }),
+          disp("implementer", { parent_agent: "architect" }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId("sub-agent-node")).toHaveLength(2);
+    expect(screen.getByText("architect")).toBeInTheDocument();
+    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
   });
 });
 

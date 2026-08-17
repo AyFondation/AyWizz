@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 17
+// Version: 18
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/conversations/[cid]/page.tsx
 //
 // v17 (2026-06-03): two chat display fixes. (1) The just-sent prompt
@@ -211,6 +211,8 @@ export default function ChatPage() {
   // the in-flight spinner so the operator gets an explicit end
   // signal (the spinner just vanishing read as ambiguous).
   const [justFinished, setJustFinished] = useState(false);
+  // Verbose reasoning toggle (R-200-207) — request + show the model's thinking.
+  const [verbose, setVerbose] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Snapshot of `state.messages.length` taken just BEFORE the
@@ -443,6 +445,7 @@ export default function ChatPage() {
       payload: userText,
       userPrompt,
       projectPrompt,
+      reasoningVerbose: verbose,
     });
   }
 
@@ -634,6 +637,21 @@ export default function ChatPage() {
           disabled={streaming}
           data-testid="composer-input"
         />
+        <button
+          type="button"
+          onClick={() => setVerbose((v) => !v)}
+          aria-pressed={verbose}
+          title="Verbose reasoning — show the model's thinking (uses extra tokens)"
+          className={[
+            "rounded-md border px-3 py-2 text-sm font-medium",
+            verbose
+              ? "border-violet-300 bg-violet-100 text-violet-800"
+              : "border-neutral-300 text-neutral-600 hover:bg-neutral-50",
+          ].join(" ")}
+          data-testid="composer-reasoning-toggle"
+        >
+          🧠
+        </button>
         <button
           type="submit"
           disabled={streaming || !composer.trim()}

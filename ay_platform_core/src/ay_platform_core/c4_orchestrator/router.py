@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/router.py
 # Description: FastAPI APIRouter for C4 per 200-SPEC §6.1. Identity is
 #              consumed from the Traefik forward-auth headers propagated
@@ -16,18 +16,24 @@
 # @relation implements:R-200-002
 # @relation implements:R-200-201
 # @relation implements:R-200-202
+# @relation implements:R-200-206
 # @relation implements:E-200-005
 # =============================================================================
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from ay_platform_core.c4_orchestrator.models import (
     RunCreate,
     RunFeedback,
     RunPublic,
     RunResume,
+    RunStatus,
     RunSteer,
     TraceEvent,
 )
@@ -159,6 +165,39 @@ async def read_trace(
     """Paginated back-in-time read of a run's TraceEvent ledger
     (R-200-201). Newest-first, capped at `limit` (≤ 200)."""
     return await service.get_run_trace(run_id, before_iso=before, limit=limit)
+
+
+_STREAM_POLL_S = 0.5
+
+
+@router.get("/api/v1/orchestrator/runs/{run_id}/events")
+async def stream_run_events(
+    run_id: str,
+    _user: str = Depends(_require_actor),
+    service: OrchestratorService = Depends(get_service),
+) -> StreamingResponse:
+    """Live run-event stream (R-200-206) as Server-Sent Events: REPLAY the
+    TraceEvents already on the run (oldest-first), then PUSH each newly-appended
+    one in real time, ending when the run reaches a terminal status. The append-
+    only ledger (R-200-201) is tailed by index over successive reads — a single
+    long-lived connection, not 2 s client polling."""
+    # Validate the run exists BEFORE returning the stream, so a missing run
+    # answers 404 cleanly rather than mid-stream.
+    await service.get_full_trace(run_id)
+
+    async def _gen() -> AsyncIterator[str]:
+        seen = 0
+        while True:
+            trace, run_status = await service.get_full_trace(run_id)
+            for ev in trace[seen:]:
+                yield f"event: trace\ndata: {ev.model_dump_json()}\n\n"
+            seen = len(trace)
+            if run_status != RunStatus.RUNNING:
+                yield f'event: done\ndata: {{"status": "{run_status.value}"}}\n\n'
+                return
+            await asyncio.sleep(_STREAM_POLL_S)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @router.post(

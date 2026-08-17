@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_trace_and_steer.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/c4_orchestrator/test_trace_and_steer.py
 # Description: Unit tests for Tranche B helpers (R-200-200..205) on the
 #              C4 OrchestratorService :
@@ -15,6 +15,7 @@
 # @relation validates:R-200-201
 # @relation validates:R-200-202
 # @relation validates:R-200-203
+# @relation validates:R-200-208
 # =============================================================================
 
 from __future__ import annotations
@@ -103,6 +104,40 @@ class TestAppendTrace:
         assert "duration_ms" not in ev
         assert "ok" not in ev
         assert "payload" not in ev
+        # R-200-208: sub-agent tree keys are absent when not tagged.
+        assert "sub_agent_id" not in ev
+        assert "parent_agent" not in ev
+
+    def test_sub_agent_tree_fields_recorded(
+        self, svc: OrchestratorService,
+    ) -> None:
+        """R-200-208: an event tagged with a (sub-)agent SHALL carry
+        `sub_agent_id` (and `parent_agent` when nested) so a consumer can
+        rebuild the sub-agent tree from the flat ledger.
+
+        @relation validates:R-200-208
+        """
+        row = _row()
+        svc._append_trace(
+            row,
+            kind=TraceEventKind.AGENT_DISPATCH,
+            phase=Phase.SPEC,
+            label="architect dispatched",
+            sub_agent_id="architect",
+        )
+        svc._append_trace(
+            row,
+            kind=TraceEventKind.AGENT_DISPATCH,
+            phase=Phase.GENERATE,
+            label="implementer dispatched",
+            sub_agent_id="implementer",
+            parent_agent="architect",
+        )
+        first, second = row["trace"]
+        assert first["sub_agent_id"] == "architect"
+        assert "parent_agent" not in first  # top-level → no parent key
+        assert second["sub_agent_id"] == "implementer"
+        assert second["parent_agent"] == "architect"
 
     def test_handles_missing_trace_field(self, svc: OrchestratorService) -> None:
         row = _row()

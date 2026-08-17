@@ -83,6 +83,11 @@ class _UsageStore:
     ) -> list[tuple[str, float, int]]:
         return []
 
+    async def breakdown_by_model(
+        self, field: str, value: str, tenant_id: str | None = None
+    ) -> list[tuple[str, int, int, float]]:
+        return []
+
 
 def _window(limits: dict[str, QuotaLimits]) -> QuotaWindow:
     # calendar_week → deterministic (no anchor) so usage is summed as-is.

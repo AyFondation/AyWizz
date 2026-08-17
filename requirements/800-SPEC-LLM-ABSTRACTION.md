@@ -1,6 +1,6 @@
 ---
 document: 800-SPEC-LLM-ABSTRACTION
-version: 10
+version: 12
 path: requirements/800-SPEC-LLM-ABSTRACTION.md
 language: en
 status: draft
@@ -11,6 +11,10 @@ derives-from: [D-002, D-011, D-012, D-020, D-021]
 
 > **Purpose of this document.** Specify the LLM Gateway (C8): the LiteLLM proxy deployment, the OpenAI-compatible API contract, provider and model management, routing strategies across v1/v2/v3 stages, the per-agent feature catalog, cost tracking, budget enforcement, and the logging hooks required for the v2 eval harness. This spec defines the contract between C8 and every component that invokes an LLM.
 
+> **Version 12 changes.** **Per-request model-mix cost breakdown (R-800-146) + verbose reasoning (R-800-147).** A single request (chat turn `tags.turn_id` or pipeline `tags.run_id`) fans out across several models; C8 stamps `turn_id` on `llm_calls` and exposes `GET /admin/v1/quota/requests/{correlation}/breakdown?by=turn|run` = total tokens/cost + a per-model split with `tokens_pct` (e.g. 10 Mtok — opus 25 % / haiku 75 %), surfaced in the consumption UI + inline on the step feed. Separately, on a **verbose-reasoning** request (200-SPEC R-200-207 toggle) C8 requests adaptive thinking and streams the thinking blocks as `reasoning` events; `normal` mode requests none (opt-in cost). Thinking tokens are recorded on `llm_calls` and flow into the breakdown.
+>
+> **Version 11 changes.** **Per-project + per-user cost dashboards (R-800-145).** The R-800-144 consumption report is extended to a **per-project** and **per-user** view across **day / week / month / quarter / semester / year** (`GET /admin/v1/quota/consumption/{projects,users}`, operator-scoped: `admin`/`tenant_admin` confined to its `X-Tenant-Id`, `platform_manager` cross-tenant; `.../tenants` day-anchored is platform_manager-only). Aggregation groups `llm_calls` by `tags.project_id` / `tags.user_id`. Reporting-only. The complementary **disk-storage dashboards** (per-project / per-tenant MinIO metering + time-series snapshots + CronJob) are specified in **100-SPEC (R-100-140)** as a platform-governance capability, not an LLM concern.
+>
 > **Version 10 changes.** **Tenant catalogue is OPT-OUT (lazy-materialised) + a discovery picker.** The per-tenant LLM catalogue stops being an empty opt-in collection: on a tenant's FIRST touch of the catalogue (list / resolve / project-models / upsert) it is **lazily materialised** with EVERY platform-registry model (enabled), then a per-tenant `initialized` marker (`tenant_llm_catalog_meta`) is set so an admin who subsequently removes models is **not** re-populated on the next read. This closes the dead-end where a freshly-seeded tenant had an empty catalogue and no way to populate it (the registry list is `platform_manager`-only) — and where an empty catalogue meant `model_quality` resolution had nothing to resolve. A NEW read endpoint **`GET /api/v1/llm/catalog/available`** (admin / tenant_admin, tenant-scoped) lists the registry models NOT currently in the tenant catalogue — the set an admin can **re-add** — as a public projection (no provider key). The HMI replaces the blind "add by id" input with a picker fed by this endpoint. Materialisation writes `default_for_new_projects=false` (the admin still curates project defaults). Catalogued in `065-TEST-MATRIX.md`. No migration — existing tenants materialise lazily on next access.
 >
 > **Version 9 changes.** **Model pricing = a dated source-of-truth series, replayable + reporting.** Model unit cost stops being a single mutable pair on the registry model and becomes an **effective-dated pricing series** — the `c8_model_pricing` collection (E-800-004): each entry `(model_id, effective_from, input_price_per_mtok, output_price_per_mtok)` is the AUTHORITATIVE basis for every cost calculation. **The cost of a call = tokens × the price effective at the call's `timestamp_start`** (R-800-140), looked up in this table — so the pricing basis of any historical call is always recoverable WITHOUT snapshotting a rate onto the call (operator decision: no per-call unit-price field). Editing a model's cost = **appending / correcting a dated entry** (R-800-141); this IS the change history and the timeline-graph source. A retroactive correction (fixing an erroneous price) is the same operation on the truth table, and it triggers an **AUTOMATIC replay** — the stored costs of the affected calls are recomputed from the corrected series — with a **manual replay** endpoint (`platform_manager`) available for on-demand re-runs (R-800-142). Costs are denominated in a **single platform currency** (config, default `EUR`): `llm_calls.cost_usd` is **renamed `cost_amount`** and gains a `currency` field (R-800-143), and the pricing series carries the same currency. A **per-tenant consumption report** aggregates `cost_amount` + tokens per tenant across the reporting windows **session / week / month / quarter / semester / year** (reporting only — the ENFORCED `QuotaPolicy` windows are unchanged) (R-800-144). Registry admin cost editing (`platform_manager`) now writes dated pricing entries; the UI surfaces the per-tenant consumption table (quotas), a dated pricing editor + timeline graph, and the replay trigger.
@@ -1193,6 +1197,85 @@ semester / year** (`GET /admin/v1/quota/consumption`, `platform_manager`).
 These windows are **reporting-only**: the ENFORCED `QuotaPolicy` windows
 (R-800 Lot 3) are UNCHANGED. Calendar windows anchor on the platform timezone;
 `session` reuses the QuotaPolicy session window duration.
+
+#### R-800-145
+
+```yaml
+id: R-800-145
+version: 1
+status: draft
+category: functional
+derives-from: [D-021]
+impacts: [E-800-002]
+```
+
+The consumption report of R-800-144 SHALL additionally be available **per
+project** and **per user**, across the windows **day / week / month / quarter /
+semester / year** (a calendar `day` window replaces `session` for these
+operator dashboards). Aggregation groups `llm_calls` by `tags.project_id` /
+`tags.user_id` respectively. Endpoints (E-100-002 v7 operator surface, forward-
+auth): `GET /admin/v1/quota/consumption/projects`, `.../users` — accepted for
+`platform_manager` (cross-tenant, optional `?tenant_id=`) AND the tenant
+operator `admin` / `tenant_admin` (CONFINED to its own `X-Tenant-Id`);
+`.../tenants` (per-tenant, day..year) is `platform_manager` only. Reporting-only
+— the ENFORCED `QuotaPolicy` is untouched; amounts are in the platform
+`currency`.
+
+**Rationale.** Operators need per-project and per-user cost attribution (who /
+which project is spending), scoped to their tenant, without exposing content.
+
+#### R-800-146
+
+```yaml
+id: R-800-146
+version: 1
+status: draft
+category: functional
+derives-from: [E-800-002]
+impacts: [E-800-002]
+```
+
+The platform SHALL attribute the cost of a single **request** — a chat TURN
+(`tags.turn_id`, minted per user message) or a pipeline RUN (`tags.run_id`) — to
+the concrete models the harness used, since one request fans out across several
+LLM calls to DIFFERENT models (architect→Opus, implementer→Sonnet, sub-agent→
+Haiku, …). C8 SHALL therefore stamp `turn_id` on `llm_calls.tags` (alongside the
+existing `run_id`), and expose a **per-request breakdown**
+`GET /admin/v1/quota/requests/{correlation}/breakdown` (query `by=turn|run`)
+returning, for the request: total tokens (input+output) + cost, AND a per-model
+split `{model, input_tokens, output_tokens, tokens, cost, tokens_pct}`.
+Aggregation is over `llm_calls` (E-800-002, the stored source of truth) grouped
+by `model`. Example shape: total 10 Mtok — `opus` 2.5 Mtok (25 %), `haiku`
+7.5 Mtok (75 %). The breakdown SHALL be surfaced in the consumption UI and
+inline on the request's step feed.
+
+**Rationale.** A single answer costs a *mix* of models; flat totals hide the
+routing economics. Per-request model attribution lets an operator see where the
+tokens (and money) actually went and tune `agent_routes`.
+
+#### R-800-147
+
+```yaml
+id: R-800-147
+version: 1
+status: draft
+category: functional
+derives-from: [R-800-014]
+impacts: [E-800-003]
+```
+
+When the caller requests **verbose reasoning** (R-200-207), C8 SHALL request
+adaptive extended thinking from the upstream model (`thinking: {type:
+"adaptive"}` on capable models) and SHALL stream the resulting **thinking
+blocks** through `chat_completion_stream` as distinct events so C3 / C4 can
+surface them as `reasoning` inline/trace events. In the default (`normal`) mode
+C8 SHALL NOT request thinking (no extra thinking tokens billed). Thinking-token
+usage, when incurred, SHALL be recorded on `llm_calls` like any other tokens so
+it appears in the per-request breakdown (R-800-146).
+
+**Rationale.** Exposing the model's reasoning is the other half of a
+Claude-Code-like view; gating it on the verbosity toggle keeps the token cost
+opt-in and attributable.
 
 #### E-800-003: Agent-to-feature catalog reference
 

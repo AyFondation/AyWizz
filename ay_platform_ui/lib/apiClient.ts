@@ -1,6 +1,6 @@
 // =============================================================================
 // File: apiClient.ts
-// Version: 12
+// Version: 13
 // Path: ay_platform_ui/lib/apiClient.ts
 // Description: Thin wrapper over `fetch` that prepends the runtime-config
 //              `apiBaseUrl` to every call and (optionally) attaches the
@@ -92,6 +92,7 @@ import type {
   QuotaStatus,
   QuotaWindow,
   RBACProjectRole,
+  RequestCostBreakdown,
   RequirementDocumentDetail,
   RequirementDocumentList,
   RequirementEntityList,
@@ -755,6 +756,18 @@ export class ApiClient {
     });
   }
 
+  /** GET /admin/v1/quota/requests/{id}/breakdown — the model-mix cost/token
+   *  split of one request (by="run" → run_id, by="turn" → turn_id). */
+  async getRequestBreakdown(
+    correlation: string,
+    by: "run" | "turn" = "run",
+  ): Promise<RequestCostBreakdown> {
+    return this.request<RequestCostBreakdown>(
+      `/admin/v1/quota/requests/${encodeURIComponent(correlation)}/breakdown?by=${by}`,
+      { method: "GET" },
+    );
+  }
+
   /** GET /admin/v1/quota/consumption/tenants — per-tenant cost across day..year
    *  (platform_manager, cross-tenant). */
   async listTenantConsumption(): Promise<ConsumptionReport> {
@@ -971,6 +984,9 @@ export class ApiClient {
        *  server enforces a 32K-token cap on combined resolved
        *  content (returns 413 on overflow). */
       references?: PromptReference[];
+      /** Verbose reasoning (R-200-207) — request + stream the model's
+       *  extended thinking as `reasoning` inline events. Opt-in. */
+      reasoningVerbose?: boolean;
     } = {},
   ): Promise<void> {
     const url = this.url(`/api/v1/conversations/${encodeURIComponent(conversationId)}/messages`);
@@ -988,6 +1004,9 @@ export class ApiClient {
     }
     if (options.references && options.references.length > 0) {
       body.references = options.references;
+    }
+    if (options.reasoningVerbose) {
+      body.reasoning_verbose = true;
     }
     const resp = await fetch(url, {
       method: "POST",
@@ -1517,6 +1536,71 @@ export class ApiClient {
       `/api/v1/orchestrator/runs/${encodeURIComponent(runId)}/trace${qs ? `?${qs}` : ""}`,
       { method: "GET" },
     );
+  }
+
+  /** GET /api/v1/orchestrator/runs/{run_id}/events — LIVE run-event SSE stream
+   *  (R-200-206). Replays the ledger then pushes each new TraceEvent. We use
+   *  fetch + a body reader (NOT EventSource — no Bearer support), same as the
+   *  chat stream. `onTrace` fires per event; `onDone` on the terminal marker.
+   *  Pass an AbortSignal (from an AbortController) to close on unmount. */
+  async streamOrchestratorEvents(
+    runId: string,
+    handlers: { onTrace: (ev: TraceEvent) => void; onDone?: (status: string) => void },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const url = this.url(`/api/v1/orchestrator/runs/${encodeURIComponent(runId)}/events`);
+    const headers = new Headers();
+    headers.set("Accept", "text/event-stream");
+    const token = readStoredToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const resp = await fetch(url, { method: "GET", headers, cache: "no-store", signal });
+    if (!resp.ok) {
+      if (resp.status === 401 && token) _notifySessionRevoked();
+      throw new ApiError(resp.status, url, await resp.text().catch(() => ""));
+    }
+    if (!resp.body) throw new Error("response has no body — cannot stream");
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic SSE loop
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        let eventType = "message";
+        const dataLines: string[] = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) {
+            const r = line.slice(6);
+            eventType = (r.startsWith(" ") ? r.slice(1) : r).trim();
+          } else if (line.startsWith("data:")) {
+            const r = line.slice(5);
+            dataLines.push(r.startsWith(" ") ? r.slice(1) : r);
+          }
+        }
+        const data = dataLines.join("\n");
+        if (eventType === "trace") {
+          try {
+            handlers.onTrace(JSON.parse(data) as TraceEvent);
+          } catch {
+            /* skip malformed frame */
+          }
+        } else if (eventType === "done") {
+          let st = "";
+          try {
+            st = (JSON.parse(data) as { status?: string }).status ?? "";
+          } catch {
+            /* no status */
+          }
+          handlers.onDone?.(st);
+          return;
+        }
+      }
+    }
   }
 
   /** POST /api/v1/orchestrator/runs/{run_id}/steer — queue an operator

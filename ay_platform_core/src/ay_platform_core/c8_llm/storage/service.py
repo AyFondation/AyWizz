@@ -7,6 +7,7 @@
 #              occupation) with the snapshot time-series (history). The metering
 #              pass (`run_snapshot`) is triggered by a periodic CronJob and
 #              appends one snapshot per project.
+# @relation implements:R-100-140
 # =============================================================================
 
 from __future__ import annotations

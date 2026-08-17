@@ -1,6 +1,6 @@
 # =============================================================================
 # File: runtime.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py
 # Description: Sub-agent runtime — the body of the `python -m
 #              ay_platform_core._sub_agent` entrypoint that runs INSIDE an
@@ -225,6 +225,9 @@ async def _invoke_llm(
             project_id=envelope.project_id,
             user_id=envelope.user_id,
             phase=envelope.phase.value,
+            # Correlate the call to its pipeline run for the per-request
+            # model-mix cost breakdown (R-800-146).
+            run_id=envelope.run_id,
         )
     except Exception as exc:
         return AgentCompletion(

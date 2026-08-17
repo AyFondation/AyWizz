@@ -8,6 +8,7 @@
 #              the time-series. Validates project discovery from the key layout,
 #              per-project byte sums, tenant-scoped reports, the snapshot pass,
 #              and the series-since read.
+# @relation validates:R-100-140
 # =============================================================================
 
 from __future__ import annotations

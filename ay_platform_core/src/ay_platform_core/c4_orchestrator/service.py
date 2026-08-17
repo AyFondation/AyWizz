@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 3
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py
 # Description: Facade for the C4 Orchestrator. Drives pipeline runs through
 #              the five phases, honours the three hard gates, applies the
@@ -27,6 +27,7 @@
 # @relation implements:R-200-001
 # @relation implements:R-200-002
 # @relation implements:R-200-003
+# @relation implements:R-200-206
 # @relation implements:R-200-010
 # @relation implements:R-200-011
 # @relation implements:R-200-012
@@ -300,6 +301,22 @@ class OrchestratorService:
         )
         return [TraceEvent.model_validate(ev) for ev in raw]
 
+    async def get_full_trace(
+        self, run_id: str
+    ) -> tuple[list[TraceEvent], RunStatus]:
+        """The FULL append-only trace ledger (oldest-first) + the run status,
+        for the live SSE stream (R-200-206). The ledger has no eviction in v1
+        (R-200-201), so index-based tailing over successive reads is stable."""
+        row = await self._repo.get_run(run_id)
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="run not found"
+            )
+        trace = [
+            TraceEvent.model_validate(ev) for ev in (row.get("trace") or [])
+        ]
+        return trace, RunStatus(row.get("status", RunStatus.RUNNING.value))
+
     async def steer_run(self, run_id: str, payload: RunSteer) -> RunPublic:
         """Queue a steering hint for consumption at the next phase /
         sub-agent-tour boundary (R-200-202..203). Returns 409 when the
@@ -331,10 +348,16 @@ class OrchestratorService:
         duration_ms: int | None = None,
         ok: bool | None = None,
         payload: dict[str, Any] | None = None,
+        sub_agent_id: str | None = None,
+        parent_agent: str | None = None,
     ) -> None:
         """In-place append to the run's trace ledger (R-200-200). The
         caller is expected to `upsert_run(row)` afterwards — we don't
-        persist here to let neighbouring mutations be batched."""
+        persist here to let neighbouring mutations be batched.
+
+        `sub_agent_id` / `parent_agent` (R-200-208) tag the event with the
+        (sub-)agent it originates from so a consumer can render the
+        sub-agent tree from the flat ledger."""
         ev: dict[str, Any] = {
             "kind": kind.value,
             "ts": datetime.now(UTC).isoformat(),
@@ -347,6 +370,10 @@ class OrchestratorService:
             ev["ok"] = ok
         if payload is not None:
             ev["payload"] = payload
+        if sub_agent_id is not None:
+            ev["sub_agent_id"] = sub_agent_id
+        if parent_agent is not None:
+            ev["parent_agent"] = parent_agent
         trace = row.get("trace")
         if not isinstance(trace, list):
             trace = []
@@ -550,6 +577,7 @@ class OrchestratorService:
             phase=phase,
             label=f"{dispatch.agent.value} dispatched",
             payload={"event": "start", "agent": dispatch.agent.value},
+            sub_agent_id=dispatch.agent.value,
         )
 
         await self._publish(
@@ -579,6 +607,7 @@ class OrchestratorService:
                 "agent": completion.agent.value,
                 "status": completion.status.value,
             },
+            sub_agent_id=completion.agent.value,
         )
         await self._repo.upsert_run(row)
         await self._publish(

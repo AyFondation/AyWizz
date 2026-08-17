@@ -1,6 +1,6 @@
 # =============================================================================
 # File: repository.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/repository.py
 # Description: ArangoDB persistence for the quota subsystem. v2 supports the
 #              four-level model: usage is aggregated over `llm_calls` filtered by
@@ -53,6 +53,9 @@ class QuotaStore(Protocol):
     async def consumption_by_user(
         self, since_iso: str, tenant_id: str | None = None
     ) -> list[tuple[str, float, int]]: ...
+    async def breakdown_by_model(
+        self, field: str, value: str, tenant_id: str | None = None
+    ) -> list[tuple[str, int, int, float]]: ...
 
 
 class QuotaRepository:
@@ -277,4 +280,52 @@ class QuotaRepository:
         for the user cost dashboards (E-100-002 v7)."""
         return await self._run(
             self._consumption_by_user_sync, since_iso, tenant_id
+        )
+
+    # Only these tag fields may correlate a "request" (whitelist — the field
+    # name is interpolated into AQL, so it must never be caller-controlled).
+    _BREAKDOWN_FIELDS = ("run_id", "turn_id")
+
+    def _breakdown_by_model_sync(
+        self, field: str, value: str, tenant_id: str | None
+    ) -> list[tuple[str, int, int, float]]:
+        if field not in self._BREAKDOWN_FIELDS:
+            raise ValueError(f"unsupported breakdown field: {field!r}")
+        if not self._db.has_collection(COLL_CALLS):
+            return []
+        filters = [f"c.tags.{field} == @val"]
+        bind: dict[str, Any] = {"@col": COLL_CALLS, "val": value}
+        if tenant_id is not None:
+            filters.append("c.tags.tenant_id == @tid")
+            bind["tid"] = tenant_id
+        query = (
+            "FOR c IN @@col "
+            f"  FILTER {' AND '.join(filters)} "
+            "  COLLECT model = c.model "
+            "  AGGREGATE intok = SUM(c.input_tokens), "
+            "            outtok = SUM(c.output_tokens), "
+            "            cost = SUM(c.cost_usd) "
+            "  RETURN { model, intok, outtok, cost }"
+        )
+        rows = list(self._db.aql.execute(query, bind_vars=bind))
+        return [
+            (
+                str(r["model"]),
+                int(r.get("intok") or 0),
+                int(r.get("outtok") or 0),
+                float(r.get("cost") or 0.0),
+            )
+            for r in rows
+            if r.get("model")
+        ]
+
+    async def breakdown_by_model(
+        self, field: str, value: str, tenant_id: str | None = None
+    ) -> list[tuple[str, int, int, float]]:
+        """Per-model (input_tokens, output_tokens, cost) of `llm_calls` for one
+        request, correlated by `tags.<field>` == `value` (field ∈ run_id /
+        turn_id), optionally confined to a tenant. Source of the R-800-146
+        model-mix breakdown."""
+        return await self._run(
+            self._breakdown_by_model_sync, field, value, tenant_id
         )

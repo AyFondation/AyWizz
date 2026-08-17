@@ -1,6 +1,6 @@
 ---
 document: 100-SPEC-ARCHITECTURE
-version: 20
+version: 21
 path: requirements/100-SPEC-ARCHITECTURE.md
 language: en
 status: draft
@@ -11,6 +11,8 @@ derives-from: [D-002, D-003, D-007, D-008, D-010, D-011, D-012, D-013, D-014, D-
 
 > **Purpose of this document.** Define the macro-level component decomposition of the platform, where each type of requirement lives, the contracts between components, the scaling model, and the deployment targets. This spec defines the **what** and the **why** of each component — concrete technology choices and implementation details belong to component-specific engineering work.
 
+> **Version 21 changes.** **Operator resource dashboards (E-100-002 v7).** Adds **R-100-140** — per-project / per-tenant **disk-storage metering** (MinIO measure by the `c4-artifacts/{tenant}/{project}/` key layout + `storage_snapshots` time-series + a `c8-storage-metering` CronJob + operator read surface `GET /admin/v1/storage/{projects,tenants}[/…/series]`, tenant-scoped for `admin`, platform-wide for `platform_manager`; sizes only, no content; 503 when unconfigured). Complements the per-project/user **LLM cost** dashboards specified in `800-SPEC` R-800-145. The reverse ACL view (`GET /admin/users/{id}/projects`) rounds out the operator's rights visualisation. No new role — all three surfaces reuse the E-100-002 v7 operator scoping.
+>
 > **Version 20 changes.** **E-100-002 v6 → v7** — REMOVES the short-lived
 > `tenant_manager` role and makes **`admin` (= `tenant_admin`) the CONTENT-BLIND
 > tenant operator**: the tenant-scoped mirror of `platform_manager` (users,
@@ -2222,6 +2224,47 @@ The platform SHALL deploy **C13 (Extraction & Chunking Service)** as a dependenc
 **Rationale.** Per D-020. The component boundary keeps AyExtractor's complexity (extractor adapters per format, structural chunking, optional LLM agents) outside AyWizz's `ay_platform_core/` package, while the MinIO artifact contract gives C7 (and any future consumer — exports, audit, downstream analytics) a stable file-based interface independent of AyExtractor's internal evolution. The HTTP surface stays minimal so that C12 (n8n) drives the macro-orchestration without re-implementing AyExtractor's LangGraph state machine.
 
 **Non-goals.** This requirement does NOT specify (a) the C13 internal pipeline (which AyExtractor's own specification governs), (b) the MinIO artifact layout itself (R-400-220), (c) the C7 `/ingest-chunks` endpoint shape (R-400-223), or (d) the n8n workflow shape (deferred to a future workflow-spec section). Q-200-022 tracks the v2 adoption of Phase 3 (KG construction inside C13 vs. inside C7).
+
+#### R-100-140
+
+```yaml
+id: R-100-140
+version: 1
+status: draft
+category: architecture
+derives-from: [E-100-002]
+impacts: [E-100-002]
+```
+
+The platform SHALL provide **per-project and per-tenant disk-storage metering**
+as an operator-governance capability (E-100-002 v7 operator dashboards). The
+metering SHALL:
+
+1. **Measure** a project's occupation as the sum of MinIO object sizes under its
+   artifact prefix (`c4-artifacts/{tenant_id}/{project_id}/…`), discovering the
+   `(tenant, project)` set from the key layout itself — NO dependency on the C2
+   project registry. A tenant's occupation is the sum of its projects.
+2. **Snapshot** a time-series: a periodic metering pass SHALL append one
+   `storage_snapshots` row `(tenant_id, project_id, measured_at, bytes)` per
+   project. The pass runs OUT of band (a K8s CronJob talking to MinIO + Arango
+   directly — no HTTP, no forward-auth) and MAY also be triggered on demand by a
+   `platform_manager`.
+3. **Expose**, behind C1 forward-auth, an OPERATOR read surface: current
+   occupation (`GET /admin/v1/storage/projects`, `.../tenants`) and the snapshot
+   series (`.../projects/{id}/series?window=…`). Scoping mirrors the cost
+   dashboards (R-800-145): a tenant operator (`admin` / `tenant_admin`) is
+   CONFINED to its own tenant; `platform_manager` is cross-tenant (`.../tenants`
+   and the snapshot trigger are platform_manager-only). The surface exposes
+   SIZES only — never project CONTENT.
+4. **Degrade safely**: when no object store is configured the storage endpoints
+   SHALL answer `503` and the rest of the operator surface is unaffected.
+
+Disk storage is a platform-ops metric, NOT an LLM concern — the complementary
+LLM cost dashboards live in `800-SPEC` (R-800-145).
+
+**Rationale.** Operators need per-project / per-tenant storage attribution +
+trend, scoped to their tenant, without a C2↔C8 coupling (discovery from the key
+layout) and without ever surfacing content.
 
 
 ---

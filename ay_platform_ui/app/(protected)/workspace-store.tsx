@@ -1,6 +1,6 @@
 // =============================================================================
 // File: workspace-store.tsx
-// Version: 5
+// Version: 6
 // Path: ay_platform_ui/app/(protected)/workspace-store.tsx
 //
 // v5 (2026-05-19): sessionStorage schema-migration safety.
@@ -130,6 +130,9 @@ export interface SendArgs {
    *  surfaced in the persisted `MessagePublic.references` (metadata
    *  only). 32K-token cap enforced server-side (413 on overflow). */
   references?: PromptReference[];
+  /** Verbose reasoning (R-200-207) — request + show the model's extended
+   *  thinking as `reasoning` inline events. Opt-in. */
+  reasoningVerbose?: boolean;
   /** Fired after a mutating DocGen tool (`create/update/delete_
    *  document`) completes — Working area refreshes its tree on it. */
   onMutatingTool?: () => void;
@@ -295,6 +298,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         userPrompt,
         projectPrompt,
         references,
+        reasoningVerbose,
         onMutatingTool,
       } = args;
       if ((runtimesRef.current[conversationId] ?? EMPTY_RT).streaming) return;
@@ -318,6 +322,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             userPrompt,
             projectPrompt,
             references,
+            reasoningVerbose,
             onInlineEvent: (evt) => {
               setRt(conversationId, (r) => {
                 // Collapse a stage `done` onto its matching `running`

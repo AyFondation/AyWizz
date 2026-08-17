@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**152 endpoints** across 8 components. Order: by component, method, path.
+**154 endpoints** across 8 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -105,6 +105,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/feedback` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/resume` | role_gated | tenant | `project_owner` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/orchestrator/runs/{run_id}/trace` | authenticated | tenant | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/orchestrator/runs/{run_id}/events` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/steer` | authenticated | tenant | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/artifacts/runs` | authenticated | project | any authenticated | `platform_manager` | arango · `c4_artifact_runs` | 200 |
 | `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree` | authenticated | project | any authenticated | `platform_manager` | minio · bucket `orchestrator` | 200 |
@@ -207,6 +208,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/admin/v1/quota/consumption/projects` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/quota/consumption/tenants` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/quota/consumption/users` | role_gated | — | `platform_manager` | — | — | 200 |
+| `GET` | `/admin/v1/quota/requests/{correlation}/breakdown` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/storage/projects` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/storage/tenants` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/storage/projects/{project_id}/series` | role_gated | — | `platform_manager` | — | — | 200 |

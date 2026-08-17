@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/models.py
 # Description: Pydantic contracts for the LLM quota subsystem. v2 generalises the
 #              Lot 3 single-per-tenant policy into a FOUR-LEVEL model: every
@@ -281,3 +281,32 @@ class UserConsumptionReport(BaseModel):
     windows: list[str]
     tenant_id: str | None = None
     users: list[UserConsumption]
+
+
+class ModelCostShare(BaseModel):
+    """One model's share of a single request's spend (R-800-146)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    tokens: int
+    cost: float
+    tokens_pct: float  # this model's % of the request's total tokens
+
+
+class RequestCostBreakdown(BaseModel):
+    """The model-mix breakdown of one request (a chat `turn` or a pipeline
+    `run`): total tokens + cost, and a per-model split. Aggregated from the
+    stored `llm_calls` (E-800-002) — the model-routing economics of one answer.
+    E.g. 10 Mtok total → opus 2.5 Mtok (25%), haiku 7.5 Mtok (75%)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    correlation: str  # the run_id or turn_id
+    by: str  # "run" | "turn"
+    currency: str
+    total_tokens: int
+    total_cost: float
+    models: list[ModelCostShare]

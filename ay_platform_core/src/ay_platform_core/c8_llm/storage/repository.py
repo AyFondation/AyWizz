@@ -7,6 +7,7 @@
 #              Sync-wrapped, lock-guarded — same pattern as the other c8
 #              repositories. A snapshot is (tenant_id, project_id, measured_at,
 #              bytes); the metering pass appends, the dashboards read a window.
+# @relation implements:R-100-140
 # =============================================================================
 
 from __future__ import annotations

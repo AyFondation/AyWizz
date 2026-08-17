@@ -1,6 +1,6 @@
 // =============================================================================
 // File: types.ts
-// Version: 13
+// Version: 14
 // Path: ay_platform_ui/lib/types.ts
 // Description: Wire-format type definitions for the platform's public
 //              bootstrap surface — `/runtime-config.json` (static, served
@@ -290,6 +290,9 @@ export interface InlineEvent {
   kind: string;
   label: string;
   status: "running" | "done";
+  /** Free text payload — for `reasoning` events, the model's extended-thinking
+   *  content (verbose mode, R-200-207). */
+  text?: string | null;
   /** Machine id : stage name (`retrieve`…) or tool name. */
   name?: string | null;
   /** Outcome flag for `tool_call` events ; null for stages. */
@@ -703,6 +706,28 @@ export interface ConsumptionReport {
   tenants: TenantConsumption[];
 }
 
+/** One model's share of a single request's spend (R-800-146). */
+export interface ModelCostShare {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  tokens: number;
+  cost: number;
+  tokens_pct: number;
+}
+
+/** Response of `GET /admin/v1/quota/requests/{id}/breakdown` — the model-mix of
+ *  one request (a chat turn or a pipeline run). E.g. 10 Mtok → opus 25% /
+ *  haiku 75%. */
+export interface RequestCostBreakdown {
+  correlation: string;
+  by: string;
+  currency: string;
+  total_tokens: number;
+  total_cost: number;
+  models: ModelCostShare[];
+}
+
 /** Per-user LLM consumption across day..year (E-100-002 v7 user cost view). */
 export interface UserConsumption {
   user_id: string;
@@ -991,6 +1016,11 @@ export interface TraceEvent {
   duration_ms?: number | null;
   ok?: boolean | null;
   payload?: Record<string, unknown> | null;
+  /** R-200-208 sub-agent tree: the (sub-)agent this event was emitted from,
+   *  and its dispatcher (absent → direct child of the run). A consumer
+   *  groups the flat ledger into the nested harness topology. */
+  sub_agent_id?: string | null;
+  parent_agent?: string | null;
 }
 
 /** Body of `POST /api/v1/orchestrator/runs/{run_id}/steer` (E-200-007,

@@ -37,14 +37,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 
 | Spec | Total | tested | implemented | test-only | divergent | not-yet |
 |---|---|---|---|---|---|---|
-| [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 82 | 8 | 26 | 4 | 0 | 44 |
-| [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 70 | 23 | 28 | 0 | 0 | 19 |
+| [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 83 | 9 | 26 | 4 | 0 | 44 |
+| [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 73 | 26 | 28 | 0 | 0 | 19 |
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
 | [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 46 | 9 | 13 | 1 | 0 | 23 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 2 | 22 | 0 | 0 | 0 |
-| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 52 | 2 | 12 | 1 | 0 | 37 |
-| **Total** | **340** | **44** | **130** | **11** | **8** | **147** |
+| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 60 | 7 | 13 | 1 | 0 | 39 |
+| **Total** | **352** | **53** | **131** | **11** | **8** | **149** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -132,6 +132,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-100-123` | v1 | approved | **implemented** | `.github/workflows/ci-tests.yml` | — |
 | `R-100-124` | v1 | approved | **tested** | `ay_platform_core/src/ay_platform_core/_observability/main.py`, `ay_platform_core/src/ay_platform_core/_observability/synthesis.py`, `ay_platform_core/src/ay_platform_core/observability/workflow/__init__.py` (+3 more) | `ay_platform_core/tests/integration/observability/workflow/test_elasticsearch_integration.py`, `ay_platform_core/tests/integration/observability/workflow/test_loki_integration.py`, `ay_platform_core/tests/unit/observability/workflow/test_router.py` |
 | `R-100-125` | v2 | draft | **implemented** | `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml`, `infra/k8s/base/c13_extractor/deployment.yaml` | — |
+| `R-100-140` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/storage/metering.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/repository.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/router.py` (+3 more) | `ay_platform_core/tests/integration/c8_admin/test_storage_router_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_storage_metering.py` |
 
 ## R-200-* — [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md)
 
@@ -207,6 +208,9 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-200-203` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_trace_and_steer_api.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_trace_and_steer.py` |
 | `R-200-204` | v1 | draft | **not-yet** | — | — |
 | `R-200-205` | v1 | draft | **not-yet** | — | — |
+| `R-200-206` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/router.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_pipeline_flow.py` |
+| `R-200-207` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c3_conversation/service.py` | `ay_platform_core/tests/unit/c3_conversation/test_service.py` |
+| `R-200-208` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/models.py` | `ay_platform_core/tests/unit/c4_orchestrator/test_trace_and_steer.py` |
 
 ## R-300-* — [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md)
 
@@ -420,6 +424,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-132` | v2 | draft | **not-yet** | — | — |
 | `R-800-133` | v1 | draft | **not-yet** | — | — |
 | `R-800-134` | v1 | draft | **not-yet** | — | — |
+| `R-800-140` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/pricing/models.py`, `ay_platform_core/src/ay_platform_core/c8_llm/pricing/service.py` | `ay_platform_core/tests/unit/c8_llm/test_pricing_select.py`, `ay_platform_core/tests/unit/c8_llm/test_pricing_service.py` |
+| `R-800-141` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/pricing/models.py`, `ay_platform_core/src/ay_platform_core/c8_llm/pricing/service.py` | `ay_platform_core/tests/integration/c8_llm/test_pricing_repository.py`, `ay_platform_core/tests/unit/c8_llm/test_pricing_service.py` |
+| `R-800-142` | v1 | draft | **not-yet** | — | — |
+| `R-800-143` | v1 | draft | **not-yet** | — | — |
+| `R-800-144` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | — |
+| `R-800-145` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py` |
+| `R-800-146` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py` |
+| `R-800-147` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py` | `ay_platform_core/tests/unit/c8_llm/test_prompt_cache.py` |
 
 ---
 

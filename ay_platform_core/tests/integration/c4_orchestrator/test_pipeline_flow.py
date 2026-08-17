@@ -1,7 +1,9 @@
 # =============================================================================
 # File: test_pipeline_flow.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c4_orchestrator/test_pipeline_flow.py
+#
+# @relation validates:R-200-206
 # Description: Integration tests — full pipeline runs against REAL ArangoDB,
 #              REAL C8 client routed to a scripted ASGI LiteLLM mock, and
 #              the REAL in-process dispatcher. Exercises phase advancement,
@@ -313,6 +315,50 @@ async def test_concurrent_run_in_same_session_rejected(
 # ---------------------------------------------------------------------------
 # Missing forward-auth headers denied
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_events_sse_replays_and_terminates(
+    c4_app: FastAPI, scripted_llm: ScriptedLLM,
+) -> None:
+    # A run that BLOCKS on brainstorm is terminal → /events replays the trace
+    # ledger then sends `event: done` (no infinite tail).
+    scripted_llm.enqueue({
+        "status": "BLOCKED",
+        "output": {},
+        "blocker": {"reason": "sse-test"},
+    })
+    async with _client(c4_app) as client:
+        start = await client.post(
+            "/api/v1/orchestrator/runs",
+            json={"project_id": "p-1", "session_id": "s-sse", "initial_prompt": "x"},
+            headers=_HEADERS,
+        )
+        run_id = start.json()["run_id"]
+        lines: list[str] = []
+        async with client.stream(
+            "GET",
+            f"/api/v1/orchestrator/runs/{run_id}/events",
+            headers=_HEADERS,
+        ) as resp:
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers["content-type"]
+            async for line in resp.aiter_lines():
+                lines.append(line)
+                if "event: done" in line:
+                    break
+    text = "\n".join(lines)
+    assert "event: trace" in text  # ledger replayed
+    assert "event: done" in text  # terminated on BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_run_events_missing_run_404(c4_app: FastAPI) -> None:
+    async with _client(c4_app) as client:
+        resp = await client.get(
+            "/api/v1/orchestrator/runs/nope/events", headers=_HEADERS
+        )
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

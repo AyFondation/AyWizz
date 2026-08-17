@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py
 # Description: FastAPI APIRouter for the global LLM quota policy (Lot 3),
 #              platform_manager only (E-100-002 v3 platform operator). Identity
@@ -11,6 +11,9 @@
 #              v3 (E-100-002 v7): adds GET /admin/v1/quota/consumption/projects
 #              — per-project cost across day..year, an OPERATOR surface
 #              (platform_manager cross-tenant; admin/tenant_admin own tenant).
+# @relation implements:R-800-144
+# @relation implements:R-800-145
+# @relation implements:R-800-146
 # =============================================================================
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from ay_platform_core.c8_llm.quota.models import (
     QuotaPolicy,
     QuotaPolicyUpdate,
     QuotaStatus,
+    RequestCostBreakdown,
     UserConsumptionReport,
 )
 from ay_platform_core.c8_llm.quota.service import QuotaService
@@ -183,6 +187,32 @@ async def get_user_consumption(
     _require_role(x_user_roles, _QUOTA_OPERATOR_ROLES)
     scope = _operator_tenant_scope(x_user_roles, x_tenant_id, tenant_id)
     return await service.user_consumption_report(tenant_id=scope)
+
+
+@router.get(
+    "/admin/v1/quota/requests/{correlation}/breakdown",
+    response_model=RequestCostBreakdown,
+)
+async def get_request_breakdown(
+    correlation: str,
+    by: str = "run",
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    x_tenant_id: str | None = Header(default=None),
+    service: QuotaService = Depends(get_quota_service),
+) -> RequestCostBreakdown:
+    """The model-mix cost/token breakdown of ONE request (`by=run` → run_id,
+    `by=turn` → turn_id): total + per-model split with % (R-800-146). Operator
+    surface: a tenant operator is confined to its own `X-Tenant-Id`;
+    platform_manager is cross-tenant (optional `?tenant_id=`)."""
+    _require_role(x_user_roles, _QUOTA_OPERATOR_ROLES)
+    if by not in ("run", "turn"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="by must be 'run' or 'turn'",
+        )
+    scope = _operator_tenant_scope(x_user_roles, x_tenant_id, None)
+    return await service.request_breakdown(correlation, by, tenant_id=scope)
 
 
 @router.get("/api/v1/quota/me", response_model=QuotaStatus)

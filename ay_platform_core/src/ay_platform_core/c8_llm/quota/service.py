@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py
 # Description: QuotaService — the global LLM quota policy + FOUR-LEVEL per-subject
 #              evaluation. For a call attributed to (tenant, project, user) it
@@ -8,6 +8,9 @@
 #              tenant / project / user), classifies ok/warn/exceeded, and blocks
 #              if ANY level is exceeded. Windows anchor first-use (session,
 #              trailing window in v2) or the calendar (week/month). Pure of HTTP.
+# @relation implements:R-800-144
+# @relation implements:R-800-145
+# @relation implements:R-800-146
 # =============================================================================
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from ay_platform_core.c8_llm.quota.models import (
     PROJECT_CONSUMPTION_WINDOWS,
     ConsumptionCell,
     ConsumptionReport,
+    ModelCostShare,
     ProjectConsumption,
     ProjectConsumptionReport,
     QuotaLevel,
@@ -35,6 +39,7 @@ from ay_platform_core.c8_llm.quota.models import (
     QuotaStatus,
     QuotaWindow,
     QuotaWindowStatus,
+    RequestCostBreakdown,
     TenantConsumption,
     UserConsumption,
     UserConsumptionReport,
@@ -241,6 +246,45 @@ class QuotaService:
             windows=list(PROJECT_CONSUMPTION_WINDOWS),
             tenant_id=tenant_id,
             projects=report_projects,
+        )
+
+    async def request_breakdown(
+        self, correlation: str, by: str, tenant_id: str | None = None
+    ) -> RequestCostBreakdown:
+        """The model-mix breakdown of one request (`by="turn"` → `turn_id`,
+        `by="run"` → `run_id`): total tokens + cost + a per-model split with
+        each model's % of the request's total tokens (R-800-146). Aggregated
+        from `llm_calls`; optionally confined to a tenant."""
+        field = "turn_id" if by == "turn" else "run_id"
+        rows = await self._store.breakdown_by_model(
+            field, correlation, tenant_id=tenant_id
+        )
+        total_tokens = sum(intok + outtok for _m, intok, outtok, _c in rows)
+        total_cost = sum(c for *_r, c in rows)
+        models = [
+            ModelCostShare(
+                model=model,
+                input_tokens=intok,
+                output_tokens=outtok,
+                tokens=intok + outtok,
+                cost=cost,
+                tokens_pct=(
+                    round(100.0 * (intok + outtok) / total_tokens, 2)
+                    if total_tokens
+                    else 0.0
+                ),
+            )
+            for model, intok, outtok, cost in sorted(
+                rows, key=lambda r: -(r[1] + r[2])
+            )
+        ]
+        return RequestCostBreakdown(
+            correlation=correlation,
+            by=by,
+            currency=self._currency,
+            total_tokens=total_tokens,
+            total_cost=total_cost,
+            models=models,
         )
 
     async def tenant_consumption_report_days(self) -> ConsumptionReport:

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 6
+# Version: 7
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/models.py
 # Description: Pydantic v2 models for C2 Auth Service public contracts.
 #              JWTClaims implements E-100-001.
@@ -513,6 +513,11 @@ class UserPreferencesUpdate(BaseModel):
     (hex `#RRGGBB`). Empty string clears the override (UI falls back
     to its built-in default palette). Validated at service layer."""
 
+    reasoning_verbosity: Literal["normal", "verbose"] | None = Field(default=None)
+    """Verbose-reasoning toggle (R-200-207). `verbose` requests + displays the
+    model's extended thinking (opt-in, extra tokens) ; `normal` (default) does
+    not. `null` leaves it unchanged."""
+
 
 class UserPreferencesResponse(BaseModel):
     """Response of GET /api/v1/users/me/preferences — the EFFECTIVE
@@ -541,3 +546,7 @@ class UserPreferencesResponse(BaseModel):
     override is set. The UI applies a default palette in that case ;
     multi-user conversations can render per-user bubble tints once
     project sharing lands."""
+
+    reasoning_verbosity: Literal["normal", "verbose"] = "normal"
+    """Verbose-reasoning toggle (R-200-207) — `verbose` shows the model's
+    extended thinking, `normal` (default) does not."""

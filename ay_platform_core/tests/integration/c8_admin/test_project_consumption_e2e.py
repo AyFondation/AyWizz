@@ -9,6 +9,8 @@
 #              platform_manager cross-tenant (optional ?tenant_id filter);
 #              admin/tenant_admin forced to its X-Tenant-Id; baseline user 403;
 #              a tenant operator without X-Tenant-Id 401.
+# @relation validates:R-800-145
+# @relation validates:R-800-146
 # =============================================================================
 
 from __future__ import annotations
@@ -61,6 +63,14 @@ class _Store:
     ) -> list[tuple[str, float, int]]:
         if tenant_id in (None, "tenant-a"):
             return [("user-1", 2.0, 200)]
+        return []
+
+    async def breakdown_by_model(
+        self, field: str, value: str, tenant_id: str | None = None
+    ) -> list[tuple[str, int, int, float]]:
+        # value "req-1" → opus 2.5M + haiku 7.5M tokens (25% / 75%).
+        if value == "req-1" and tenant_id in (None, "tenant-a"):
+            return [("opus", 2_000_000, 500_000, 6.0), ("haiku", 6_000_000, 1_500_000, 2.0)]
         return []
 
 
@@ -132,6 +142,28 @@ async def test_tenant_cost_report_platform_manager_only() -> None:
     assert ok.json()["windows"] == ["day", "week", "month", "quarter", "semester", "year"]
     assert [t["tenant_id"] for t in ok.json()["tenants"]] == ["tenant-a"]
     assert denied.status_code == 403
+
+
+async def test_request_breakdown_model_mix() -> None:
+    async with _client(_app()) as c:
+        r = await c.get(
+            "/admin/v1/quota/requests/req-1/breakdown?by=run",
+            headers={"X-User-Id": "p", "X-User-Roles": "platform_manager"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_tokens"] == 10_000_000
+    pct = {m["model"]: m["tokens_pct"] for m in body["models"]}
+    assert pct == {"opus": 25.0, "haiku": 75.0}
+
+
+async def test_request_breakdown_rejects_bad_by() -> None:
+    async with _client(_app()) as c:
+        r = await c.get(
+            "/admin/v1/quota/requests/req-1/breakdown?by=bogus",
+            headers={"X-User-Id": "p", "X-User-Roles": "platform_manager"},
+        )
+    assert r.status_code == 400
 
 
 async def test_user_cost_report_scoped_for_admin() -> None:

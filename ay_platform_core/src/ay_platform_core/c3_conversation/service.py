@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 16
+# Version: 17
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/service.py
 # Description: C3 Conversation Service facade.
 #              Orchestrates CRUD and the SSE message-send flow.
@@ -103,6 +103,7 @@
 #              that don't need RAG can pass `memory_service=None` and
 #              `llm_client=None` and the original stub fallback runs.
 # @relation R-100-003 R-100-074 D-008
+# @relation implements:R-200-207
 # =============================================================================
 
 from __future__ import annotations
@@ -395,9 +396,13 @@ class ConversationService:
         user_prompt: str | None = None,
         project_prompt: str | None = None,
         references: list[PromptReference] | None = None,
+        reasoning_verbose: bool = False,
     ) -> AsyncIterator[str]:
         """Persist the user message and yield SSE chunks for the
         assistant reply.
+
+        `reasoning_verbose` (R-200-207) requests the model's extended thinking
+        and streams it as `reasoning` inline events (verbose toggle; opt-in).
 
         Two paths:
 
@@ -472,6 +477,7 @@ class ConversationService:
                 user_prompt=user_prompt,
                 project_prompt=project_prompt,
                 reference_blocks=resolved_ref_blocks,
+                reasoning_verbose=reasoning_verbose,
             )
         return self._stub_stream(conversation_id)
 
@@ -589,7 +595,7 @@ class ConversationService:
 
         return _generate()
 
-    def _rag_stream(
+    def _rag_stream(  # noqa: PLR0915 - cohesive RAG SSE generator (retrieve→generate→done + reasoning capture)
         self,
         *,
         conversation_id: UUID,
@@ -601,8 +607,9 @@ class ConversationService:
         user_prompt: str | None,
         project_prompt: str | None,
         reference_blocks: list[str] | None = None,
+        reasoning_verbose: bool = False,
     ) -> AsyncIterator[str]:
-        async def _generate() -> AsyncIterator[str]:
+        async def _generate() -> AsyncIterator[str]:  # noqa: PLR0915 - single linear SSE turn; splitting would thread state across yields
             # The SSE protocol mixes two event kinds :
             #   - default `message` events (no `event:` line) carry the
             #     streamed LLM tokens — legacy clients keep working
@@ -761,6 +768,7 @@ class ConversationService:
                 #     `choices[0].delta.content` and re-emit as a plain
                 #     SSE message event.
                 request = ChatCompletionRequest(messages=messages, stream=True)
+                reasoning_buf: list[str] = []
                 async with self._llm.chat_completion_stream(
                     request,
                     agent_name="c3-rag",
@@ -772,8 +780,22 @@ class ConversationService:
                     # every turn → cache it (provider-aware, safe no-op below the
                     # min cacheable size or on non-marker providers).
                     cache_hint="static",
+                    # Verbose mode (R-200-207) → adaptive thinking is requested
+                    # and its deltas stream back as `reasoning_content`.
+                    reasoning_verbose=reasoning_verbose,
                 ) as chunks:
                     async for chunk in chunks:
+                        if reasoning_verbose:
+                            think = _extract_delta_reasoning(chunk)
+                            if think:
+                                reasoning_buf.append(think)
+                                # Live-only running delta (not persisted).
+                                yield _inline_sse({
+                                    "kind": "reasoning",
+                                    "label": "thinking",
+                                    "status": "running",
+                                    "text": think,
+                                })
                         delta = _extract_delta_content(chunk)
                         if delta:
                             collected_tokens.append(delta)
@@ -781,6 +803,19 @@ class ConversationService:
                             # so they don't break the SSE framing.
                             safe = delta.replace("\n", "\\n")
                             yield f"data: {safe}\n\n"
+
+                # One persisted `done` reasoning event with the full thinking, so
+                # the collapsible panel re-renders on reload (R-200-207).
+                if reasoning_buf:
+                    full = "".join(reasoning_buf)
+                    reasoning_done: dict[str, Any] = {
+                        "kind": "reasoning",
+                        "label": "Reasoning",
+                        "status": "done",
+                        "text": full,
+                    }
+                    collected_events.append(reasoning_done)
+                    yield _inline_sse(reasoning_done)
 
             generate_ms = int((time.perf_counter() - t_generate) * 1000)
             total_tokens = sum(len(t) for t in collected_tokens)  # char count
@@ -1330,3 +1365,15 @@ def _extract_delta_content(chunk: dict[str, Any]) -> str:
     delta = choices[0].get("delta") or {}
     content = delta.get("content")
     return content if isinstance(content, str) else ""
+
+
+def _extract_delta_reasoning(chunk: dict[str, Any]) -> str:
+    """Pull the streamed extended-thinking text out of an OpenAI-shaped chunk
+    (R-200-207). LiteLLM surfaces Claude thinking as `delta.reasoning_content`.
+    Returns "" when absent (the common case, or `normal` mode)."""
+    choices = chunk.get("choices") or []
+    if not choices:
+        return ""
+    delta = choices[0].get("delta") or {}
+    reasoning = delta.get("reasoning_content")
+    return reasoning if isinstance(reasoning, str) else ""

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/router.py
 # Description: FastAPI APIRouter for C3 — 8 endpoints.
 #              JWT identity is read from X-User-Id header propagated by C1
@@ -146,6 +146,7 @@ async def send_message(
         user_prompt=payload.user_prompt,
         project_prompt=payload.project_prompt,
         references=payload.references,
+        reasoning_verbose=payload.reasoning_verbose,
     )
     return StreamingResponse(stream, media_type="text/event-stream")
 

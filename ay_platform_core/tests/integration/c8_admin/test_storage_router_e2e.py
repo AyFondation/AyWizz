@@ -8,6 +8,7 @@
 #              testcontainer). Validates the operator gate + tenant scoping, the
 #              platform_manager-only snapshot trigger, and the 503 when metering
 #              is unconfigured (storage_service = None).
+# @relation validates:R-100-140
 # =============================================================================
 
 from __future__ import annotations

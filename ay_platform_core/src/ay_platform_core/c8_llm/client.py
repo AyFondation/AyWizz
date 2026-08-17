@@ -1,6 +1,6 @@
 # =============================================================================
 # File: client.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/client.py
 # Description: Python client for the C8 LLM gateway. All internal components
 #              (C3, C4, C6, C7, …) use this class rather than importing
@@ -25,6 +25,7 @@
 #
 # @relation implements:R-800-010
 # @relation implements:R-800-011
+# @relation implements:R-800-147
 # @relation implements:R-800-013
 # @relation implements:R-800-014
 # @relation implements:R-800-030
@@ -176,6 +177,15 @@ def _retry_after_seconds(resp: httpx.Response) -> float:
 # Anthropic-shaped ``cache_control`` block sent to them is REJECTED. The cache
 # decision is thus translated per provider at the C8 gateway (spec R-800-042).
 _CACHE_MARKER_WIRE_FORMATS = frozenset({"anthropic"})
+
+
+def _apply_adaptive_thinking(body: dict[str, Any]) -> None:
+    """Request adaptive extended thinking (R-800-147) — set on the request when
+    the caller asked for VERBOSE reasoning (R-200-207). LiteLLM passes `thinking`
+    through to the provider; on Claude 4.6+ tiers this yields streamed thinking
+    blocks (surfaced downstream as `reasoning` events). `mock_llm` ignores it, so
+    tests stay green. No-op if the caller already set `thinking`."""
+    body.setdefault("thinking", {"type": "adaptive"})
 
 
 def _apply_static_prompt_cache(body: dict[str, Any]) -> None:
@@ -382,6 +392,9 @@ class LLMGatewayClient:
         sub_agent_id: str | None = None,
         cache_hint: str | None = None,
         bearer_token: str | None = None,
+        run_id: str | None = None,
+        turn_id: str | None = None,
+        reasoning_verbose: bool = False,
     ) -> ChatCompletionResponse:
         """Non-streaming chat completion.
 
@@ -404,8 +417,12 @@ class LLMGatewayClient:
             sub_agent_id=sub_agent_id,
             cache_hint=cache_hint,
             bearer_token=bearer_token,
+            run_id=run_id,
+            turn_id=turn_id,
         )
         body = payload.model_dump(exclude_none=True)
+        if reasoning_verbose:
+            _apply_adaptive_thinking(body)
         await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
         await self._inject_upstream_key(body)
         # Cache marker AFTER upstream resolution: the marker is provider-aware
@@ -442,6 +459,9 @@ class LLMGatewayClient:
         sub_agent_id: str | None = None,
         cache_hint: str | None = None,
         bearer_token: str | None = None,
+        run_id: str | None = None,
+        turn_id: str | None = None,
+        reasoning_verbose: bool = False,
     ) -> AsyncIterator[AsyncIterator[dict[str, Any]]]:
         """Streaming chat completion — yields OpenAI-style SSE chunks.
 
@@ -465,8 +485,12 @@ class LLMGatewayClient:
             sub_agent_id=sub_agent_id,
             cache_hint=cache_hint,
             bearer_token=bearer_token,
+            run_id=run_id,
+            turn_id=turn_id,
         )
         stream_body = stream_payload.model_dump(exclude_none=True)
+        if reasoning_verbose:
+            _apply_adaptive_thinking(stream_body)
         await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
         await self._inject_upstream_key(stream_body)
         # Cache marker AFTER upstream resolution (provider-aware — see above).
@@ -547,6 +571,8 @@ class LLMGatewayClient:
         sub_agent_id: str | None,
         cache_hint: str | None,
         bearer_token: str | None,
+        run_id: str | None = None,
+        turn_id: str | None = None,
     ) -> dict[str, str]:
         if not agent_name:
             raise ValueError("X-Agent-Name is mandatory (R-800-013)")
@@ -570,6 +596,13 @@ class LLMGatewayClient:
             headers["X-Phase"] = phase
         if sub_agent_id:
             headers["X-Sub-Agent-Id"] = sub_agent_id
+        # Request correlation for the per-request cost breakdown (R-800-146):
+        # run_id (a pipeline run) / turn_id (a chat turn). The cost tracker reads
+        # X-Run-Id / X-Turn-Id off the forwarded headers.
+        if run_id:
+            headers["X-Run-Id"] = run_id
+        if turn_id:
+            headers["X-Turn-Id"] = turn_id
         if cache_hint:
             if cache_hint not in {"static", "dynamic", "none"}:
                 raise ValueError(

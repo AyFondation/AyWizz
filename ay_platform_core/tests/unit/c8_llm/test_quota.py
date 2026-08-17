@@ -7,6 +7,8 @@
 #              per-level evaluation (block if ANY level exceeded), warn
 #              threshold, calendar vs first-use reset, and the QuotaGuard
 #              (best-effort warn, hard raise, subject pass-through).
+# @relation validates:R-800-145
+# @relation validates:R-800-146
 # =============================================================================
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ class _FakeStore:
         self.user_scope_calls: list[str | None] = []
         # Returned verbatim by consumption_by_tenant for every window.
         self.tenant_rows: list[tuple[str, float, int]] = []
+        # Returned verbatim by breakdown_by_model.
+        self.breakdown_rows: list[tuple[str, int, int, float]] = []
+        self.breakdown_calls: list[tuple[str, str, str | None]] = []
 
     async def get_policy(self) -> dict[str, Any] | None:
         return self.policy_doc
@@ -90,6 +95,12 @@ class _FakeStore:
     ) -> list[tuple[str, float, int]]:
         self.user_scope_calls.append(tenant_id)
         return self.user_rows
+
+    async def breakdown_by_model(
+        self, field: str, value: str, tenant_id: str | None = None
+    ) -> list[tuple[str, int, int, float]]:
+        self.breakdown_calls.append((field, value, tenant_id))
+        return self.breakdown_rows
 
 
 def _svc(store: _FakeStore) -> QuotaService:
@@ -376,6 +387,11 @@ async def test_guard_is_best_effort_on_eval_error() -> None:
         ) -> list[tuple[str, float, int]]:
             return []
 
+        async def breakdown_by_model(
+            self, field: str, value: str, tenant_id: str | None = None
+        ) -> list[tuple[str, int, int, float]]:
+            return []
+
     guard = QuotaGuard(QuotaService(_Boom(), clock=lambda: _NOW))
     await guard("t1", user_id="u1")  # swallowed — never breaks an LLM call
 
@@ -409,6 +425,33 @@ async def test_tenant_consumption_report_days_windows() -> None:
     assert {t.tenant_id for t in report.tenants} == {"t-a", "t-b"}
     ta = next(t for t in report.tenants if t.tenant_id == "t-a")
     assert ta.windows["day"].cost == 3.0
+
+
+async def test_request_breakdown_model_mix_percentages() -> None:
+    store = _FakeStore()
+    # opus 2.5M tok (2.0M in + 0.5M out), haiku 7.5M tok — total 10M.
+    store.breakdown_rows = [
+        ("opus", 2_000_000, 500_000, 6.0),
+        ("haiku", 6_000_000, 1_500_000, 2.0),
+    ]
+    b = await _svc(store).request_breakdown("run-1", "run", tenant_id="t-a")
+    assert b.correlation == "run-1" and b.by == "run"
+    assert b.total_tokens == 10_000_000
+    assert b.total_cost == 8.0
+    by_model = {m.model: m for m in b.models}
+    assert by_model["opus"].tokens == 2_500_000 and by_model["opus"].tokens_pct == 25.0
+    assert by_model["haiku"].tokens == 7_500_000 and by_model["haiku"].tokens_pct == 75.0
+    # Sorted by tokens desc → the dominant model (haiku) first.
+    assert b.models[0].model == "haiku"
+    # "run" → run_id field; tenant scope forwarded.
+    assert store.breakdown_calls == [("run_id", "run-1", "t-a")]
+
+
+async def test_request_breakdown_turn_maps_to_turn_id() -> None:
+    store = _FakeStore()
+    store.breakdown_rows = [("opus", 10, 5, 0.1)]
+    await _svc(store).request_breakdown("turn-9", "turn")
+    assert store.breakdown_calls == [("turn_id", "turn-9", None)]
 
 
 async def test_user_consumption_report_scoped() -> None:
