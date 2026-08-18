@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/overlays/prod/kustomization.yaml
 # Description: Production overlay. Same `infra/k8s/base/` as dev, but :
 #                - SHA-pinned image tags (NOT :latest) for reproducibility ;
@@ -35,8 +35,18 @@ kind: Kustomization
 
 namespace: aywizz
 
+# v3 (Q-100-023): `../../base` is now dispatcher-agnostic — `c4_workers` was
+# moved OUT of the base resource list (it owns a separate `c4-workers`
+# Namespace that the `namespace: aywizz` transformer above would rename,
+# causing an ID conflict). Referencing the base wholesale is therefore safe
+# again. `c13_extractor` is opt-in (R-100-125) and added explicitly, mirroring
+# overlays/dev. To enable the K8s sub-agent dispatcher, apply the opt-in worker
+# layer SEPARATELY (it must NOT go through the `namespace: aywizz` transformer):
+#   kubectl apply -k infra/k8s/base/c4_workers
+# and set C4_DISPATCHER=k8s in .env.
 resources:
   - ../../base
+  - ../../base/c13_extractor
 
 configMapGenerator:
   - name: aywizz-config

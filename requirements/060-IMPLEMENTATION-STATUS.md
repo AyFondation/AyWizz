@@ -42,9 +42,9 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
 | [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 46 | 9 | 13 | 1 | 0 | 23 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
-| [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 2 | 22 | 0 | 0 | 0 |
+| [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 3 | 21 | 0 | 0 | 0 |
 | [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 60 | 7 | 13 | 1 | 0 | 39 |
-| **Total** | **352** | **53** | **131** | **11** | **8** | **149** |
+| **Total** | **352** | **54** | **130** | **11** | **8** | **149** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -353,7 +353,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-700-014` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/plugin.py`, `ay_platform_core/src/ay_platform_core/c6_validation/service.py` | — |
 | `R-700-020` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |
 | `R-700-021` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |
-| `R-700-022` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |
+| `R-700-022` | v1 | approved | **tested** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | `ay_platform_core/tests/unit/c6_validation/test_interface_signature_drift.py` |
 | `R-700-023` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |
 | `R-700-024` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |
 | `R-700-025` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py` | — |

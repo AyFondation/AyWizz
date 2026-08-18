@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c6_validation/service.py
 # Description: ValidationService — the C6 facade. Orchestrates:
 #              - plugin discovery (via the registry)
@@ -402,6 +402,7 @@ class ValidationService:
             requirements=requirements,
             artifacts=artifacts,
             markers=all_markers,
+            baseline_artifacts=list(payload.baseline_artifacts),
         )
 
         findings: list[Finding] = [

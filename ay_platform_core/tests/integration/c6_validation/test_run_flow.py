@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_run_flow.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c6_validation/test_run_flow.py
 # Description: Integration tests for the C6 validation run lifecycle. Uses
 #              REAL ArangoDB (findings/runs collections) and REAL MinIO
@@ -88,11 +88,11 @@ async def test_clean_project_completes_with_only_info_findings(
     )
     assert run.status == RunStatus.COMPLETED
     assert run.findings_count.blocking == 0
-    # 1 remaining stub check (#3 interface-signature-drift) emits a single
-    # info finding. The other 8 checks are real and pass silently on a clean
-    # corpus (#8 data-model-drift, de-stubbed under D-017, is opt-in and emits
-    # nothing without `fields:`/`model_name:` declarations).
-    assert run.findings_count.info >= 1
+    # All 9 checks are now real (V1 close: #3 interface-signature-drift
+    # de-stubbed) and pass silently on a clean corpus with no baseline —
+    # #3 has nothing to compare, #8 data-model-drift is opt-in. So a clean
+    # run emits zero findings of any severity.
+    assert run.findings_count.info == 0
     # A clean run earns a perfect deterministic verdict (D-017 / R-700-031).
     assert run.verdict is not None
     assert run.verdict.score == 1.0
@@ -155,7 +155,7 @@ async def test_snapshot_is_written_and_readable(
     payload = RunTriggerRequest(
         domain="code",
         project_id="demo",
-        check_ids=["interface-signature-drift"],  # persistent stub
+        check_ids=["interface-signature-drift"],  # deterministic: no baseline → []
     )
     run = await c6_service.execute_run_sync(
         payload, requirements=[], artifacts=[]
@@ -267,12 +267,18 @@ async def test_trigger_run_returns_202_and_findings_accessible(
             json={
                 "domain": "code",
                 "project_id": "demo",
-                # interface-signature-drift is still a stub in v1; it always
-                # emits one info finding regardless of the corpus, which lets
-                # us assert on a deterministic minimal result.
+                # interface-signature-drift compares public signatures against
+                # the same-path baseline. A changed public parameter → exactly
+                # one advisory finding, a deterministic minimal result to
+                # exercise the trigger → poll → findings HTTP flow.
                 "check_ids": ["interface-signature-drift"],
                 "requirements": [],
-                "artifacts": [],
+                "artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a, b):\n    return a\n"}
+                ],
+                "baseline_artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a):\n    return a\n"}
+                ],
             },
             headers=_HEADERS,
         )
@@ -300,7 +306,7 @@ async def test_trigger_run_returns_202_and_findings_accessible(
     assert findings.status_code == 200
     body = findings.json()
     assert body["run_id"] == run_id
-    # The interface-signature-drift stub always emits at least one info finding.
+    # The changed public signature drifts vs. the baseline → one advisory finding.
     assert body["total"] >= 1
     assert body["items"][0]["check_id"] == "interface-signature-drift"
 

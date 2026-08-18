@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_grading_judge.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/c6_validation/test_grading_judge.py
 # Description: Unit tests for C6 T3 LLM-as-judge grading (R-700-032). Covers
 #              the pure parsing/clamping logic of `grade_judged` (with a fake
@@ -250,7 +250,7 @@ async def _run(svc: ValidationService) -> Any:
     payload = RunTriggerRequest(
         domain="code",
         project_id="demo",
-        check_ids=["interface-signature-drift"],  # deterministic 1 info finding
+        check_ids=["interface-signature-drift"],  # deterministic clean verdict (no baseline)
     )
     return await svc.execute_run_sync(payload, requirements=[], artifacts=[])
 

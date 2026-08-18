@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c6_tools.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/tools/c6_tools.py
 # Description: C9 tool adapters wrapping the C6 Validation Pipeline Registry.
 #              Three tools: list plugins, trigger a validation run, fetch
@@ -84,12 +84,22 @@ def _trigger_validation_tool(c6: ValidationService) -> Tool:
         except Exception as exc:
             raise ToolDispatchError(f"invalid artifact: {exc}") from exc
 
+        # R-700-022: previous-version artifacts for interface-signature-drift.
+        baseline_raw = args.get("baseline_artifacts", [])
+        if not isinstance(baseline_raw, list):
+            raise ToolDispatchError("baseline_artifacts must be a list")
+        try:
+            baseline = [CodeArtifact.model_validate(a) for a in baseline_raw]
+        except Exception as exc:
+            raise ToolDispatchError(f"invalid baseline artifact: {exc}") from exc
+
         payload = RunTriggerRequest(
             domain=domain,
             project_id=project_id,
             check_ids=list(check_ids_raw),
             requirements=requirements_raw,
             artifacts=artifacts,
+            baseline_artifacts=baseline,
         )
         actor = current_actor()
         response = await c6.trigger_run(
@@ -120,6 +130,7 @@ def _trigger_validation_tool(c6: ValidationService) -> Tool:
                 },
                 "requirements": {"type": "array"},
                 "artifacts": {"type": "array"},
+                "baseline_artifacts": {"type": "array"},
             },
             "required": ["domain", "project_id"],
         },

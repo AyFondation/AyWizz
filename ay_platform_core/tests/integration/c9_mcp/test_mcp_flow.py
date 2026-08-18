@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_mcp_flow.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c9_mcp/test_mcp_flow.py
 # Description: End-to-end tests for the C9 MCP server against REAL C5 + C6
 #              services (ArangoDB + MinIO testcontainers). Exercises the
@@ -247,7 +247,8 @@ async def test_c6_trigger_and_list_findings_round_trip(
     c9_app: FastAPI, c9_c6_service: ValidationService
 ) -> None:
     async with _client(c9_app) as client:
-        # Trigger a run of a stub check so we get a deterministic info finding.
+        # Trigger interface-signature-drift with a changed public signature vs.
+        # the baseline → a deterministic advisory finding to round-trip.
         trigger_body = await _call_tool(
             client,
             "c6_trigger_validation",
@@ -255,6 +256,12 @@ async def test_c6_trigger_and_list_findings_round_trip(
                 "domain": "code",
                 "project_id": "demo",
                 "check_ids": ["interface-signature-drift"],
+                "artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a, b):\n    return a\n"}
+                ],
+                "baseline_artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a):\n    return a\n"}
+                ],
             },
         )
         assert trigger_body["result"]["isError"] is False

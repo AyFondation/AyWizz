@@ -1,6 +1,6 @@
 # =============================================================================
 # File: checks.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c6_validation/domains/code/checks.py
 # Description: Implementation of the 9 MUST checks of the `code` domain
 #              (D-006, R-700-020..R-700-028). Each check is a pure function
@@ -8,8 +8,12 @@
 #
 #              v2 (D-017): #8 `data-model-drift` (R-700-027) promoted from
 #              STUB — it compares a Pydantic model's fields against an `E-*`
-#              `fields:`/`model_name:` declaration. Only #3
-#              `interface-signature-drift` (R-700-022) remains a stub.
+#              `fields:`/`model_name:` declaration.
+#              v3 (V1 close): #3 `interface-signature-drift` (R-700-022)
+#              promoted from STUB — it compares each artifact's PUBLIC AST
+#              signatures against the same-path baseline (previous version)
+#              carried on `CheckContext.baseline_artifacts`; drift = a public
+#              symbol removed or re-signed. All 9 checks are now real.
 #
 # @relation implements:R-700-020
 # @relation implements:R-700-021
@@ -35,6 +39,7 @@ from ay_platform_core.c6_validation.domains.code.parsers import (
 )
 from ay_platform_core.c6_validation.models import (
     CheckContext,
+    CodeArtifact,
     Finding,
     RelationMarker,
     RelationVerb,
@@ -192,24 +197,116 @@ def check_code_without_requirement(
 
 
 # ---------------------------------------------------------------------------
-# #3 — interface-signature-drift (R-700-022) — STUB
+# #3 — interface-signature-drift (R-700-022)
 # ---------------------------------------------------------------------------
+
+
+def _fn_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """Render a public function/method signature as a stable, comparable
+    string : parameter NAMES in order, with kind markers (`/`, `*`, `**`).
+
+    Names + order + kind together capture what a caller depends on —
+    positional callers care about order, keyword callers about names — so a
+    rename or reorder of a public parameter reads as drift.
+    """
+    args = node.args
+    parts: list[str] = []
+    for arg in getattr(args, "posonlyargs", []):
+        parts.append(arg.arg)
+    if getattr(args, "posonlyargs", []):
+        parts.append("/")
+    for arg in args.args:
+        parts.append(arg.arg)
+    if args.vararg is not None:
+        parts.append(f"*{args.vararg.arg}")
+    elif args.kwonlyargs:
+        parts.append("*")
+    for arg in args.kwonlyargs:
+        parts.append(arg.arg)
+    if args.kwarg is not None:
+        parts.append(f"**{args.kwarg.arg}")
+    return "(" + ", ".join(parts) + ")"
+
+
+def _public_signatures(artifact: CodeArtifact) -> dict[str, str]:
+    """Map ``symbol`` → signature for the PUBLIC top-level functions and the
+    public methods of public classes in one Python artifact. Public = the
+    name does not start with ``_``. Non-Python or unparseable → ``{}`` (the
+    check simply has nothing to compare, never a false positive).
+    """
+    if not artifact.path.endswith(".py"):
+        return {}
+    try:
+        tree = ast.parse(artifact.content)
+    except SyntaxError:
+        return {}
+    sigs: dict[str, str] = {}
+    _fn_types = (ast.FunctionDef, ast.AsyncFunctionDef)
+    for node in tree.body:
+        if isinstance(node, _fn_types) and not node.name.startswith("_"):
+            sigs[node.name] = _fn_signature(node)
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+            for item in node.body:
+                if isinstance(item, _fn_types) and not item.name.startswith("_"):
+                    sigs[f"{node.name}.{item.name}"] = _fn_signature(item)
+    return sigs
 
 
 def check_interface_signature_drift(
     run_id: str, context: CheckContext
 ) -> list[Finding]:
-    return [
-        _make_finding(
-            run_id,
-            "interface-signature-drift",
-            Severity.INFO,
-            message=(
-                "Interface signature drift detection is a v1 stub. "
-                "Full implementation requires machine-readable E-* signatures."
-            ),
-        )
-    ]
+    """R-700-022. Compare each artifact's public interface signatures against
+    the same-path baseline (its previous version). Drift = a public symbol
+    that was REMOVED or whose signature CHANGED. Without a baseline (e.g. the
+    first generation) there is nothing to compare and the check passes.
+    """
+    findings: list[Finding] = []
+    current_by_path = {a.path: a for a in context.artifacts}
+    for base_art in context.baseline_artifacts:
+        base_sigs = _public_signatures(base_art)
+        if not base_sigs:
+            continue
+        cur_art = current_by_path.get(base_art.path)
+        cur_sigs = _public_signatures(cur_art) if cur_art is not None else {}
+        for symbol, base_sig in base_sigs.items():
+            cur_sig = cur_sigs.get(symbol)
+            if cur_sig is None:
+                findings.append(
+                    _make_finding(
+                        run_id,
+                        "interface-signature-drift",
+                        Severity.ADVISORY,
+                        message=(
+                            f"Public interface `{symbol}` in {base_art.path} "
+                            f"was removed relative to the baseline version."
+                        ),
+                        artifact_ref=base_art.path,
+                        location=symbol,
+                        fix_hint=(
+                            "Restore the symbol, or record the breaking removal "
+                            "with a coordinated version bump."
+                        ),
+                    )
+                )
+            elif cur_sig != base_sig:
+                findings.append(
+                    _make_finding(
+                        run_id,
+                        "interface-signature-drift",
+                        Severity.ADVISORY,
+                        message=(
+                            f"Public interface `{symbol}` in {base_art.path} "
+                            f"changed: baseline {base_sig} → now {cur_sig}."
+                        ),
+                        artifact_ref=base_art.path,
+                        location=symbol,
+                        fix_hint=(
+                            "Keep the public signature stable, or coordinate a "
+                            "breaking-change version bump with its consumers."
+                        ),
+                    )
+                )
+    return findings
 
 
 # ---------------------------------------------------------------------------

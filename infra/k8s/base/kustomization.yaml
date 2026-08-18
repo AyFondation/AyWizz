@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/kustomization.yaml
 # Description: Root base for all platform components. Overlays
 #              (`overlays/dev/`, `overlays/prod/`) reference this base
@@ -10,6 +10,16 @@
 #              Order is informational — Kubernetes' API server applies
 #              resources in dependency-aware order; we list dependencies
 #              first for human readability.
+#
+#              v2 (Q-100-023): `c4_workers` is NO LONGER listed here. It
+#              declares its OWN `c4-workers` Namespace, which the overlays'
+#              `namespace: aywizz` transformer would rename → an ID conflict
+#              that breaks `kubectl kustomize`. It is a dispatcher-specific,
+#              opt-in layer: apply `infra/k8s/base/c4_workers/` SEPARATELY
+#              (no `namespace:` transformer) only when `C4_DISPATCHER=k8s`.
+#              The default in-process dispatcher does not need it. This keeps
+#              the base dispatcher-agnostic so every overlay can reference it
+#              without dragging the extra namespace.
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -29,7 +39,8 @@ resources:
   - c2_auth
   - c3_conversation
   - c4_orchestrator
-  - c4_workers    # Sub-agent dispatch namespace + SAs + RBAC + NetworkPolicy.
+  # c4_workers is intentionally NOT here (Q-100-023) — it owns a separate
+  # `c4-workers` Namespace and is applied opt-in when C4_DISPATCHER=k8s.
   - c5_requirements
   - c6_validation
   - c7_memory

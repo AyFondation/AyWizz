@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c6_validation/models.py
 # Description: Pydantic v2 models for C6 — public contracts (Finding,
 #              ValidationRun, CheckSpec, PluginDescriptor) and internal
@@ -219,6 +219,10 @@ class RunTriggerRequest(BaseModel):
     check_ids: list[str] = Field(default_factory=list)
     requirements: list[dict[str, object]] = Field(default_factory=list)
     artifacts: list[CodeArtifact] = Field(default_factory=list)
+    # R-700-022: the same artifacts at their PREVIOUS version, matched by
+    # `path`, against which `interface-signature-drift` compares public
+    # signatures. Empty (e.g. first generation) → the drift check is a no-op.
+    baseline_artifacts: list[CodeArtifact] = Field(default_factory=list)
 
 
 class RunTriggerResponse(BaseModel):
@@ -269,6 +273,9 @@ class CheckContext(BaseModel):
     requirements: list[dict[str, object]] = Field(default_factory=list)
     artifacts: list[CodeArtifact] = Field(default_factory=list)
     markers: list[RelationMarker] = Field(default_factory=list)
+    # R-700-022: previous-version artifacts (matched by path) for the
+    # interface-signature-drift check. Empty → no baseline to compare.
+    baseline_artifacts: list[CodeArtifact] = Field(default_factory=list)
 
 
 class CheckResult(BaseModel):

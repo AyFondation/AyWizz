@@ -1,6 +1,6 @@
 # =============================================================================
 # File: plugin.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c6_validation/domains/code/plugin.py
 # Description: Built-in `code` domain plugin. Registers itself at import time
 #              (R-700-002). Declares metadata via ``describe()`` and
@@ -55,9 +55,12 @@ _CHECK_SPECS: list[CheckSpec] = [
     ),
     CheckSpec(
         check_id="interface-signature-drift",
-        title="Interface signature drift (E-*) [STUB]",
-        severity_default=Severity.INFO,
-        description="R-700-022. v1 stub pending machine-readable E-* specs.",
+        title="Public interface signature drift vs. the previous version",
+        severity_default=Severity.ADVISORY,
+        description=(
+            "R-700-022. Flags a public function/method removed or re-signed "
+            "relative to the same-path baseline artifact (AST comparison)."
+        ),
     ),
     CheckSpec(
         check_id="test-absent-for-requirement",

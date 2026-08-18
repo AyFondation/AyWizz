@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_storage_verified.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c6_validation/test_storage_verified.py
 # Description: Storage-verified integration tests for C6. Triggers a run
 #              via the service, then reads the raw ArangoDB + MinIO state
@@ -139,7 +139,7 @@ async def test_empty_run_still_writes_snapshot(
     payload = RunTriggerRequest(
         domain="code",
         project_id="demo",
-        check_ids=["interface-signature-drift"],  # stub → 1 info finding
+        check_ids=["interface-signature-drift"],  # no baseline → zero findings
     )
     run = await c6_service.execute_run_sync(
         payload, requirements=[], artifacts=[]

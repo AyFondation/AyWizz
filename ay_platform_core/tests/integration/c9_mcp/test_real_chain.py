@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_real_chain.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c9_mcp/test_real_chain.py
 # Description: Real-HTTP-chain integration tests for C9. Complements
 #              test_mcp_flow.py (which wires C5/C6 as in-process Python
@@ -336,6 +336,12 @@ async def test_real_chain_c6_trigger_and_list_findings(
                 "domain": "code",
                 "project_id": "demo",
                 "check_ids": ["interface-signature-drift"],
+                "artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a, b):\n    return a\n"}
+                ],
+                "baseline_artifacts": [
+                    {"path": "src/svc.py", "content": "def run(a):\n    return a\n"}
+                ],
             },
         )
         trigger_content = _success_content(trigger_body, "c6_trigger_validation")

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_checks.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/c6_validation/test_checks.py
 # Description: Unit tests for each of the 9 MUST checks of the `code` domain.
 #              The 5 real checks are exercised on both positive (clean) and
@@ -362,21 +362,6 @@ class TestCheck9CrossLayerCoherence:
             ]
         )
         assert checks.check_cross_layer_coherence(RUN_ID, ctx) == []
-
-
-@pytest.mark.unit
-class TestRemainingStubs:
-    """#3 (interface-signature-drift, R-700-022) is the last STUB — it needs
-    machine-readable signature specs on `E-*` entities (deferred). It emits
-    one info finding. (#8 data-model-drift was de-stubbed under D-017 — see
-    `test_data_model_drift.py`.)
-    """
-
-    def test_interface_signature_drift_is_a_stub(self) -> None:
-        out = checks.check_interface_signature_drift(RUN_ID, _context())
-        assert len(out) == 1
-        assert out[0].severity == Severity.INFO
-        assert out[0].check_id == "interface-signature-drift"
 
 
 @pytest.mark.unit
