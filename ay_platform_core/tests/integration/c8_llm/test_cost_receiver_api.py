@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_cost_receiver_api.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c8_llm/test_cost_receiver_api.py
 # Description: Integration test for the C8 cost receiver (R-800-070) against
 #              a real ArangoDB testcontainer. POSTs a forwarder envelope to
@@ -71,13 +71,35 @@ def _client(app: FastAPI) -> httpx.AsyncClient:
     )
 
 
-async def test_ingest_persists_llm_call_with_cost_and_tags(
+async def test_ingest_persists_llm_call_with_cost_from_registry(
     receiver_app: tuple[FastAPI, object],
 ) -> None:
+    """Bloc 5 (D-011): cost is computed from the in-app REGISTRY (operator-set
+    per-model `provider_cost`), NOT the neutral config catalog. The C8 client
+    resolves a tier to the model's `<wire>/<upstream>`, which the proxy reports
+    as `model`; the receiver looks that up in a registry-derived catalog."""
     app, db = receiver_app
+    # Seed one provider + one model (any provider family — provider-independent).
+    db.create_collection("llm_providers")  # type: ignore[attr-defined]
+    db.create_collection("llm_registry")  # type: ignore[attr-defined]
+    db.collection("llm_providers").insert(  # type: ignore[attr-defined]
+        {"_key": "p1", "name": "Anthropic", "wire_format": "anthropic"}
+    )
+    db.collection("llm_registry").insert(  # type: ignore[attr-defined]
+        {
+            "_key": "m1",
+            "provider_id": "p1",
+            "alias": "fast",
+            "upstream_model": "claude-haiku-4-5",
+            "capabilities": {"context_window": 200000, "vision": False, "tool_calling": True},
+            "provider_cost_in_per_1m": 0.8,
+            "provider_cost_out_per_1m": 4.0,
+            "enabled": True,
+        }
+    )
     envelope = {
         "status": "success",
-        "model": "claude-haiku-fast",
+        "model": "anthropic/claude-haiku-4-5",  # the RESOLVED model the proxy sees
         "usage": {"prompt_tokens": 1000, "completion_tokens": 500, "cached_tokens": 0},
         "headers": {
             "X-Agent-Name": "c3-docgen",
@@ -96,13 +118,13 @@ async def test_ingest_persists_llm_call_with_cost_and_tags(
 
     doc = db.collection(COLLECTION).get(call_id)  # type: ignore[attr-defined]
     assert doc is not None
-    assert doc["model"] == "claude-haiku-fast"
+    assert doc["model"] == "anthropic/claude-haiku-4-5"
     assert doc["provider"] == "anthropic"
     assert doc["input_tokens"] == 1000
     assert doc["output_tokens"] == 500
     assert doc["latency_ms"] == 2000
     assert doc["status"] == "success"
-    # Cost from the canonical catalog : 1000 in @ 0.8/M + 500 out @ 4.0/M.
+    # Cost from the REGISTRY: 1000 in @ 0.8/M + 500 out @ 4.0/M = 0.0028.
     assert doc["cost_usd"] == pytest.approx(0.0028)
     assert doc["tags"]["agent_name"] == "c3-docgen"
     assert doc["tags"]["tenant_id"] == "t1"

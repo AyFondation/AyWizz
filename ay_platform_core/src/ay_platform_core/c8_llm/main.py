@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/main.py
 # Description: C8 cost receiver — the in-process FastAPI service of the C8
 #              tier (the LiteLLM proxy itself is off-the-shelf, §4.5). It
@@ -31,10 +31,15 @@ from fastapi import FastAPI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ay_platform_core.c8_llm.callbacks.cost_tracker import build_call_record
+from ay_platform_core.c8_llm.callbacks.cost_tracker import (
+    build_call_record,
+    build_registry_cost_catalog,
+)
 from ay_platform_core.c8_llm.config import LiteLLMConfig, ModelInfo
 from ay_platform_core.c8_llm.cost_sink_arango import ArangoCallRecordSink
 from ay_platform_core.c8_llm.models import CostCallEnvelope
+from ay_platform_core.c8_llm.registry.provider_repository import LLMProviderRepository
+from ay_platform_core.c8_llm.registry.repository import LLMRegistryRepository
 from ay_platform_core.observability import (
     TraceContextMiddleware,
     configure_logging,
@@ -85,6 +90,12 @@ def create_app(config: CostReceiverConfig | None = None) -> FastAPI:
         cfg.arango_db, username=cfg.arango_username, password=cfg.arango_password,
     )
     sink = ArangoCallRecordSink(db)
+    # Provider-independent cost source (D-011): the REGISTRY, not the static
+    # config catalog. The client rewrites body['model'] → `<wire>/<upstream>`,
+    # so `envelope.model` is looked up against a registry-derived catalog whose
+    # costs are the operator-set per-model `provider_cost`.
+    registry_repo = LLMRegistryRepository(db)
+    provider_repo = LLMProviderRepository(db)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -97,12 +108,24 @@ def create_app(config: CostReceiverConfig | None = None) -> FastAPI:
     app.state.cost_sink = sink
     app.state.cost_catalog = catalog
 
+    async def _resolve_catalog() -> dict[str, ModelInfo]:
+        """Registry costs (by resolved `<wire>/<upstream>`) layered OVER the
+        static config catalog. Queried per event — cost tracking is async and
+        off the LLM critical path — so an operator's HMI change takes effect
+        immediately. Registry unreachable → fall back to the config catalog."""
+        try:
+            models = await registry_repo.list_all()
+            providers = await provider_repo.list_all()
+        except Exception:
+            return catalog
+        return {**catalog, **build_registry_cost_catalog(models, providers)}
+
     @app.post("/internal/llm-calls")
     async def ingest(envelope: CostCallEnvelope) -> dict[str, str]:
         """Record one LLM call (R-800-070). Best-effort from the caller's
         view : the forwarder swallows any error, so a transient failure
         here simply drops the record rather than affecting an LLM call."""
-        record = build_call_record(envelope, catalog)
+        record = build_call_record(envelope, await _resolve_catalog())
         await sink.insert(record)
         return {"stored": record.call_id}
 

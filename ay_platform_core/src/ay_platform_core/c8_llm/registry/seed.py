@@ -1,6 +1,6 @@
 # =============================================================================
 # File: seed.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/seed.py
 # Description: One-shot, IDEMPOTENT seeding of the provider + model registries
 #              from the canonical `litellm-config.yaml`. v2: each model's
@@ -79,8 +79,13 @@ async def seed_missing(
     # 1) Ensure one provider per wire_format, reusing an existing one by name.
     wire_to_provider_id: dict[str, str] = {}
     for entry in config.model_list:
-        if entry.model_name == "*":
-            continue  # routing pass-through, not a seedable model
+        # Skip routing pass-throughs: the bare `"*"` catch-all AND the neutral
+        # tier entries (`model: "*"`), which carry no provider/model to seed.
+        # With the provider-independent config (D-011) EVERY entry is a
+        # pass-through, so the seed creates nothing — the registry stays EMPTY
+        # until an operator registers a provider via the HMI (Option B).
+        if entry.model_name == "*" or entry.litellm_params.model == "*":
+            continue
         wire, _ = _split_upstream(entry.litellm_params.model)
         if wire in wire_to_provider_id:
             continue
@@ -102,7 +107,9 @@ async def seed_missing(
     # 2) Ensure each model (by alias), referencing its provider id.
     created: list[str] = []
     for entry in config.model_list:
-        if entry.model_name == "*":
+        # Same pass-through skip as the provider loop (bare `"*"` + neutral
+        # tiers) — they have no wire_format/provider to reference.
+        if entry.model_name == "*" or entry.litellm_params.model == "*":
             continue
         if await repo.get_by_alias(entry.model_name) is not None:
             continue

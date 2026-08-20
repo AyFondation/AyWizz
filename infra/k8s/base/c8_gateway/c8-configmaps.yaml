@@ -24,7 +24,7 @@ data:
   config.yaml: |-
     # =============================================================================
     # File: litellm-config.yaml
-    # Version: 2
+    # Version: 4
     # Path: infra/c8_gateway/config/litellm-config.yaml
     # Description: Canonical (prod-shaped) LiteLLM configuration. The shape
     #              mirrors Appendix 8.1 of 800-SPEC-LLM-ABSTRACTION and validates
@@ -40,60 +40,109 @@ data:
     #              `litellm_settings.callbacks` wire the cost forwarder
     #              (R-800-070) — a mounted CustomLogger that POSTs each call to
     #              the AyWizz cost receiver. Keys read from env (os.environ/...).
+    #              v3 (provider-independence, D-011) : added a `model_name: "*"`
+    #              passthrough with `configurable_clientside_auth_params`
+    #              ["api_base","api_key"] so the C8 client injects the provider
+    #              endpoint + decrypted key PER CALL from the in-app registry —
+    #              no provider hardcoded. Proven by the litellm testcontainers
+    #              integration test (tests/integration/c8_llm/test_litellm_
+    #              clientside_auth.py).
+    #              v4 (provider-independence, D-011) : REMOVED all Anthropic model
+    #              entries + every `os.environ/ANTHROPIC_API_KEY`. model_list is
+    #              now the neutral tiers flagship/balanced/fast (+ the bare "*"
+    #              catch-all); agent_routes reference the tiers. Registry (HMI)
+    #              resolves each tier per call. Option B bootstrap: registry
+    #              EMPTY until configured (seed skips `model == "*"`). Mirrors the
+    #              canonical infra/c8_gateway/config/litellm-config.yaml v6.
     # =============================================================================
 
     model_list:
-      - model_name: claude-opus-flagship
+      # Provider-INDEPENDENT routing tiers (D-011) — mirror of the canonical
+      # infra/c8_gateway/config/litellm-config.yaml. NO provider/model, NO env
+      # key: the C8 client injects the registry-resolved `<wire>/<upstream>` +
+      # api_base + decrypted api_key PER CALL; these entries name the quality
+      # tier an agent routes to and honour those clientside overrides (api_base
+      # bounded by the anti-SSRF allowlist). Real capability + cost are governed
+      # by the registry model the operator maps to each tier (Option B: the
+      # registry is EMPTY until configured via the HMI). `features` is the full
+      # set — passthrough placeholder; the routed provider's real features are
+      # enforced at registration. The registry SEED skips `model == "*"`.
+      - model_name: flagship
         litellm_params:
-          model: anthropic/claude-opus-4-7
-          api_key: os.environ/ANTHROPIC_API_KEY
+          model: "*"
+          configurable_clientside_auth_params:
+            - "api_key"
+            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
         model_info:
-          display_name: "Claude Opus 4.7"
+          display_name: "Flagship tier (registry-resolved)"
           features:
             - chat_completion
             - streaming
-            - long_context
-            - prompt_caching
-            - extended_thinking
             - tool_calling
             - structured_outputs
             - vision
+            - long_context
+            - extended_thinking
+            - prompt_caching
           context_window: 200000
-          cost_per_million_input: 15.00
-          cost_per_million_output: 75.00
-          rate_limit_rpm: 4000
-          rate_limit_tpm: 400000
+          cost_per_million_input: 0.0
+          cost_per_million_output: 0.0
 
-      - model_name: claude-sonnet-midtier
+      - model_name: balanced
         litellm_params:
-          model: anthropic/claude-sonnet-4-6
-          api_key: os.environ/ANTHROPIC_API_KEY
+          model: "*"
+          configurable_clientside_auth_params:
+            - "api_key"
+            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
         model_info:
-          display_name: "Claude Sonnet 4.6"
+          display_name: "Balanced tier (registry-resolved)"
           features:
             - chat_completion
             - streaming
-            - long_context
-            - prompt_caching
             - tool_calling
             - structured_outputs
+            - vision
+            - long_context
+            - extended_thinking
+            - prompt_caching
           context_window: 200000
-          cost_per_million_input: 3.00
-          cost_per_million_output: 15.00
+          cost_per_million_input: 0.0
+          cost_per_million_output: 0.0
 
-      - model_name: claude-haiku-fast
+      - model_name: fast
         litellm_params:
-          model: anthropic/claude-haiku-4-5-20251001
-          api_key: os.environ/ANTHROPIC_API_KEY
+          model: "*"
+          configurable_clientside_auth_params:
+            - "api_key"
+            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
         model_info:
-          display_name: "Claude Haiku 4.5"
+          display_name: "Fast tier (registry-resolved)"
           features:
             - chat_completion
             - streaming
             - tool_calling
+            - structured_outputs
+            - vision
+            - long_context
+            - extended_thinking
+            - prompt_caching
           context_window: 200000
-          cost_per_million_input: 0.80
-          cost_per_million_output: 4.00
+          cost_per_million_input: 0.0
+          cost_per_million_output: 0.0
+
+      # Bare catch-all: matches the registry-REWRITTEN `<wire>/<upstream>` model.
+      - model_name: "*"
+        litellm_params:
+          model: "*"
+          configurable_clientside_auth_params:
+            - "api_key"
+            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
+        model_info:
+          display_name: "Wildcard pass-through"
+          features: []
+          context_window: 200000
+          cost_per_million_input: 0.0
+          cost_per_million_output: 0.0
 
     # Per-agent routing by best quality/cost ratio (R-800-030 v1, client-side).
     # Orchestrator roles : deep reasoning → Opus (architect), balanced → Sonnet,
@@ -103,16 +152,16 @@ data:
     # a proxy route : it stays the separate local-dev-only path (revert the two
     # C8_GATEWAY_URL/C8_DEFAULT_MODEL lines in .env.dev to use it offline).
     agent_routes:
-      architect: claude-opus-flagship
-      planner: claude-sonnet-midtier
-      implementer: claude-sonnet-midtier
-      spec-reviewer: claude-sonnet-midtier
-      quality-reviewer: claude-sonnet-midtier
-      sub-agent: claude-haiku-fast
-      c3-rag: claude-haiku-fast
-      c3-docgen: claude-haiku-fast
-      c7-kg-extractor: claude-haiku-fast
-      default: claude-sonnet-midtier
+      architect: flagship
+      planner: balanced
+      implementer: balanced
+      spec-reviewer: balanced
+      quality-reviewer: balanced
+      sub-agent: fast
+      c3-rag: fast
+      c3-docgen: fast
+      c7-kg-extractor: fast
+      default: balanced
 
     budgets:
       default_hard_cap_usd_per_month: 100.0

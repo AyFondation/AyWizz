@@ -1,6 +1,6 @@
 # =============================================================================
 # File: cost_tracker.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py
 # Description: Cost-record construction + persistence for the `llm_calls`
 #              ledger (E-800-002 / R-800-070). Two entry points share the
@@ -196,6 +196,41 @@ def build_call_record(
         tags=tags,
         request_fingerprint=envelope.fingerprint or "sha256:unknown",
     )
+
+
+def build_registry_cost_catalog(
+    models: list[dict[str, Any]], providers: list[dict[str, Any]]
+) -> dict[str, ModelInfo]:
+    """Cost catalog derived from the in-app REGISTRY (D-011, provider-independent
+    cost source). Keys are the resolved model string `<wire_format>/<upstream>`
+    — exactly what the C8 client rewrites `body['model']` to, and therefore what
+    LiteLLM reports as `envelope.model`. Costs come from each registry model's
+    operator-set `provider_cost_in/out_per_1m`. Disabled models are skipped.
+
+    Pure (takes plain documents) so the cost receiver can pass `list_all()`
+    results and it stays unit-testable without a database. This SUPERSEDES the
+    static litellm-config catalog, whose neutral tiers carry no real cost."""
+    wire_by_pid = {
+        str(p.get("_key") or p.get("provider_id", "")): str(p.get("wire_format", ""))
+        for p in providers
+    }
+    catalog: dict[str, ModelInfo] = {}
+    for m in models:
+        if not m.get("enabled", True):
+            continue
+        wire = wire_by_pid.get(str(m.get("provider_id", "")))
+        upstream = m.get("upstream_model")
+        if not wire or not upstream:
+            continue
+        caps = m.get("capabilities") or {}
+        catalog[f"{wire}/{upstream}"] = ModelInfo(
+            display_name=str(m.get("alias") or upstream),
+            features=[],
+            context_window=int(caps.get("context_window") or 200_000),
+            cost_per_million_input=float(m.get("provider_cost_in_per_1m") or 0.0),
+            cost_per_million_output=float(m.get("provider_cost_out_per_1m") or 0.0),
+        )
+    return catalog
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_quota_attribution_pipeline_e2e.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c8_llm/test_quota_attribution_pipeline_e2e.py
 # Description: End-to-end attribution-pipeline test (gap #1). The other quota
 #              tests SEED `llm_calls` directly; this one drives the REAL cost
@@ -64,6 +64,25 @@ async def pipeline(arango_container: ArangoEndpoint) -> AsyncIterator[tuple[Fast
     app = create_app(cfg)
     app.state.cost_sink.ensure_collection()
     db = client.db(db_name, username="root", password=arango_container.password)
+    # Bloc 5 (D-011): cost comes from the REGISTRY, not the neutral config
+    # catalog. Seed one provider + model so the resolved model carries a cost.
+    db.create_collection("llm_providers")
+    db.create_collection("llm_registry")
+    db.collection("llm_providers").insert(
+        {"_key": "p1", "name": "Anthropic", "wire_format": "anthropic"}
+    )
+    db.collection("llm_registry").insert(
+        {
+            "_key": "m1",
+            "provider_id": "p1",
+            "alias": "fast",
+            "upstream_model": "claude-haiku-4-5",
+            "capabilities": {"context_window": 200000, "vision": False, "tool_calling": True},
+            "provider_cost_in_per_1m": 0.8,
+            "provider_cost_out_per_1m": 4.0,
+            "enabled": True,
+        }
+    )
     try:
         yield app, db
     finally:
@@ -93,7 +112,7 @@ def _envelope(
     now = datetime.now(UTC)
     return {
         "status": "success",
-        "model": "claude-haiku-fast",
+        "model": "anthropic/claude-haiku-4-5",  # RESOLVED model (registry cost)
         "usage": {"prompt_tokens": in_tok, "completion_tokens": out_tok, "cached_tokens": 0},
         "headers": headers,
         "fingerprint": "sha256:abc",
@@ -180,12 +199,12 @@ async def test_usage_accumulates_across_calls(pipeline: tuple[FastAPI, Any]) -> 
     assert after_three.blocked is True
 
 
-# --- Cost (not just tokens) is computed from the catalog + attributed -------
+# --- Cost (not just tokens) is computed from the REGISTRY + attributed ------
 
 
-async def test_cost_from_catalog_attributed_to_project(pipeline: tuple[FastAPI, Any]) -> None:
+async def test_cost_from_registry_attributed_to_project(pipeline: tuple[FastAPI, Any]) -> None:
     app, db = pipeline
-    # 1000 in @ $0.8/M + 500 out @ $4.0/M = $0.0028 per call (canonical catalog).
+    # 1000 in @ $0.8/M + 500 out @ $4.0/M = $0.0028 per call (registry cost).
     await _set_policy(db, _week(project=QuotaLimits(max_cost_usd=0.005)))
     await _post(app, _envelope(in_tok=1000, out_tok=500, tenant="t1", project="p1"))
     one = await _evaluate(db, tenant_id="t1", project_id="p1")

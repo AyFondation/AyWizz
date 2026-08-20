@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_config_schema.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/c8_llm/test_config_schema.py
 # Description: Unit tests — the Pydantic schema accepts the sample config
 #              from `infra/c8_gateway/config/litellm-config.yaml` (ensuring
@@ -51,16 +51,16 @@ class TestSampleConfigParses:
 
     def test_service_agents_routed_by_quality_cost(self) -> None:
         # The C3/C7 service agents are routed explicitly (best quality/cost),
-        # not left to fall through to `default`. Claude-only — Ollama is the
-        # separate local-dev path, never a proxy route.
+        # not left to fall through to `default`. Provider-INDEPENDENT (D-011):
+        # routes target NEUTRAL tiers, never a provider-specific model.
         cfg = LiteLLMConfig.model_validate(
             yaml.safe_load(_SAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
         )
         assert {"c3-rag", "c3-docgen", "c7-kg-extractor"}.issubset(cfg.agent_routes.keys())
         model_names = {m.model_name for m in cfg.model_list}
-        # "*" is the wildcard pass-through entry (provider-normalised routing);
-        # the named entries remain Claude tiers.
-        assert all(m == "*" or m.startswith("claude-") for m in model_names)
+        # `*` is the catch-all; the named entries are the neutral routing tiers.
+        assert {"flagship", "balanced", "fast", "*"}.issubset(model_names)
+        assert not any("claude" in m or "anthropic" in m for m in model_names)
         assert all(target in model_names for target in cfg.agent_routes.values())
 
 

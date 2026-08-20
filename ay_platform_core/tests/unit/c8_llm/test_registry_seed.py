@@ -96,25 +96,43 @@ def _ids() -> Any:
     return (f"x{i}" for i in itertools.count()).__next__
 
 
-async def test_seed_creates_provider_and_models() -> None:
+async def test_seed_over_canonical_creates_nothing() -> None:
+    """Provider-independence / Option B (D-011): the shipped canonical config is
+    now entirely pass-through (neutral tiers `flagship`/`balanced`/`fast` +
+    the `*` catch-all, all `model: "*"`), so seeding creates NO provider and NO
+    model — the registry stays EMPTY until an operator registers a provider via
+    the HMI."""
     reg, prov = _FakeRegistry(), _FakeProviders()
     created = await seed_missing(
         reg, prov, _canonical(),
         clock=lambda: "2026-06-08T00:00:00+00:00", id_factory=_ids(),
     )
-    assert set(created) == {"claude-haiku-fast", "claude-sonnet-midtier", "claude-opus-flagship"}
-    # One Anthropic provider with an EXPLICIT base_url.
+    assert created == []
+    assert prov.store == {}
+    assert reg.store == {}
+
+
+async def test_seed_creates_provider_and_model_for_a_seedable_entry() -> None:
+    """The seed MECHANISM still works when a config DOES declare a concrete
+    `<provider>/<model>` (e.g. an operator-authored bootstrap): one provider per
+    wire_format + one aliased model referencing it."""
+    reg, prov = _FakeRegistry(), _FakeProviders()
+    config = LiteLLMConfig(model_list=[_entry("anthropic/claude-haiku-4-5-20251001")])
+    created = await seed_missing(
+        reg, prov, config,
+        clock=lambda: "2026-06-08T00:00:00+00:00", id_factory=_ids(),
+    )
+    assert created == ["custom"]  # _entry sets model_name="custom" (the alias)
     providers = list(prov.store.values())
     assert len(providers) == 1
     assert providers[0]["name"] == "Anthropic"
     assert providers[0]["base_url"] == "https://api.anthropic.com"
     assert providers[0]["wire_format"] == "anthropic"
-    # Models reference it by id; upstream is the bare model (no provider prefix).
-    haiku = await reg.get_by_alias("claude-haiku-fast")
-    assert haiku is not None
-    assert haiku["provider_id"] == providers[0]["_key"]
-    assert haiku["upstream_model"] == "claude-haiku-4-5-20251001"
-    assert haiku["default_model_quality"] == ModelQuality.LOW.value
+    model = await reg.get_by_alias("custom")
+    assert model is not None
+    assert model["provider_id"] == providers[0]["_key"]
+    assert model["upstream_model"] == "claude-haiku-4-5-20251001"
+    assert model["default_model_quality"] == ModelQuality.LOW.value
 
 
 async def test_seed_skips_the_wildcard_entry() -> None:
@@ -126,13 +144,15 @@ async def test_seed_skips_the_wildcard_entry() -> None:
 
 
 async def test_seed_is_idempotent_and_preserves_provider_key() -> None:
+    # Uses a seedable config (the canonical one seeds nothing now, Option B).
+    config = LiteLLMConfig(model_list=[_entry("anthropic/claude-haiku-4-5-20251001")])
     reg, prov = _FakeRegistry(), _FakeProviders()
-    await seed_missing(reg, prov, _canonical(), id_factory=_ids())
+    await seed_missing(reg, prov, config, id_factory=_ids())
     # Operator sets a key on the provider.
     pid = next(iter(prov.store))
     prov.store[pid]["api_key_ciphertext"] = "ay.1.k1.X.Y"
 
-    second = await seed_missing(reg, prov, _canonical(), id_factory=_ids())
+    second = await seed_missing(reg, prov, config, id_factory=_ids())
     assert second == []  # nothing re-created
     assert prov.store[pid]["api_key_ciphertext"] == "ay.1.k1.X.Y"  # key survived
     assert len(prov.store) == 1  # provider reused, not duplicated

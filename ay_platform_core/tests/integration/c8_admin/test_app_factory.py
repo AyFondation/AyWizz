@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_app_factory.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c8_admin/test_app_factory.py
 # Description: Exercises the REAL c8_admin `create_app` factory + its lifespan
 #              against a real ArangoDB — the production wiring path (collections
@@ -72,23 +72,22 @@ def _http(app: FastAPI) -> httpx.AsyncClient:
     )
 
 
-async def test_lifespan_seeds_registry_from_canonical_config(
+async def test_lifespan_starts_with_empty_registry_option_b(
     seeded_app: FastAPI,
 ) -> None:
+    """Provider-independence / Option B (D-011): the canonical config is now
+    entirely pass-through (neutral tiers + `*`), so the startup seed creates
+    NOTHING — the registry is EMPTY until an operator registers a provider +
+    model via the HMI. The factory + lifespan still boot cleanly."""
     async with _http(seeded_app) as c:
         health = await c.get("/health")
         listing = await c.get("/admin/v1/llm/registry", headers=_TMGR)
     assert health.status_code == 200
     assert health.json()["component"] == "c8_admin"
     assert listing.status_code == 200
-    aliases = {m["alias"] for m in listing.json()["models"]}
-    # The canonical config's three Claude tiers were seeded on startup.
-    assert {"claude-haiku-fast", "claude-sonnet-midtier", "claude-opus-flagship"} <= aliases
-    # Seeded models reference a provider and carry NO secret (key is on the
-    # provider; the model projection has no key field at all).
-    models = listing.json()["models"]
-    assert all(m["provider_id"] for m in models)
-    assert all("api_key" not in m and "key_status" not in m for m in models)
+    # No Anthropic (or any) model was seeded — the operator populates the
+    # registry via the HMI.
+    assert listing.json()["models"] == []
 
 
 async def test_auth_guard_blocks_anonymous(seeded_app: FastAPI) -> None:

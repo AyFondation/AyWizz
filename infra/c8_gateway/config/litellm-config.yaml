@@ -1,7 +1,19 @@
 # =============================================================================
 # File: litellm-config.yaml
-# Version: 5
+# Version: 6
 # Path: infra/c8_gateway/config/litellm-config.yaml
+#
+#              v6 (provider-independence, D-011): removed ALL Anthropic-specific
+#              model entries + every `os.environ/ANTHROPIC_API_KEY`. `model_list`
+#              is now the `"*"` catch-all plus three PROVIDER-NEUTRAL routing
+#              tiers (`flagship` / `balanced` / `fast`, each `model: "*"` +
+#              clientside auth, full feature set). `agent_routes` reference the
+#              neutral tiers. The registry (operator-managed, HMI) resolves each
+#              tier → provider model + api_base + decrypted key per call, so NO
+#              provider is hardcoded. Bootstrap is Option B: the registry starts
+#              EMPTY (seed skips `model == "*"` pass-throughs), so LLM calls fail
+#              cleanly until an operator registers a provider and maps the tiers.
+#              Proven by tests/integration/c8_llm/test_litellm_clientside_auth.
 #
 #              v5 (2026-06-07): LLM-governance Lot 1 — `api_base` added to each
 #              model's `configurable_clientside_auth_params` (per-request URL
@@ -67,83 +79,78 @@ model_list:
       context_window: 200000
       cost_per_million_input: 0.0
       cost_per_million_output: 0.0
-  - model_name: claude-opus-flagship
+  # Provider-INDEPENDENT routing tiers (D-011). These name the QUALITY tier an
+  # agent routes to; they carry NO provider/model and NO env key. The C8 client
+  # injects the registry-resolved `<wire>/<upstream>` + api_base + decrypted
+  # api_key per call, and these entries honour those clientside overrides
+  # (api_base bounded by the anti-SSRF allowlist). Real capability + cost are
+  # governed by the registry model the operator maps to each tier via the HMI
+  # (Option B: the registry is EMPTY until configured, so LLM calls fail cleanly
+  # until an operator registers a provider + model and assigns these aliases).
+  # `features` is the full set — a passthrough placeholder; the routed
+  # provider's real features are enforced when it is registered.
+  - model_name: flagship
     litellm_params:
-      model: anthropic/claude-opus-4-7
-      api_key: os.environ/ANTHROPIC_API_KEY
-      # LLM-governance #3 : allow a per-request `api_key` override (and ONLY
-      # api_key — NOT api_base, so the upstream stays pinned to Anthropic and
-      # no SSRF/exfil seam is opened). The env key above remains the FALLBACK
-      # for callers that do not inject a registry-managed key.
+      model: "*"
       configurable_clientside_auth_params:
         - "api_key"
-        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
-        # (anti-SSRF): any https endpoint, or internal http for self-hosted
-        # (ollama / localhost / host.docker.internal). Tighten per environment.
         - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
-      display_name: "Claude Opus 4.7"
+      display_name: "Flagship tier (registry-resolved)"
       features:
         - chat_completion
         - streaming
+        - tool_calling
+        - structured_outputs
+        - vision
         - long_context
-        - prompt_caching
         - extended_thinking
-        - tool_calling
-        - structured_outputs
-        - vision
+        - prompt_caching
       context_window: 200000
-      cost_per_million_input: 15.00
-      cost_per_million_output: 75.00
-      rate_limit_rpm: 4000
-      rate_limit_tpm: 400000
+      cost_per_million_input: 0.0
+      cost_per_million_output: 0.0
 
-  - model_name: claude-sonnet-midtier
+  - model_name: balanced
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-      # Per-request api_key override (LLM-governance #3) ; env key = fallback.
+      model: "*"
       configurable_clientside_auth_params:
         - "api_key"
-        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
-        # (anti-SSRF): any https endpoint, or internal http for self-hosted
-        # (ollama / localhost / host.docker.internal). Tighten per environment.
         - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
-      display_name: "Claude Sonnet 4.6"
+      display_name: "Balanced tier (registry-resolved)"
       features:
         - chat_completion
         - streaming
+        - tool_calling
+        - structured_outputs
+        - vision
         - long_context
+        - extended_thinking
         - prompt_caching
-        - tool_calling
-        - structured_outputs
       context_window: 200000
-      cost_per_million_input: 3.00
-      cost_per_million_output: 15.00
+      cost_per_million_input: 0.0
+      cost_per_million_output: 0.0
 
-  - model_name: claude-haiku-fast
+  - model_name: fast
     litellm_params:
-      model: anthropic/claude-haiku-4-5-20251001
-      api_key: os.environ/ANTHROPIC_API_KEY
-      # Per-request api_key override (LLM-governance #3) ; env key = fallback.
+      model: "*"
       configurable_clientside_auth_params:
         - "api_key"
-        # api_base override (LLM-governance Lot 1) bounded by an allowlist regex
-        # (anti-SSRF): any https endpoint, or internal http for self-hosted
-        # (ollama / localhost / host.docker.internal). Tighten per environment.
         - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
     model_info:
-      display_name: "Claude Haiku 4.5"
+      display_name: "Fast tier (registry-resolved)"
       features:
         - chat_completion
         - streaming
         - tool_calling
+        - structured_outputs
         - vision
+        - long_context
+        - extended_thinking
         - prompt_caching
       context_window: 200000
-      cost_per_million_input: 0.80
-      cost_per_million_output: 4.00
+      cost_per_million_input: 0.0
+      cost_per_million_output: 0.0
 
 # Per-agent routing by best quality/cost ratio (R-800-030 v1, client-side).
 # Orchestrator roles : deep reasoning → Opus (architect), balanced → Sonnet,
@@ -153,30 +160,30 @@ model_list:
 # a proxy route : it stays the separate local-dev-only path (revert the two
 # C8_GATEWAY_URL/C8_DEFAULT_MODEL lines in .env.dev to use it offline).
 agent_routes:
-  architect: claude-opus-flagship
-  planner: claude-sonnet-midtier
-  implementer: claude-sonnet-midtier
-  spec-reviewer: claude-sonnet-midtier
-  quality-reviewer: claude-sonnet-midtier
-  sub-agent: claude-haiku-fast
-  c3-rag: claude-haiku-fast
-  c3-docgen: claude-haiku-fast
-  c7-kg-extractor: claude-haiku-fast
-  c7-contextualizer: claude-haiku-fast
+  architect: flagship
+  planner: balanced
+  implementer: balanced
+  spec-reviewer: balanced
+  quality-reviewer: balanced
+  sub-agent: fast
+  c3-rag: fast
+  c3-docgen: fast
+  c7-kg-extractor: fast
+  c7-contextualizer: fast
   # C13 (AyExtractor) ingestion enrichment — descriptive leaf work (per-chunk
   # summarisation, decontextualisation, image captioning) → Haiku at lowest
   # cost. The densifier (premium document summary, high tier, one call) MAY be
   # promoted to Sonnet if top quality is wanted there.
-  summarizer: claude-haiku-fast
-  decontextualizer: claude-haiku-fast
-  densifier: claude-haiku-fast
-  image_analyzer: claude-haiku-fast
+  summarizer: fast
+  decontextualizer: fast
+  densifier: fast
+  image_analyzer: fast
   # T3 LLM-as-judge (R-700-032). D-011 wants a DIFFERENT family than the
   # generator ; with Anthropic-only routing this is the strongest available
   # tier (different-tier, NOT cross-family). Re-point at a non-Anthropic
   # family once a second provider is wired, before enabling the judge.
-  c6-judge: claude-opus-flagship
-  default: claude-sonnet-midtier
+  c6-judge: flagship
+  default: balanced
 
 budgets:
   default_hard_cap_usd_per_month: 100.0

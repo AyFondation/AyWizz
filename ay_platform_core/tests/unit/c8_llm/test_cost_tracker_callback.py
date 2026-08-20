@@ -1,6 +1,8 @@
 # =============================================================================
 # File: test_cost_tracker_callback.py
-# Version: 1
+# Version: 2
+#
+# @relation validates:R-800-070
 # Path: ay_platform_core/tests/unit/c8_llm/test_cost_tracker_callback.py
 # Description: Unit tests — the cost-tracker LiteLLM callback extracts tags
 #              from request headers, applies the normative cost formula,
@@ -18,6 +20,7 @@ from ay_platform_core.c8_llm.callbacks.cost_tracker import (
     _extract_tags,
     _fingerprint,
     _provider_of,
+    build_registry_cost_catalog,
 )
 from ay_platform_core.c8_llm.catalog import Feature
 from ay_platform_core.c8_llm.config import ModelInfo
@@ -173,3 +176,62 @@ class TestCallback:
         assert record.error_code == "TimeoutError"
         assert "timed out" in (record.error_message or "")
         assert record.cost_usd == 0.0
+
+
+_REG_PROVIDERS = [
+    {"_key": "p-anthropic", "wire_format": "anthropic"},
+    {"_key": "p-openai", "wire_format": "openai"},
+]
+_REG_MODELS = [
+    {
+        "alias": "flagship",
+        "provider_id": "p-anthropic",
+        "upstream_model": "claude-opus-4-8",
+        "capabilities": {"context_window": 200000, "vision": True},
+        "provider_cost_in_per_1m": 5.0,
+        "provider_cost_out_per_1m": 25.0,
+        "enabled": True,
+    },
+    {
+        "alias": "fast",
+        "provider_id": "p-openai",
+        "upstream_model": "gpt-5-mini",
+        "capabilities": {"context_window": 128000},
+        "provider_cost_in_per_1m": 0.3,
+        "provider_cost_out_per_1m": 1.2,
+        "enabled": True,
+    },
+]
+
+
+@pytest.mark.unit
+class TestRegistryCostCatalog:
+    """Bloc 5 (D-011): cost comes from the REGISTRY, keyed by the resolved
+    `<wire>/<upstream>` model — exactly `envelope.model` after the client
+    rewrite — with the operator-set per-model provider_cost."""
+
+    def test_keys_by_resolved_model_with_registry_costs(self) -> None:
+        cat = build_registry_cost_catalog(_REG_MODELS, _REG_PROVIDERS)
+        # Keyed by `<wire>/<upstream>` (== envelope.model), NOT the alias.
+        assert set(cat.keys()) == {"anthropic/claude-opus-4-8", "openai/gpt-5-mini"}
+        anth = cat["anthropic/claude-opus-4-8"]
+        assert anth.cost_per_million_input == 5.0
+        assert anth.cost_per_million_output == 25.0
+        assert anth.context_window == 200000
+
+    def test_provider_independent_any_wire_format(self) -> None:
+        # An OpenAI-family model is catalogued identically — no Anthropic bias.
+        assert "openai/gpt-5-mini" in build_registry_cost_catalog(
+            _REG_MODELS, _REG_PROVIDERS
+        )
+
+    def test_disabled_models_are_excluded(self) -> None:
+        models = [{**_REG_MODELS[0], "enabled": False}]
+        assert build_registry_cost_catalog(models, _REG_PROVIDERS) == {}
+
+    def test_model_without_provider_is_skipped(self) -> None:
+        models = [{**_REG_MODELS[0], "provider_id": "missing"}]
+        assert build_registry_cost_catalog(models, _REG_PROVIDERS) == {}
+
+    def test_empty_registry_yields_empty_catalog(self) -> None:
+        assert build_registry_cost_catalog([], []) == {}

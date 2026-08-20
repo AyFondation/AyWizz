@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_cost_receiver.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/c8_llm/test_cost_receiver.py
 # Description: Unit tests for the C8 cost receiver's pure core
 #              (`build_call_record`) and catalog loader (`_load_catalog`),
@@ -122,5 +122,8 @@ class TestLoadCatalog:
             / "litellm-config.yaml"
         )
         catalog = _load_catalog(str(config))
-        assert "claude-haiku-fast" in catalog
-        assert catalog["claude-haiku-fast"].cost_per_million_input > 0
+        # Provider-independent: the canonical config exposes NEUTRAL tiers.
+        assert {"flagship", "balanced", "fast"}.issubset(catalog.keys())
+        # Neutral tiers are passthrough placeholders — real per-call cost is
+        # tracked by the receiver (llm_calls), so the config cost is 0.
+        assert catalog["fast"].cost_per_million_input == 0.0
