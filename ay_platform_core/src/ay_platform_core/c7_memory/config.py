@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/config.py
 # Description: Runtime settings for C7 Memory Service.
 #
@@ -15,6 +15,12 @@
 #              `kg_expansion_neighbour_cap`). Active when both `kg_repo`
 #              and a populated graph are present at retrieve time;
 #              dormant otherwise.
+#
+#              v4 (D-011): removed the env-level embedding knobs
+#              (`OLLAMA_URL`, `C7_EMBEDDING_ADAPTER`, `C7_EMBEDDING_MODEL_ID`,
+#              `C7_EMBEDDING_DIMENSION`, `C7_EMBEDDING_OLLAMA_TIMEOUT_S`).
+#              Embedding selection is now in-app (registry, resolved
+#              per-project); the env fallback is a fixed deterministic hash.
 #
 # @relation implements:R-100-111
 # @relation implements:R-100-110
@@ -59,13 +65,6 @@ class MemoryConfig(BaseSettings):
     )
     minio_secure: bool = Field(default=False, validation_alias="MINIO_SECURE")
 
-    # Shared Ollama (C7 is the only consumer today, but the URL is platform-
-    # level; promoted to a shared knob so a future component reusing Ollama
-    # picks up the same value with no duplication.)
-    ollama_url: str = Field(
-        default="http://ollama:11434", validation_alias="OLLAMA_URL"
-    )
-
     # ---- C7-specific (C7_ prefix) ------------------------------------------
     minio_bucket: str = "memory"
 
@@ -89,16 +88,13 @@ class MemoryConfig(BaseSettings):
     # artifacts).
     c13_artifacts_bucket: str = "c13-extractor-artifacts"
 
-    # Embedding adapter selection.
-    #   - "deterministic-hash": zero-dep baseline (reproducible, no ML).
-    #   - "ollama": call the running Ollama server at the shared `OLLAMA_URL`
-    #     serving `embedding_model_id` (e.g. "all-minilm").
-    embedding_adapter: str = "deterministic-hash"
-    embedding_model_id: str = "deterministic-hash-v1"
-    embedding_dimension: int = Field(default=128, ge=8)
-    # The Ollama call timeout is C7-specific (it is THIS component that calls
-    # Ollama; another component might tolerate a different latency budget).
-    embedding_ollama_timeout_s: float = Field(default=30.0, ge=1.0)
+    # D-011 — embedding selection is IN-APP, not env. Real embedders (ollama,
+    # openai-compatible, …) are declared in the embedding registry and resolved
+    # per-project (see `embedding/registry_resolver.py`). C7's env-level
+    # bootstrap fallback is a fixed, keyless, no-network deterministic hash
+    # (built in `main._build_embedder`); it needs no config knob and carries no
+    # provider adherence. A project with no registry selection uses it — lexical
+    # but functional — until the operator configures a real embedding model.
 
     # Chunking (R-400-022)
     chunk_token_size: int = Field(default=512, ge=16)

@@ -75,8 +75,6 @@ async def hybrid_stack(
     # test verifies the MECHANISM, not the production tuning.
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,
@@ -222,8 +220,6 @@ async def test_retrieve_pulls_in_chunks_beyond_scan_cap(
         embedder = DeterministicHashEmbedder(dimension=1024)
         service = MemoryService(
             config=MemoryConfig(
-                embedding_adapter="deterministic-hash",
-                embedding_dimension=embedder.dimension,
                 chunk_token_size=64,
                 chunk_overlap=8,
                 default_quota_bytes=1024 * 1024 * 1024,

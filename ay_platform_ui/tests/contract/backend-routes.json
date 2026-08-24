@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 154,
+  "route_count": 170,
   "routes": [
     {
       "method": "GET",
@@ -96,6 +96,60 @@
       "method": "POST",
       "path": "/admin/users/{user_id}/reactivate",
       "component": "c2_auth",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/llm/embedding-models",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/llm/embedding-models",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/v1/llm/embedding-models/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/embedding-models/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/llm/embedding-providers",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/llm/embedding-providers",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/v1/llm/embedding-providers/{provider_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/embedding-providers/{provider_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/v1/llm/embedding-providers/{provider_id}/api-key",
+      "component": "c8_admin",
       "auth": "role_gated"
     },
     {
@@ -310,6 +364,42 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/llm/embedding-catalog",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/embedding-catalog/available",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/llm/embedding-catalog/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/llm/embedding-catalog/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm/projects/{project_id}/embedding",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/llm/projects/{project_id}/embedding",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/llm/projects/{project_id}/models",
       "component": "c8_admin",
       "auth": "role_gated"
@@ -373,6 +463,12 @@
       "path": "/api/v1/memory/projects/{project_id}/quota",
       "component": "c7_memory",
       "auth": "authenticated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/memory/projects/{project_id}/reembed",
+      "component": "c7_memory",
+      "auth": "role_gated"
     },
     {
       "method": "POST",

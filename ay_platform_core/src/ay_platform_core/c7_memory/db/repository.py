@@ -413,6 +413,34 @@ class MemoryRepository:
             self._list_chunks_for_source_sync, tenant_id, project_id, source_id
         )
 
+    def _list_active_entity_chunks_sync(
+        self, tenant_id: str, project_id: str
+    ) -> list[dict[str, Any]]:
+        aql = """
+        FOR c IN memory_chunks
+            FILTER c.tenant_id == @tenant_id
+                AND c.project_id == @project_id
+                AND c.source_id == null
+                AND c.status == 'active'
+            RETURN c
+        """
+        cursor = self._db.aql.execute(
+            aql,
+            bind_vars={"tenant_id": tenant_id, "project_id": project_id},
+        )
+        return list(cursor)
+
+    async def list_active_entity_chunks_for_project(
+        self, tenant_id: str, project_id: str
+    ) -> list[dict[str, Any]]:
+        """Active chunk rows NOT tied to a source (entity/requirements
+        embeddings from `embed_entity`, `source_id == null`). These have no
+        `memory_sources` row, so the per-source re-embed loop skips them — the
+        re-embed entity pass uses this to cover them (R-400-222)."""
+        return await self._run(
+            self._list_active_entity_chunks_sync, tenant_id, project_id
+        )
+
     def _get_chunk_sync(
         self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
     ) -> dict[str, Any] | None:

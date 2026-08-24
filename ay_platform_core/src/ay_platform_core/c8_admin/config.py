@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/config.py
 # Description: Runtime settings for the C8 admin app. Shared infra params
 #              (Arango) are read un-prefixed via validation_alias like the
@@ -52,3 +52,11 @@ class C8AdminConfig(BaseSettings):
     minio_bucket: str = Field(
         default="orchestrator", validation_alias="MINIO_BUCKET"
     )
+
+    # D-011 / R-400-222 — when a registry embedding model is edited (vectors
+    # change) or a project switches selection, c8_admin fires a best-effort
+    # `reembed` job to this C12/n8n webhook; the workflow calls C7 /reembed as
+    # the system. Blank → auto-trigger DISABLED (staleness stays visible via
+    # processing_version drift; the operator reembeds manually).
+    reembed_webhook_url: str = ""
+    reembed_webhook_timeout_s: float = Field(default=10.0, ge=1.0)

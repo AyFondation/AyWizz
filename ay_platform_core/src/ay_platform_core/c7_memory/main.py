@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 3
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/main.py
 # Description: FastAPI app factory for C7 Memory Service. v3 wires
 #              `MemorySourceStorage` (MinIO blob storage for uploaded
@@ -24,7 +24,9 @@ from ay_platform_core.c7_memory.config import MemoryConfig
 from ay_platform_core.c7_memory.db.repository import MemoryRepository
 from ay_platform_core.c7_memory.embedding.base import EmbeddingProvider
 from ay_platform_core.c7_memory.embedding.deterministic import DeterministicHashEmbedder
-from ay_platform_core.c7_memory.embedding.ollama import OllamaEmbedder
+from ay_platform_core.c7_memory.embedding.registry_resolver import (
+    build_embedding_resolver,
+)
 from ay_platform_core.c7_memory.kg.repository import KGRepository
 from ay_platform_core.c7_memory.llm_resolver import LLMResolverClient
 from ay_platform_core.c7_memory.router import router
@@ -43,28 +45,18 @@ from ay_platform_core.observability.auth_guard import AuthGuardMiddleware
 from ay_platform_core.observability.config import LoggingSettings
 
 
-def _build_embedder(cfg: MemoryConfig) -> EmbeddingProvider:
-    """Select the embedding adapter declared by ``C7_EMBEDDING_ADAPTER``.
+def _build_embedder() -> EmbeddingProvider:
+    """The C7 env-level BOOTSTRAP fallback embedder (D-011).
 
-    Adding a new adapter means adding a new value here + a corresponding
-    import above. Unknown values fail fast at startup rather than silently
-    falling back.
+    Embedding selection is in-app: real embedders (ollama, openai-compatible,
+    …) are declared in the embedding registry and resolved per-project by
+    `RegistryEmbedderResolver`. This fallback is used ONLY when a project has
+    no registry selection. It is deliberately a fixed, keyless, no-network
+    deterministic hash — no provider adherence, no config knob — so a fresh
+    install works out of the box (lexical RAG) until the operator configures a
+    real embedding model via the HMI.
     """
-    name = cfg.embedding_adapter
-    if name == "deterministic-hash":
-        return DeterministicHashEmbedder(
-            model_id=cfg.embedding_model_id, dimension=cfg.embedding_dimension
-        )
-    if name == "ollama":
-        return OllamaEmbedder(
-            base_url=cfg.ollama_url,
-            model_id=cfg.embedding_model_id,
-            request_timeout_s=cfg.embedding_ollama_timeout_s,
-        )
-    raise ValueError(
-        f"unknown C7 embedding adapter {name!r}. "
-        f"Accepted: 'deterministic-hash', 'ollama'."
-    )
+    return DeterministicHashEmbedder()
 
 
 def create_app(config: MemoryConfig | None = None) -> FastAPI:
@@ -76,7 +68,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         cfg.arango_db, username=cfg.arango_username, password=cfg.arango_password
     )
     repo = MemoryRepository(db)
-    embedder = _build_embedder(cfg)
+    embedder = _build_embedder()
     minio_client = Minio(
         cfg.minio_endpoint,
         access_key=cfg.minio_access_key,
@@ -108,6 +100,10 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         base_url=cfg.c8_admin_url,
         timeout_s=cfg.c8_admin_timeout_s,
     )
+    # D-011 — per-project embedder resolution from the in-app embedding
+    # registry (shared Arango `db`). `embedder` above stays the global
+    # fallback used when a project has no registry selection.
+    embedder_resolver = build_embedding_resolver(db)
     service = MemoryService(
         config=cfg,
         repo=repo,
@@ -117,6 +113,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         llm_client=llm_client,
         c12_client=c12_client,
         llm_resolver=llm_resolver,
+        embedder_resolver=embedder_resolver,
     )
 
     @asynccontextmanager
@@ -124,6 +121,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         repo._ensure_collections_sync()
         await storage.ensure_bucket()
         await kg_repo.ensure_collections()
+        await embedder_resolver.ensure_collections()
         yield
         # The Ollama adapter owns its httpx client; close it cleanly on
         # shutdown. Other adapters are no-op.

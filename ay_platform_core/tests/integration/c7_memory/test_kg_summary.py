@@ -53,9 +53,6 @@ async def kg_summary_app(
     kg_repo._ensure_collections_sync()
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_model_id="deterministic-hash-v1",
-            embedding_dimension=c7_deterministic_embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024,

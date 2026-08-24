@@ -1,0 +1,58 @@
+{
+  "_comment": "Version: 1 | Path: infra/c12_workflow/workflows/reembed_project.json | Description: D-011 R-400-222 re-embed trigger workflow. c8_admin POSTs this webhook with {job:'reembed', tenant_id, project_id, model_id} when a registry embedding model is edited (vectors change) or a project switches selection. n8n then calls C7 POST /projects/{project_id}/reembed AS THE SYSTEM (self-asserted project_owner headers, same convention as extract_and_ingest) — reembed is a CONTENT op and the triggering operator may be a content-blind platform_manager, so the recompute runs decoupled as the system, never under the operator identity. Re-embed ONLY (C7 recomputes vectors from the already-stored chunk text; no re-parse/chunk/LLM). onReceived → acks immediately, C7 reembed runs async. Import via `docker compose exec c12 n8n import:workflow --input=/workflows/reembed_project.json`. @relation implements:R-400-222",
+  "id": "reembed-project-v1",
+  "name": "Re-embed Project (c8_admin -> C12 -> C7)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reembed-project",
+        "responseMode": "onReceived",
+        "options": { "rawBody": false }
+      },
+      "id": "webhook-reembed-project",
+      "name": "Webhook — POST /uploads/reembed-project",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 360],
+      "webhookId": "reembed-project-v1",
+      "notes": "Triggered by c8_admin (D-011 R-400-222). Body: { job: 'reembed', tenant_id, project_id, model_id }. Fire-and-forget best-effort — a failure is logged c8_admin-side and never blocks the admin op."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://c7:8000/api/v1/memory/projects/{{$('Webhook — POST /uploads/reembed-project').item.json.body.project_id}}/reembed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-User-Id", "value": "system" },
+            { "name": "X-Tenant-Id", "value": "={{$('Webhook — POST /uploads/reembed-project').item.json.body.tenant_id}}" },
+            { "name": "X-User-Roles", "value": "project_owner,admin" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": false,
+        "options": { "timeout": 600000 }
+      },
+      "id": "c7-reembed",
+      "name": "C7 POST /reembed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 360],
+      "notes": "System-authed reembed (self-asserted project_owner; NOT platform_manager, which is content-excluded). C7 recomputes vectors in place from stored chunk text — re-embed only. Long timeout: a large project re-embeds many chunks. The webhook already responded (onReceived); this runs async, so no respond node is needed."
+    }
+  ],
+  "connections": {
+    "Webhook — POST /uploads/reembed-project": {
+      "main": [[{ "node": "C7 POST /reembed", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "active": true,
+  "staticData": null,
+  "pinData": {}
+}

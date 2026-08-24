@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/config.py
 # Description: Runtime settings for the C4 Orchestrator.
 #
@@ -84,13 +84,15 @@ class OrchestratorConfig(BaseSettings):
     generate_engine: Literal["in_process", "openhands"] = Field(default="in_process")
 
     # OpenHands engine knobs (V2 #2 / R-200-029). Consumed ONLY when
-    # `generate_engine == "openhands"`. `openhands_model` is a C8
-    # `model_list` name prefixed `litellm_proxy/` so the OpenHands LiteLLM
-    # client routes THROUGH the C8 proxy (never a provider directly) ;
-    # default = Claude Opus 4.7 per the Q13 POC. `max_iterations` bounds one
+    # `generate_engine == "openhands"`. `openhands_model` is a C8 routing
+    # target prefixed `litellm_proxy/` so the OpenHands LiteLLM client routes
+    # THROUGH the C8 proxy (never a provider directly). Default is EMPTY —
+    # provider-independent (D-011): no model/provider name is hardcoded. When
+    # the OpenHands engine is enabled, set it to a neutral tier the registry
+    # resolves (e.g. `litellm_proxy/flagship`). `max_iterations` bounds one
     # agent run (the SDK default of 500 is too high for a POC task).
     openhands_model: str = Field(
-        default="litellm_proxy/claude-opus-flagship",
+        default="",
         validation_alias="C4_OPENHANDS_MODEL",
     )
     openhands_max_iterations: int = Field(

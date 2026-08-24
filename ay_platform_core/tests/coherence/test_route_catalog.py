@@ -37,6 +37,12 @@ from ay_platform_core.c6_validation.router import router as c6_router
 from ay_platform_core.c7_memory.router import router as c7_router
 from ay_platform_core.c8_llm.quota.router import router as c8_quota_router
 from ay_platform_core.c8_llm.registry.catalog_router import router as c8_catalog_router
+from ay_platform_core.c8_llm.registry.embedding_catalog_router import (
+    router as c8_embedding_catalog_router,
+)
+from ay_platform_core.c8_llm.registry.embedding_router import (
+    router as c8_embedding_router,
+)
 from ay_platform_core.c8_llm.registry.provider_router import router as c8_provider_router
 from ay_platform_core.c8_llm.registry.router import router as c8_admin_router
 from ay_platform_core.c8_llm.storage.router import router as c8_storage_router
@@ -66,6 +72,8 @@ _ROUTERS: list[tuple[str, object, str]] = [
     ("c8_admin", c8_admin_router, ""),
     ("c8_admin", c8_provider_router, ""),
     ("c8_admin", c8_catalog_router, ""),
+    ("c8_admin", c8_embedding_router, ""),
+    ("c8_admin", c8_embedding_catalog_router, ""),
     ("c8_admin", c8_quota_router, ""),
     ("c8_admin", c8_storage_router, ""),
     ("c9_mcp", c9_router, ""),

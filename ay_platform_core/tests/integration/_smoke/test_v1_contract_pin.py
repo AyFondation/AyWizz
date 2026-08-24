@@ -128,7 +128,7 @@ def c7_app(arango_container: ArangoEndpoint) -> Iterator[FastAPI]:
     repo._ensure_collections_sync()
     embedder = DeterministicHashEmbedder(dimension=64)
     service = MemoryService(
-        config=MemoryConfig(embedding_dimension=embedder.dimension),
+        config=MemoryConfig(),
         repo=repo,
         embedder=embedder,
     )

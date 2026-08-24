@@ -153,8 +153,6 @@ async def test_upload_resolves_model_quality_into_c12_trigger(
     c12 = _CapturingC12()
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=128,
             default_quota_bytes=1024 * 1024 * 1024,
             c13_artifacts_bucket=minio_bucket,
         ),

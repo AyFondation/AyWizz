@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 2
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/main.py
 # Description: FastAPI app factory for the C8 admin tier (R-100-114). Hosts the
 #              platform LLM registry admin surface behind Traefik forward-auth.
@@ -32,6 +32,26 @@ from ay_platform_core.c8_llm.quota.service import QuotaService
 from ay_platform_core.c8_llm.registry.catalog_repository import TenantCatalogRepository
 from ay_platform_core.c8_llm.registry.catalog_router import router as catalog_router
 from ay_platform_core.c8_llm.registry.catalog_service import TenantCatalogService
+from ay_platform_core.c8_llm.registry.embedding_catalog_repository import (
+    EmbeddingCatalogRepository,
+    EmbeddingProjectRepository,
+)
+from ay_platform_core.c8_llm.registry.embedding_catalog_router import (
+    router as embedding_catalog_router,
+)
+from ay_platform_core.c8_llm.registry.embedding_catalog_service import (
+    EmbeddingCatalogService,
+)
+from ay_platform_core.c8_llm.registry.embedding_reembed_notifier import ReembedNotifier
+from ay_platform_core.c8_llm.registry.embedding_repository import (
+    EmbeddingModelRepository,
+    EmbeddingProviderRepository,
+)
+from ay_platform_core.c8_llm.registry.embedding_router import router as embedding_router
+from ay_platform_core.c8_llm.registry.embedding_service import (
+    EmbeddingModelService,
+    EmbeddingProviderService,
+)
 from ay_platform_core.c8_llm.registry.provider_repository import LLMProviderRepository
 from ay_platform_core.c8_llm.registry.provider_router import router as provider_router
 from ay_platform_core.c8_llm.registry.provider_service import LLMProviderService
@@ -80,7 +100,7 @@ def _load_litellm_config(path: str) -> LiteLLMConfig | None:
     return LiteLLMConfig.model_validate(raw)
 
 
-def create_app(
+def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + routers
     config: C8AdminConfig | None = None,
     *,
     cipher: SecretCipher | None = None,
@@ -104,6 +124,33 @@ def create_app(
     provider_service = LLMProviderService(provider_repo, secret_cipher)
     catalog_service = TenantCatalogService(catalog_repo, service)
     quota_service = QuotaService(QuotaRepository(db))
+
+    # EMBEDDING registry (D-011) — parallel to the chat registry. Same cipher
+    # (one master key). Providers/models are platform_manager-managed; the tenant
+    # catalogue + per-project selection are admin/tenant_admin-managed; C7
+    # resolves the embedder per project (B4).
+    emb_provider_repo = EmbeddingProviderRepository(db)
+    emb_model_repo = EmbeddingModelRepository(db)
+    emb_catalog_repo = EmbeddingCatalogRepository(db)
+    emb_project_repo = EmbeddingProjectRepository(db)
+    embedding_provider_service = EmbeddingProviderService(
+        emb_provider_repo, emb_model_repo, secret_cipher
+    )
+    # D-011 / R-400-222 — best-effort re-embed trigger. Fires the C12/n8n
+    # webhook when a model edit changes vectors or a project switches
+    # selection. Blank URL → disabled (no-op).
+    reembed_notifier = ReembedNotifier(
+        webhook_url=cfg.reembed_webhook_url,
+        timeout_s=cfg.reembed_webhook_timeout_s,
+    )
+    # project_repo wires the DELETE-GUARD (a model selected by a project can't
+    # be deleted) AND enumerates projects to re-embed on a model change.
+    embedding_model_service = EmbeddingModelService(
+        emb_model_repo, emb_provider_repo, emb_project_repo, reembed_notifier
+    )
+    embedding_catalog_service = EmbeddingCatalogService(
+        emb_catalog_repo, emb_project_repo, emb_model_repo, reembed_notifier
+    )
 
     # Storage metering (E-100-002 v7) — optional: only when a MinIO endpoint is
     # configured. Absent → the storage endpoints answer 503, nothing else
@@ -129,11 +176,16 @@ def create_app(
         await provider_repo.ensure_collections()
         await catalog_repo.ensure_collections()
         await storage_repo.ensure_collections()
+        await emb_provider_repo.ensure_collections()
+        await emb_model_repo.ensure_collections()
+        await emb_catalog_repo.ensure_collections()
+        await emb_project_repo.ensure_collections()
         if cfg.seed_on_start:
             litellm_cfg = _load_litellm_config(cfg.litellm_config_path)
             if litellm_cfg is not None:
                 await seed_missing(repo, provider_repo, litellm_cfg)
         yield
+        await reembed_notifier.aclose()
 
     app = FastAPI(title="C8 Admin", lifespan=lifespan)
     app.add_middleware(
@@ -147,8 +199,13 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(quota_router)
     app.include_router(storage_router)
+    app.include_router(embedding_router)
+    app.include_router(embedding_catalog_router)
     app.state.registry_service = service
     app.state.provider_service = provider_service
+    app.state.embedding_provider_service = embedding_provider_service
+    app.state.embedding_model_service = embedding_model_service
+    app.state.embedding_catalog_service = embedding_catalog_service
     app.state.catalog_service = catalog_service
     app.state.quota_service = quota_service
     app.state.storage_service = storage_service

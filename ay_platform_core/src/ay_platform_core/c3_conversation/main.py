@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/main.py
 # Description: FastAPI app factory for C3 Conversation Service.
 #
@@ -46,7 +46,10 @@ from ay_platform_core.c8_llm.client import LLMGatewayClient
 from ay_platform_core.c8_llm.config import ClientSettings
 from ay_platform_core.c8_llm.quota.guard import build_quota_guard
 from ay_platform_core.c8_llm.quota.http import register_quota_handler
-from ay_platform_core.c8_llm.registry.key_provider import build_registry_key_provider
+from ay_platform_core.c8_llm.registry.key_provider import (
+    build_registry_key_provider,
+    build_registry_model_resolver,
+)
 from ay_platform_core.observability import (
     TraceContextMiddleware,
     configure_logging,
@@ -124,6 +127,10 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
             # LLM-governance #3 (option B) — per-call registry key injection
             # over the shared Arango `db`; None → proxy env fallback.
             key_provider=build_registry_key_provider(db),
+            # D-011 — provider-independent model selection from the registry
+            # catalogue (scoped to the conversation's project). No model name
+            # in config: registering + associating a model in the HMI is enough.
+            model_provider=build_registry_model_resolver(db),
             quota_guard=build_quota_guard(db),
         )
 

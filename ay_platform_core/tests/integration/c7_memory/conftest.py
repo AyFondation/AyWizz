@@ -97,9 +97,6 @@ async def c7_config(c7_embedder: EmbeddingProvider) -> MemoryConfig:
     """Config aligned with the real embedder's dimension. `c7_embedder`
     has already probed Ollama, so `embedder.dimension` is accurate."""
     return MemoryConfig(
-        embedding_adapter="ollama",
-        embedding_model_id=c7_embedder.model_id,
-        embedding_dimension=c7_embedder.dimension,
         chunk_token_size=20,
         chunk_overlap=4,
         default_quota_bytes=1024 * 1024,
@@ -160,9 +157,6 @@ def c7_upload_service(
     deterministic embedder for speed."""
     return MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_model_id="deterministic-hash-v1",
-            embedding_dimension=c7_deterministic_embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,

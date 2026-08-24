@@ -578,6 +578,89 @@ export interface ProjectModelsUpdate {
 }
 
 // ---------------------------------------------------------------------------
+// Embedding registry (D-011) — parallel to the LLM registry above. Providers
+// carry an `adapter` (the wire protocol chosen at creation) + a write-only
+// key; models declare an upstream model + a fixed `dimension`. No
+// cost/capabilities/quality. Tenants expose a subset; each project selects ONE
+// (embeddings are index-consistent — one per project).
+// ---------------------------------------------------------------------------
+
+export type EmbeddingAdapter = "ollama" | "openai" | "deterministic-hash";
+
+export interface EmbeddingProviderPublic {
+  provider_id: string;
+  name: string;
+  adapter: EmbeddingAdapter;
+  base_url: string;
+  effective_from: string;
+  key_status: "set" | "not_set";
+  api_key_hint: string;
+}
+
+export interface EmbeddingProviderListResponse {
+  providers: EmbeddingProviderPublic[];
+}
+
+export interface EmbeddingProviderUpsert {
+  name: string;
+  adapter: EmbeddingAdapter;
+  base_url: string;
+}
+
+export interface EmbeddingModelPublic {
+  model_id: string;
+  alias: string;
+  provider_id: string;
+  upstream_model: string;
+  dimension: number;
+  enabled: boolean;
+  effective_from: string;
+}
+
+export interface EmbeddingModelListResponse {
+  models: EmbeddingModelPublic[];
+}
+
+export interface EmbeddingModelUpsert {
+  alias: string;
+  provider_id: string;
+  upstream_model: string;
+  dimension: number;
+  enabled: boolean;
+}
+
+/** One per-tenant embedding-catalogue entry joined with the registry view. */
+export interface EmbeddingCatalogModelPublic {
+  tenant_id: string;
+  model_id: string;
+  enabled: boolean;
+  default_for_new_projects: boolean;
+  registry: EmbeddingModelPublic;
+}
+
+export interface EmbeddingCatalogListResponse {
+  models: EmbeddingCatalogModelPublic[];
+}
+
+export interface EmbeddingCatalogUpsert {
+  enabled?: boolean;
+  default_for_new_projects?: boolean;
+}
+
+/** A project's EFFECTIVE embedding model (explicit, or the tenant default). */
+export interface ProjectEmbeddingResponse {
+  tenant_id: string;
+  project_id: string;
+  model_id: string | null;
+  is_explicit: boolean;
+  model: EmbeddingModelPublic | null;
+}
+
+export interface ProjectEmbeddingUpdate {
+  model_id: string;
+}
+
+// ---------------------------------------------------------------------------
 // Platform operator — tenants + cross-tenant user oversight (E-100-002 v3)
 // ---------------------------------------------------------------------------
 

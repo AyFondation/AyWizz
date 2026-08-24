@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/router.py
 # Description: FastAPI APIRouter for C7 per 400-SPEC §6.1. Identity comes
 #              from Traefik forward-auth headers (X-User-Id, X-User-Roles,
@@ -39,6 +39,7 @@ from ay_platform_core.c7_memory.models import (
     EntityEmbedRequest,
     KGExtractionResult,
     KGSummary,
+    ProjectReembedResult,
     QuotaStatus,
     RetrievalRequest,
     RetrievalResponse,
@@ -268,6 +269,28 @@ async def extract_structural_kg(
     return await service.extract_structural_kg(
         tenant_id=tenant_id, project_id=project_id, source_id=source_id, kind=kind,
     )
+
+
+@router.post(
+    "/api/v1/memory/projects/{project_id}/reembed",
+    response_model=ProjectReembedResult,
+    status_code=status.HTTP_200_OK,
+)
+async def reembed_project(
+    project_id: str,
+    _user: str = Depends(_require_actor),
+    tenant_id: str = Depends(_require_tenant),
+    x_user_roles: str | None = Header(default=None),
+    service: MemoryService = Depends(get_service),
+) -> ProjectReembedResult:
+    """D-011 / R-400-222 — recompute the project's vectors with its CURRENT
+    embedder from the already-stored chunk text (re-embed ONLY, no re-parse /
+    re-chunk / LLM — that full reprocess stays C12's, per D-020). Invoked after
+    an embedding-model selection change to restore recall. Config-level project
+    op: `project_owner` / `admin` ; `platform_manager` excluded by
+    E-100-002 v2."""
+    _require_role(x_user_roles, required=("project_owner", "admin"))
+    return await service.reembed_project(tenant_id, project_id)
 
 
 @router.get(

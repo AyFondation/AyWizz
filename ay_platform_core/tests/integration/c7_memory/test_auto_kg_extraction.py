@@ -164,8 +164,6 @@ async def kg_upload_stack(
 
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,
@@ -348,8 +346,6 @@ async def test_malformed_llm_response_does_not_break_upload(
             )
             service = MemoryService(
                 config=MemoryConfig(
-                    embedding_adapter="deterministic-hash",
-                    embedding_dimension=embedder.dimension,
                     chunk_token_size=64,
                     chunk_overlap=8,
                     default_quota_bytes=1024 * 1024 * 1024,

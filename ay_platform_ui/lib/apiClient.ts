@@ -62,6 +62,15 @@ import type {
   ConversationResponse,
   DocumentRef,
   DocumentStructuralOpResult,
+  EmbeddingCatalogListResponse,
+  EmbeddingCatalogModelPublic,
+  EmbeddingCatalogUpsert,
+  EmbeddingModelListResponse,
+  EmbeddingModelPublic,
+  EmbeddingModelUpsert,
+  EmbeddingProviderListResponse,
+  EmbeddingProviderPublic,
+  EmbeddingProviderUpsert,
   EnrichmentConfig,
   Finding,
   FindingPage,
@@ -81,6 +90,7 @@ import type {
   PlatformConfig,
   Project,
   ProjectConsumptionReport,
+  ProjectEmbeddingResponse,
   ProjectList,
   ProjectMemberList,
   ProjectModelsResponse,
@@ -578,6 +588,142 @@ export class ApiClient {
     return this.request<ProjectModelsResponse>(
       `/api/v1/llm/projects/${encodeURIComponent(projectId)}/models`,
       { method: "PUT", body: JSON.stringify({ model_ids: modelIds }) },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Embedding registry (D-011) — providers + models (platform_manager)
+  // -------------------------------------------------------------------------
+
+  /** GET /admin/v1/llm/embedding-providers — list every embedding provider. */
+  async listEmbeddingProviders(): Promise<EmbeddingProviderListResponse> {
+    return this.request<EmbeddingProviderListResponse>("/admin/v1/llm/embedding-providers", {
+      method: "GET",
+    });
+  }
+
+  /** POST /admin/v1/llm/embedding-providers — create one (mints provider_id). */
+  async createEmbeddingProvider(body: EmbeddingProviderUpsert): Promise<EmbeddingProviderPublic> {
+    return this.request<EmbeddingProviderPublic>("/admin/v1/llm/embedding-providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** PUT /admin/v1/llm/embedding-providers/{id} — update name / adapter / base_url. */
+  async updateEmbeddingProvider(
+    providerId: string,
+    body: EmbeddingProviderUpsert,
+  ): Promise<EmbeddingProviderPublic> {
+    return this.request<EmbeddingProviderPublic>(
+      `/admin/v1/llm/embedding-providers/${encodeURIComponent(providerId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** PUT /admin/v1/llm/embedding-providers/{id}/api-key — set the write-only key. */
+  async putEmbeddingProviderApiKey(
+    providerId: string,
+    apiKey: string,
+  ): Promise<EmbeddingProviderPublic> {
+    return this.request<EmbeddingProviderPublic>(
+      `/admin/v1/llm/embedding-providers/${encodeURIComponent(providerId)}/api-key`,
+      { method: "PUT", body: JSON.stringify({ api_key: apiKey }) },
+    );
+  }
+
+  /** DELETE /admin/v1/llm/embedding-providers/{id} — remove a provider by id. */
+  async deleteEmbeddingProvider(providerId: string): Promise<void> {
+    await this.request<void>(
+      `/admin/v1/llm/embedding-providers/${encodeURIComponent(providerId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  /** GET /admin/v1/llm/embedding-models — list every embedding model. */
+  async listEmbeddingModels(): Promise<EmbeddingModelListResponse> {
+    return this.request<EmbeddingModelListResponse>("/admin/v1/llm/embedding-models", {
+      method: "GET",
+    });
+  }
+
+  /** POST /admin/v1/llm/embedding-models — create one (mints model_id). */
+  async createEmbeddingModel(body: EmbeddingModelUpsert): Promise<EmbeddingModelPublic> {
+    return this.request<EmbeddingModelPublic>("/admin/v1/llm/embedding-models", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** PUT /admin/v1/llm/embedding-models/{id} — update a model (alias + attrs). */
+  async updateEmbeddingModel(
+    modelId: string,
+    body: EmbeddingModelUpsert,
+  ): Promise<EmbeddingModelPublic> {
+    return this.request<EmbeddingModelPublic>(
+      `/admin/v1/llm/embedding-models/${encodeURIComponent(modelId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** DELETE /admin/v1/llm/embedding-models/{id} — remove a model by id. */
+  async deleteEmbeddingModel(modelId: string): Promise<void> {
+    await this.request<void>(`/admin/v1/llm/embedding-models/${encodeURIComponent(modelId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Embedding catalogue + project selection (admin / tenant_admin)
+  // -------------------------------------------------------------------------
+
+  /** GET /api/v1/llm/embedding-catalog — the calling tenant's embedding catalogue. */
+  async listEmbeddingCatalog(): Promise<EmbeddingCatalogListResponse> {
+    return this.request<EmbeddingCatalogListResponse>("/api/v1/llm/embedding-catalog", {
+      method: "GET",
+    });
+  }
+
+  /** GET /api/v1/llm/embedding-catalog/available — platform embedding models
+   *  NOT yet in the tenant catalogue (the add picker). */
+  async listAvailableEmbeddingCatalogModels(): Promise<EmbeddingModelListResponse> {
+    return this.request<EmbeddingModelListResponse>("/api/v1/llm/embedding-catalog/available", {
+      method: "GET",
+    });
+  }
+
+  /** PUT /api/v1/llm/embedding-catalog/{model_id} — expose/configure a model
+   *  for the tenant (404 if the model_id is unknown to the platform registry). */
+  async putEmbeddingCatalogModel(
+    modelId: string,
+    body: EmbeddingCatalogUpsert,
+  ): Promise<EmbeddingCatalogModelPublic> {
+    return this.request<EmbeddingCatalogModelPublic>(
+      `/api/v1/llm/embedding-catalog/${encodeURIComponent(modelId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  }
+
+  /** DELETE /api/v1/llm/embedding-catalog/{model_id} — remove from the catalogue. */
+  async deleteEmbeddingCatalogModel(modelId: string): Promise<void> {
+    await this.request<void>(`/api/v1/llm/embedding-catalog/${encodeURIComponent(modelId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** GET /api/v1/llm/projects/{id}/embedding — the project's effective embedding. */
+  async getProjectEmbedding(projectId: string): Promise<ProjectEmbeddingResponse> {
+    return this.request<ProjectEmbeddingResponse>(
+      `/api/v1/llm/projects/${encodeURIComponent(projectId)}/embedding`,
+      { method: "GET" },
+    );
+  }
+
+  /** PUT /api/v1/llm/projects/{id}/embedding — set the project's embedding model. */
+  async setProjectEmbedding(projectId: string, modelId: string): Promise<ProjectEmbeddingResponse> {
+    return this.request<ProjectEmbeddingResponse>(
+      `/api/v1/llm/projects/${encodeURIComponent(projectId)}/embedding`,
+      { method: "PUT", body: JSON.stringify({ model_id: modelId }) },
     );
   }
 

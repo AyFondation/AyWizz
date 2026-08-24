@@ -176,7 +176,7 @@ async def test_download_returns_503_when_storage_not_wired(
     download — same convention as the upload endpoint."""
     embedder = DeterministicHashEmbedder(dimension=64)
     service = MemoryService(
-        config=MemoryConfig(embedding_dimension=embedder.dimension),
+        config=MemoryConfig(),
         repo=c7_repo,
         embedder=embedder,
         # No `storage` injected — download is unavailable.

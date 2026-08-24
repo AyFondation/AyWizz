@@ -109,12 +109,9 @@ async def test_ingest_and_retrieve_with_real_embedder(
         model_id=ollama_container.embed_model_id,
     )
     # Force the embedder to probe its dimension before passing to C7 so
-    # MemoryConfig.embedding_dimension can be set accurately.
+    # downstream assertions read an accurate `embedder.dimension`.
     await embedder.embed_one("warmup")
     config = MemoryConfig(
-        embedding_adapter="ollama",
-        embedding_model_id=ollama_container.embed_model_id,
-        embedding_dimension=embedder.dimension,
         chunk_token_size=64,
         chunk_overlap=8,
         retrieval_scan_cap=1000,

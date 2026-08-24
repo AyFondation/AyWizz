@@ -99,6 +99,27 @@ afterEach(() => vi.restoreAllMocks());
 // a default handler so the section renders (per-test `server.use` can override).
 const CAT_URL = "/api/v1/llm/catalog";
 const PM_URL = "/api/v1/llm/projects/p1/models";
+const EMB_CAT_URL = "/api/v1/llm/embedding-catalog";
+const PE_URL = "/api/v1/llm/projects/p1/embedding";
+
+function embCatEntry(over: Record<string, unknown> = {}) {
+  return {
+    tenant_id: "tenant-x",
+    model_id: "e1",
+    enabled: true,
+    default_for_new_projects: true,
+    registry: {
+      model_id: "e1",
+      alias: "all-minilm",
+      provider_id: "p1",
+      upstream_model: "all-minilm",
+      dimension: 384,
+      enabled: true,
+      effective_from: "2026-08-21T00:00:00+00:00",
+    },
+    ...over,
+  };
+}
 
 function catModel(over: Record<string, unknown> = {}) {
   return {
@@ -138,6 +159,17 @@ beforeEach(() => {
         model_ids: [],
         is_explicit: false,
         models: [],
+      }),
+    ),
+    // The tenant-admin Embedding section fetches these too.
+    http.get(EMB_CAT_URL, () => HttpResponse.json({ models: [] })),
+    http.get(PE_URL, () =>
+      HttpResponse.json({
+        tenant_id: "tenant-x",
+        project_id: "p1",
+        model_id: null,
+        is_explicit: false,
+        model: null,
       }),
     ),
   );
@@ -343,5 +375,48 @@ describe("ProjectSettingsPage — project models (tenant-admin)", () => {
     renderSettings();
     await waitFor(() => expect(screen.getByTestId("project-system-prompt")).toBeInTheDocument());
     expect(screen.queryByTestId("project-models")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectSettingsPage — project embedding (tenant-admin)", () => {
+  it("lists enabled catalogue embeddings and switches the project's selection", async () => {
+    seedToken(["tenant_admin"]);
+    let sent: { model_id: string } | null = null;
+    const put = vi.fn(async ({ request }) => {
+      sent = (await request.json()) as { model_id: string };
+      return HttpResponse.json({
+        tenant_id: "tenant-x",
+        project_id: "p1",
+        model_id: sent.model_id,
+        is_explicit: true,
+        model: embCatEntry().registry,
+      });
+    });
+    server.use(
+      http.get(PROJECT_URL, () => HttpResponse.json(makeProject())),
+      http.get(EMB_CAT_URL, () => HttpResponse.json({ models: [embCatEntry()] })),
+      http.put(PE_URL, put),
+    );
+    renderSettings();
+    await waitFor(() =>
+      expect(screen.getByTestId("project-embedding-all-minilm")).toBeInTheDocument(),
+    );
+    // Lazy default → "using default" hint, nothing explicitly checked yet.
+    expect(screen.getByTestId("project-embedding-using-default")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("project-embedding-all-minilm"));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(sent).toEqual({ model_id: "e1" });
+    await waitFor(() =>
+      expect(screen.getByTestId("project-embedding-notice")).toHaveTextContent(/re-embedded/i),
+    );
+  });
+
+  it("is hidden from a plain project_owner (not tenant-admin)", async () => {
+    seedToken(["project_viewer"], { p1: ["project_owner"] });
+    server.use(http.get(PROJECT_URL, () => HttpResponse.json(makeProject())));
+    renderSettings();
+    await waitFor(() => expect(screen.getByTestId("project-system-prompt")).toBeInTheDocument());
+    expect(screen.queryByTestId("project-embedding")).not.toBeInTheDocument();
   });
 });

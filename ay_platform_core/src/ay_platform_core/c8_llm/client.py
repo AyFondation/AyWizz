@@ -1,6 +1,6 @@
 # =============================================================================
 # File: client.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/client.py
 # Description: Python client for the C8 LLM gateway. All internal components
 #              (C3, C4, C6, C7, …) use this class rather than importing
@@ -248,6 +248,7 @@ class LLMGatewayClient:
         key_provider: (
             Callable[[str], Awaitable[CallTarget | None]] | None
         ) = None,
+        model_provider: Callable[..., Awaitable[str | None]] | None = None,
         quota_guard: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
@@ -264,6 +265,13 @@ class LLMGatewayClient:
         # None → no override (proxy env fallback). Best-effort : a provider
         # returning None or raising leaves the call on the fallback.
         self._key_provider = key_provider
+        # Provider-INDEPENDENT model resolution (D-011). When a call arrives with
+        # no explicit model AND no client-side route, this resolves the agent →
+        # a CONCRETE model alias from the operator's registry catalogue, scoped
+        # to the call's project. So registering + associating a model in the HMI
+        # is enough — NO model/provider name in config. None → the legacy
+        # agent_routes / default_model path only. Best-effort (None on failure).
+        self._model_provider = model_provider
         # Single shared gateway credential (R-800-012) : an explicit
         # constructor `bearer_token` (e.g. user-scoped JWT forwarding)
         # wins ; otherwise the client uses `C8_GATEWAY_API_KEY` from
@@ -318,6 +326,37 @@ class LLMGatewayClient:
         if not target:
             return payload  # let the proxy emit a 400 per R-800-030
         return payload.model_copy(update={"model": target})
+
+    async def _resolve_model_alias(
+        self,
+        body: dict[str, Any],
+        *,
+        agent_name: str,
+        tenant_id: str | None,
+        project_id: str | None,
+    ) -> None:
+        """Provider-INDEPENDENT model selection (D-011). When no model was
+        chosen (no explicit `model`, no client-side agent route), resolve one
+        from the operator's registry catalogue — scoped to the call's project,
+        by the agent's quality tier — and set ``body['model']``. So registering
+        + associating a model in the HMI is sufficient; NO model/provider name
+        lives in config. Best-effort: `None` leaves the body unset (the proxy
+        then 400s with a clear 'no model' error rather than a silent default).
+        Runs BEFORE `_inject_upstream_key`, which rewrites the alias to the
+        provider endpoint + key."""
+        if self._model_provider is None or body.get("model"):
+            return
+        try:
+            alias = await self._model_provider(
+                agent_name,
+                tenant_id,
+                project_id,
+                require_tool_calling=bool(body.get("tools")),
+            )
+        except Exception:  # best-effort, never break a call
+            return
+        if alias:
+            body["model"] = alias
 
     async def _inject_upstream_key(self, body: dict[str, Any]) -> None:
         """Resolve the alias in ``body['model']`` to its registry CallTarget and
@@ -424,6 +463,9 @@ class LLMGatewayClient:
         if reasoning_verbose:
             _apply_adaptive_thinking(body)
         await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
+        await self._resolve_model_alias(
+            body, agent_name=agent_name, tenant_id=tenant_id, project_id=project_id
+        )
         await self._inject_upstream_key(body)
         # Cache marker AFTER upstream resolution: the marker is provider-aware
         # and reads the now-rewritten `<wire_format>/<upstream>` model.
@@ -492,6 +534,9 @@ class LLMGatewayClient:
         if reasoning_verbose:
             _apply_adaptive_thinking(stream_body)
         await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
+        await self._resolve_model_alias(
+            stream_body, agent_name=agent_name, tenant_id=tenant_id, project_id=project_id
+        )
         await self._inject_upstream_key(stream_body)
         # Cache marker AFTER upstream resolution (provider-aware — see above).
         if cache_hint == "static":

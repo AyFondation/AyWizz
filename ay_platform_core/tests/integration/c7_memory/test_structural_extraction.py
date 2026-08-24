@@ -97,8 +97,6 @@ async def structural_stack(
 
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             default_quota_bytes=1024 * 1024 * 1024,
             retrieval_scan_cap=1000,
         ),
@@ -275,7 +273,7 @@ async def test_extract_structural_503_when_kg_repo_not_wired(
         repo._ensure_collections_sync()
         embedder = DeterministicHashEmbedder(dimension=64)
         service = MemoryService(
-            config=MemoryConfig(embedding_dimension=embedder.dimension),
+            config=MemoryConfig(),
             repo=repo,
             embedder=embedder,
             # No kg_repo.
@@ -340,8 +338,6 @@ async def code_stack(
     embedder = DeterministicHashEmbedder(dimension=64)
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             default_quota_bytes=1024 * 1024 * 1024,
             retrieval_scan_cap=1000,
         ),

@@ -203,6 +203,37 @@ function invocations(client: ApiClient): Record<string, () => Promise<unknown> |
     deleteLlmCatalogModel: () => client.deleteLlmCatalogModel("m1"),
     getProjectModels: () => client.getProjectModels(P),
     setProjectModels: () => client.setProjectModels(P, ["m1"]),
+    listEmbeddingProviders: () => client.listEmbeddingProviders(),
+    createEmbeddingProvider: () =>
+      client.createEmbeddingProvider({ name: "P", adapter: "ollama", base_url: "http://x" }),
+    updateEmbeddingProvider: () =>
+      client.updateEmbeddingProvider("p1", { name: "P", adapter: "ollama", base_url: "http://x" }),
+    putEmbeddingProviderApiKey: () => client.putEmbeddingProviderApiKey("p1", "sk-x"),
+    deleteEmbeddingProvider: () => client.deleteEmbeddingProvider("p1"),
+    listEmbeddingModels: () => client.listEmbeddingModels(),
+    createEmbeddingModel: () =>
+      client.createEmbeddingModel({
+        alias: "e",
+        provider_id: "p1",
+        upstream_model: "all-minilm",
+        dimension: 384,
+        enabled: true,
+      }),
+    updateEmbeddingModel: () =>
+      client.updateEmbeddingModel("m1", {
+        alias: "e",
+        provider_id: "p1",
+        upstream_model: "all-minilm",
+        dimension: 384,
+        enabled: true,
+      }),
+    deleteEmbeddingModel: () => client.deleteEmbeddingModel("m1"),
+    listEmbeddingCatalog: () => client.listEmbeddingCatalog(),
+    listAvailableEmbeddingCatalogModels: () => client.listAvailableEmbeddingCatalogModels(),
+    putEmbeddingCatalogModel: () => client.putEmbeddingCatalogModel("m1", { enabled: true }),
+    deleteEmbeddingCatalogModel: () => client.deleteEmbeddingCatalogModel("m1"),
+    getProjectEmbedding: () => client.getProjectEmbedding(P),
+    setProjectEmbedding: () => client.setProjectEmbedding(P, "m1"),
     listTenants: () => client.listTenants(),
     createTenant: () => client.createTenant("t1", "T1"),
     deleteTenant: () => client.deleteTenant("t1"),

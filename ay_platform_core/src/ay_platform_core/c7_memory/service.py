@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 4
+# Version: 7
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/service.py
 # Description: Facade for the C7 Memory Service. Wires ingestion (parse +
 #              chunk + embed + index), federated retrieval, entity-event
@@ -56,7 +56,10 @@ from ay_platform_core.c7_memory.c12_client import C12WebhookClient, C12WebhookEr
 from ay_platform_core.c7_memory.config import MemoryConfig
 from ay_platform_core.c7_memory.contextualizer import contextualise_chunks
 from ay_platform_core.c7_memory.db.repository import MemoryRepository
-from ay_platform_core.c7_memory.embedding.base import EmbeddingProvider
+from ay_platform_core.c7_memory.embedding.base import (
+    EmbedderResolver,
+    EmbeddingProvider,
+)
 from ay_platform_core.c7_memory.ingestion.chunker import chunk_text
 from ay_platform_core.c7_memory.ingestion.parser import (
     ParseFailureError,
@@ -91,6 +94,7 @@ from ay_platform_core.c7_memory.models import (
     KGRelationSample,
     KGSummary,
     ParseStatus,
+    ProjectReembedResult,
     Provenance,
     QuotaStatus,
     RetrievalHit,
@@ -101,6 +105,7 @@ from ay_platform_core.c7_memory.models import (
     SourceIngestRequest,
     SourceListResponse,
     SourcePublic,
+    SourceReembedOutcome,
     SourceRunListing,
     SourceStorageInfo,
 )
@@ -134,10 +139,18 @@ class MemoryService:
         llm_client: LLMGatewayClient | None = None,
         c12_client: C12WebhookClient | None = None,
         llm_resolver: LLMResolverClient | None = None,
+        embedder_resolver: EmbedderResolver | None = None,
     ) -> None:
         self._config = config
         self._repo = repo
+        # The GLOBAL env-configured embedder (fallback). It is used verbatim
+        # when no per-project registry selection resolves.
         self._embedder = embedder
+        # D-011 — per-project embedder resolver (in-app embedding registry).
+        # None → registry disabled; every operation uses `self._embedder`.
+        # When wired, ingestion + retrieval resolve the project's embedder,
+        # falling back to `self._embedder` when the project has no selection.
+        self._embedder_resolver = embedder_resolver
         # `storage` is optional: tests that don't exercise the upload
         # endpoint can pass None. The /sources/upload route requires
         # storage to be present and 503's otherwise.
@@ -665,12 +678,28 @@ class MemoryService:
                 )
         return public
 
-    def _current_processing_version(self) -> str:
+    async def _embedder_for(
+        self, tenant_id: str, project_id: str
+    ) -> EmbeddingProvider:
+        """The embedder a given `(tenant, project)` SHALL use. Resolves the
+        project's registry selection when a resolver is wired; falls back to
+        the global env embedder otherwise (or when the project has no
+        selection). Callers use the SAME resolved embedder for BOTH the vector
+        computation and the `model_id` stamped/filtered alongside it, so
+        ingestion and retrieval stay consistent per project (R-400-222)."""
+        if self._embedder_resolver is None or not project_id:
+            return self._embedder
+        resolved = await self._embedder_resolver.resolve(tenant_id, project_id)
+        return resolved if resolved is not None else self._embedder
+
+    def _current_processing_version(
+        self, embedder: EmbeddingProvider | None = None
+    ) -> str:
         """Pipeline descriptor a fresh ingestion would stamp now (R-400-208)."""
         return _format_processing_version(
             self._config.chunk_token_size,
             self._config.chunk_overlap,
-            self._embedder.model_id,
+            (embedder or self._embedder).model_id,
         )
 
     async def _index_parsed_source(
@@ -702,7 +731,8 @@ class MemoryService:
             uploaded_by=uploaded_by,
         )
 
-        version = self._current_processing_version()
+        embedder = await self._embedder_for(tenant_id, project_id)
+        version = self._current_processing_version(embedder)
         chunks = chunk_text(
             parsed_text,
             token_size=self._config.chunk_token_size,
@@ -712,7 +742,7 @@ class MemoryService:
             source_row = _source_row(
                 payload=synth_payload,
                 tenant_id=tenant_id,
-                model_id=self._embedder.model_id,
+                model_id=embedder.model_id,
                 chunk_count=0,
                 parse_status=ParseStatus.PARSED,
                 processing_version=version,
@@ -741,13 +771,13 @@ class MemoryService:
             f"{ctx}\n\n{chunk.text}" if ctx else chunk.text
             for chunk, ctx in zip(chunks, contexts, strict=True)
         ]
-        vectors = await self._embedder.embed_batch(embed_texts)
+        vectors = await embedder.embed_batch(embed_texts)
         if len(vectors) != len(chunks):
             raise RuntimeError(
                 "embedder returned a different number of vectors than "
                 "input chunks — adapter contract violation"
             )
-        if any(len(v) != self._embedder.dimension for v in vectors):
+        if any(len(v) != embedder.dimension for v in vectors):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
@@ -779,8 +809,8 @@ class MemoryService:
                 "context": ctx,
                 "content_hash": content_hash,
                 "vector": vector,
-                "model_id": self._embedder.model_id,
-                "model_dim": self._embedder.dimension,
+                "model_id": embedder.model_id,
+                "model_dim": embedder.dimension,
                 "created_at": now,
                 "status": ChunkStatus.ACTIVE.value,
                 "metadata": {"mime_type": mime_type},
@@ -797,13 +827,13 @@ class MemoryService:
                 project_id=project_id,
                 source_id=source_id,
                 name=CHUNKS_ARTIFACT,
-                data=serialize_chunks(source_id, self._embedder.model_id, chunk_rows),
+                data=serialize_chunks(source_id, embedder.model_id, chunk_rows),
             )
 
         source_row = _source_row(
             payload=synth_payload,
             tenant_id=tenant_id,
-            model_id=self._embedder.model_id,
+            model_id=embedder.model_id,
             chunk_count=len(chunks),
             parse_status=ParseStatus.INDEXED,
             processing_version=version,
@@ -842,12 +872,15 @@ class MemoryService:
             )
 
         # Reconstruct the source's text from its persisted chunks. Cheap
-        # for v1 sources (≤ a few MB); avoids re-parsing the raw blob.
+        # for v1 sources (≤ a few MB); avoids re-parsing the raw blob. The
+        # chunks were stamped with the PROJECT's embedder model_id at
+        # ingestion, so scan with the same resolved model_id.
+        embedder = await self._embedder_for(tenant_id, project_id)
         chunk_rows = await self._repo.scan_chunks(
             tenant_id=tenant_id,
             project_id=project_id,
             indexes=[IndexKind.EXTERNAL_SOURCES.value],
-            model_id=self._embedder.model_id,
+            model_id=embedder.model_id,
             include_deprecated=False,
             include_history=False,
             scan_cap=self._config.retrieval_scan_cap,
@@ -948,11 +981,12 @@ class MemoryService:
                 mime_type=str(existing["mime_type"]),
             )
         else:
+            embedder = await self._embedder_for(tenant_id, project_id)
             chunk_rows = await self._repo.scan_chunks(
                 tenant_id=tenant_id,
                 project_id=project_id,
                 indexes=[IndexKind.EXTERNAL_SOURCES.value],
-                model_id=self._embedder.model_id,
+                model_id=embedder.model_id,
                 include_deprecated=False,
                 include_history=False,
                 scan_cap=self._config.retrieval_scan_cap,
@@ -1182,7 +1216,8 @@ class MemoryService:
         self, tenant_id: str, project_id: str
     ) -> SourceListResponse:
         rows = await self._repo.list_sources(tenant_id, project_id)
-        current = self._current_processing_version()
+        embedder = await self._embedder_for(tenant_id, project_id)
+        current = self._current_processing_version(embedder)
         return SourceListResponse(
             sources=[_source_public(r, current_version=current) for r in rows]
         )
@@ -1195,7 +1230,8 @@ class MemoryService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="source not found"
             )
-        return _source_public(row, current_version=self._current_processing_version())
+        embedder = await self._embedder_for(tenant_id, project_id)
+        return _source_public(row, current_version=self._current_processing_version(embedder))
 
     async def get_source_diagnostics(
         self, tenant_id: str, project_id: str, source_id: str
@@ -1554,6 +1590,179 @@ class MemoryService:
     # (R-400-208) so staleness detection at GET /sources/{id} keeps
     # working ; only the re-run trigger moved out of C7.
 
+    # ------------------------------------------------------------------
+    # Re-embedding (D-011 / R-400-222)
+    # ------------------------------------------------------------------
+    # This is NOT the D-020 reprocess. `reembed_project` recomputes ONLY the
+    # vectors, from the chunk text already stored in `memory_chunks`
+    # (content + context are the embedding input). No re-parse, re-chunk, or
+    # LLM contextualisation runs — that full pipeline stays owned by C12's
+    # `extract_and_ingest`. Used when a project's embedding-model selection
+    # changes (in-app registry): retrieval already filters by the current
+    # model_id (so it is SAFE — never mixes models — but returns nothing from
+    # the old-model chunks until they are re-embedded); this restores recall by
+    # moving the stored chunks onto the new model in place.
+
+    # Sentinel unit label for the standalone entity/requirements embeddings
+    # (`embed_entity`, source_id=null) — they have no source row, so they are
+    # reported as one synthetic unit rather than per-source.
+    _ENTITY_UNIT = "<project-entities>"
+
+    async def reembed_project(
+        self, tenant_id: str, project_id: str
+    ) -> ProjectReembedResult:
+        """Re-embed EVERY embedded element of a project with the project's
+        CURRENT embedder, reusing the stored chunk text: all indexed sources
+        (external + conversation) AND the standalone entity/requirements
+        embeddings (`embed_entity`, which have no source row). Per-unit failures
+        are isolated (recorded, not fatal) so one bad unit cannot abort the
+        batch. Units already on the current model are skipped."""
+        embedder = await self._embedder_for(tenant_id, project_id)
+        version = self._current_processing_version(embedder)
+        sources = await self._repo.list_sources(tenant_id, project_id)
+        outcomes = [
+            await self._reembed_source(
+                tenant_id, project_id, src, embedder=embedder, version=version
+            )
+            for src in sources
+        ]
+        # Cover the source-less entity/requirements embeddings (D-coverage).
+        entity_outcome = await self._reembed_entities(
+            tenant_id, project_id, embedder=embedder
+        )
+        if entity_outcome is not None:
+            outcomes.append(entity_outcome)
+        return ProjectReembedResult(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            model_id=embedder.model_id,
+            total_sources=len(outcomes),
+            reembedded=sum(o.status == "reembedded" for o in outcomes),
+            skipped=sum(o.status == "skipped" for o in outcomes),
+            failed=sum(o.status == "failed" for o in outcomes),
+            sources=outcomes,
+        )
+
+    async def _recompute_chunk_vectors(
+        self, active: list[dict[str, Any]], embedder: EmbeddingProvider
+    ) -> tuple[list[dict[str, Any]] | None, str | None]:
+        """Re-embed the given active chunk rows with `embedder`. Returns
+        `(new_rows, None)` on success or `(None, error_detail)` on failure. The
+        embedding input is the stored contextualised text when present
+        (R-400-203) else the raw content — mirrors what ingestion embedded.
+        Vector count + dimension are validated; only the vector + model
+        provenance change (same `_key` → upsert overwrites in place)."""
+        embed_texts = [
+            f"{ctx}\n\n{r['content']}" if (ctx := r.get("context")) else r["content"]
+            for r in active
+        ]
+        try:
+            vectors = await embedder.embed_batch(embed_texts)
+        except Exception as exc:
+            # Per-unit isolation — an adapter/network failure must not abort the
+            # whole project re-embed; the old index is left intact.
+            return None, f"embedding failed: {exc}"
+        if len(vectors) != len(active) or any(
+            len(v) != embedder.dimension for v in vectors
+        ):
+            return None, "embedder produced an unexpected vector count/dimension"
+        now = datetime.now(UTC).isoformat()
+        new_rows: list[dict[str, Any]] = []
+        for r, vector in zip(active, vectors, strict=True):
+            updated = dict(r)
+            updated["vector"] = vector
+            updated["model_id"] = embedder.model_id
+            updated["model_dim"] = embedder.dimension
+            updated["created_at"] = now
+            new_rows.append(updated)
+        return new_rows, None
+
+    async def _reembed_source(
+        self,
+        tenant_id: str,
+        project_id: str,
+        src: dict[str, Any],
+        *,
+        embedder: EmbeddingProvider,
+        version: str,
+    ) -> SourceReembedOutcome:
+        source_id = str(src["source_id"])
+        if src.get("parse_status") != ParseStatus.INDEXED.value:
+            return SourceReembedOutcome(
+                source_id=source_id, status="skipped", detail="source not indexed"
+            )
+        if src.get("model_id") == embedder.model_id:
+            return SourceReembedOutcome(
+                source_id=source_id,
+                status="skipped",
+                chunk_count=int(src.get("chunk_count") or 0),
+                detail="already on the current embedding model",
+            )
+        all_rows = await self._repo.list_chunks_for_source(
+            tenant_id, project_id, source_id
+        )
+        active = [r for r in all_rows if r.get("status") == ChunkStatus.ACTIVE.value]
+        if not active:
+            return SourceReembedOutcome(
+                source_id=source_id, status="skipped", detail="no active chunks"
+            )
+        new_rows, err = await self._recompute_chunk_vectors(active, embedder)
+        if err is not None or new_rows is None:
+            return SourceReembedOutcome(
+                source_id=source_id, status="failed", detail=err
+            )
+        await self._repo.upsert_chunks(new_rows)
+        # Keep the replayable artifact in sync when blob storage is wired
+        # (R-400-207) so a later rebuild reproduces the NEW vectors.
+        if self._storage is not None:
+            await self._storage.put_artifact(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                source_id=source_id,
+                name=CHUNKS_ARTIFACT,
+                data=serialize_chunks(source_id, embedder.model_id, new_rows),
+            )
+        updated_src = dict(src)
+        updated_src["model_id"] = embedder.model_id
+        updated_src["processing_version"] = version
+        await self._repo.upsert_source(updated_src)
+        return SourceReembedOutcome(
+            source_id=source_id, status="reembedded", chunk_count=len(new_rows)
+        )
+
+    async def _reembed_entities(
+        self, tenant_id: str, project_id: str, *, embedder: EmbeddingProvider
+    ) -> SourceReembedOutcome | None:
+        """Re-embed the project's source-less entity/requirements chunks
+        (`embed_entity`, source_id=null). Returns None when there are none (so
+        the common no-entities case adds nothing to the report). Only chunks
+        NOT already on the current model are recomputed (entities may have been
+        embedded at different times → mixed models)."""
+        active = await self._repo.list_active_entity_chunks_for_project(
+            tenant_id, project_id
+        )
+        if not active:
+            return None
+        off = [r for r in active if r.get("model_id") != embedder.model_id]
+        if not off:
+            return SourceReembedOutcome(
+                source_id=self._ENTITY_UNIT,
+                status="skipped",
+                chunk_count=len(active),
+                detail="already on the current embedding model",
+            )
+        new_rows, err = await self._recompute_chunk_vectors(off, embedder)
+        if err is not None or new_rows is None:
+            return SourceReembedOutcome(
+                source_id=self._ENTITY_UNIT, status="failed", detail=err
+            )
+        await self._repo.upsert_chunks(new_rows)
+        return SourceReembedOutcome(
+            source_id=self._ENTITY_UNIT,
+            status="reembedded",
+            chunk_count=len(new_rows),
+        )
+
     async def kg_summary(
         self, tenant_id: str, project_id: str, *, sample_limit: int = 10
     ) -> KGSummary:
@@ -1601,8 +1810,9 @@ class MemoryService:
     async def embed_entity(
         self, payload: EntityEmbedRequest, *, tenant_id: str
     ) -> ChunkPublic:
-        vector = await self._embedder.embed_one(payload.content)
-        if len(vector) != self._embedder.dimension:
+        embedder = await self._embedder_for(tenant_id, payload.project_id)
+        vector = await embedder.embed_one(payload.content)
+        if len(vector) != embedder.dimension:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="embedder produced vector of unexpected dimension",
@@ -1629,8 +1839,8 @@ class MemoryService:
             "content": payload.content,
             "content_hash": content_hash,
             "vector": vector,
-            "model_id": self._embedder.model_id,
-            "model_dim": self._embedder.dimension,
+            "model_id": embedder.model_id,
+            "model_dim": embedder.dimension,
             "created_at": now,
             "status": ChunkStatus.ACTIVE.value,
             "metadata": dict(payload.metadata),
@@ -1656,15 +1866,18 @@ class MemoryService:
         # informational here. Keeping the kwargs ensures the two
         # implementations are call-compatible.
         started = time.monotonic()
-        # R-400-042: the query is embedded with the ACTIVE embedder; we
-        # only compare against stored chunks that used the same model.
-        query_vector = await self._embedder.embed_one(payload.query)
+        # R-400-042 / R-400-222: the query is embedded with the project's
+        # ACTIVE embedder (per-project registry selection, or the global
+        # fallback); we only compare against stored chunks that used the same
+        # model. Ingestion stamps the same model_id, so the two stay aligned.
+        embedder = await self._embedder_for(tenant_id, payload.project_id)
+        query_vector = await embedder.embed_one(payload.query)
 
         rows = await self._repo.scan_chunks(
             tenant_id=tenant_id,
             project_id=payload.project_id,
             indexes=[ix.value for ix in payload.indexes],
-            model_id=self._embedder.model_id,
+            model_id=embedder.model_id,
             include_deprecated=payload.include_deprecated,
             include_history=payload.include_history,
             scan_cap=self._config.retrieval_scan_cap,
@@ -1706,6 +1919,7 @@ class MemoryService:
                 payload=payload,
                 tenant_id=tenant_id,
                 cosine_fn=_cosine_weighted,
+                model_id=embedder.model_id,
             )
 
         # R-400-202 — hybrid retrieval : fuse the dense (cosine + KG) ranking
@@ -1719,7 +1933,7 @@ class MemoryService:
                 project_id=payload.project_id,
                 query=payload.query,
                 indexes=[ix.value for ix in payload.indexes],
-                model_id=self._embedder.model_id,
+                model_id=embedder.model_id,
                 include_deprecated=payload.include_deprecated,
                 include_history=payload.include_history,
                 limit=max(payload.top_k * 5, 50),
@@ -1785,6 +1999,7 @@ class MemoryService:
         payload: RetrievalRequest,
         tenant_id: str,
         cosine_fn: Any,
+        model_id: str,
     ) -> list[tuple[dict[str, Any], float]]:
         """Phase F.2 hybrid expansion. Returns a re-sorted scored list
         with (A) extra chunks pulled from graph-neighbour source_ids
@@ -1824,7 +2039,7 @@ class MemoryService:
                 project_id=payload.project_id,
                 source_ids=extra_source_ids,
                 indexes=[ix.value for ix in payload.indexes],
-                model_id=self._embedder.model_id,
+                model_id=model_id,
                 include_deprecated=payload.include_deprecated,
                 include_history=payload.include_history,
             )

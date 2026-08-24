@@ -65,8 +65,6 @@ async def lexical_stack(
     embedder = DeterministicHashEmbedder(dimension=64)
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             default_quota_bytes=1024 * 1024 * 1024,
             retrieval_scan_cap=1000,
         ),

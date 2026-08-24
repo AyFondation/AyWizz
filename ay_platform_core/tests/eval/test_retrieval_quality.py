@@ -78,9 +78,6 @@ async def eval_stack(
     )
     await embedder.embed_one("warmup")  # probe dimension
     config = MemoryConfig(
-        embedding_adapter="ollama",
-        embedding_model_id=embedder.model_id,
-        embedding_dimension=embedder.dimension,
         default_quota_bytes=1024 * 1024 * 1024,
         retrieval_scan_cap=1000,
     )

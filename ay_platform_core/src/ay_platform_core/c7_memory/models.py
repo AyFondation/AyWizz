@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/models.py
 # Description: Pydantic v2 models for the C7 Memory Service. Mirrors the
 #              contract-critical entities E-400-001..005 from
@@ -531,6 +531,39 @@ class ChunkListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chunks: list[ChunkPublic]
+
+
+# ---------------------------------------------------------------------------
+# Re-embedding (D-011 / R-400-222) — recompute a project's vectors with its
+# CURRENT embedder from the already-stored chunk text. This is re-embed ONLY:
+# no re-parse / re-chunk / LLM contextualisation (that full reprocess is C12's
+# `extract_and_ingest`, per D-020). The chunk text (content + context) is the
+# stored embedding input, so no source re-processing is needed.
+# ---------------------------------------------------------------------------
+
+
+class SourceReembedOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    status: Literal["reembedded", "skipped", "failed"]
+    chunk_count: int = 0
+    detail: str | None = None
+
+
+class ProjectReembedResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str
+    project_id: str
+    # The embedding model every re-embedded source was moved to (the project's
+    # current resolved embedder). Recorded so the caller knows the target.
+    model_id: str
+    total_sources: int
+    reembedded: int
+    skipped: int
+    failed: int
+    sources: list[SourceReembedOutcome]
 
 
 # ---------------------------------------------------------------------------

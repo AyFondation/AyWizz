@@ -99,9 +99,6 @@ def _make_service(
 ) -> MemoryService:
     embedder = DeterministicHashEmbedder(dimension=128)
     config = MemoryConfig(
-        embedding_adapter="deterministic-hash",
-        embedding_model_id=embedder.model_id,
-        embedding_dimension=embedder.dimension,
         chunk_token_size=512,
         chunk_overlap=64,
         default_quota_bytes=10 * 1024 * 1024,

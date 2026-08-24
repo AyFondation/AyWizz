@@ -773,6 +773,18 @@ register_contract(
 # C8 Admin — platform LLM registry contracts (write-only API key)
 # ---------------------------------------------------------------------------
 
+from ay_platform_core.c8_llm.registry.embedding_catalog_models import (  # noqa: E402
+    EmbeddingCatalogModelPublic,
+    EmbeddingCatalogUpsert,
+    ProjectEmbeddingResponse,
+    ProjectEmbeddingUpdate,
+)
+from ay_platform_core.c8_llm.registry.embedding_models import (  # noqa: E402
+    EmbeddingModelPublic,
+    EmbeddingModelUpsert,
+    EmbeddingProviderPublic,
+    EmbeddingProviderUpsert,
+)
 from ay_platform_core.c8_llm.registry.models import (  # noqa: E402
     LLMModelUpsert,
     LLMRegistryListResponse,
@@ -859,6 +871,90 @@ register_contract(
         consumers=("C1_gateway", "ay_platform_ui"),
         transport="rest",
         description="PUT write-only provider API key (encrypted before persistence).",
+    )
+)
+# EMBEDDING registry (D-011) — distinct domain from the chat registry above.
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingProviderPublic",
+        schema=EmbeddingProviderPublic,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description=(
+            "Read projection of an embedding provider (endpoint + adapter). "
+            "WRITE-ONLY KEY: key_status + masked hint only."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingProviderUpsert",
+        schema=EmbeddingProviderUpsert,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description="POST/PUT embedding provider metadata (name + adapter + base_url; no key).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingModelPublic",
+        schema=EmbeddingModelPublic,
+        consumers=("ay_platform_ui", "C7_memory"),
+        transport="rest",
+        description="Read projection of an embedding model (upstream + dimension).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingModelUpsert",
+        schema=EmbeddingModelUpsert,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description="POST/PUT embedding model metadata (alias + provider + upstream + dimension).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingCatalogModelPublic",
+        schema=EmbeddingCatalogModelPublic,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description="Tenant embedding-catalogue entry joined with the model's public view.",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="EmbeddingCatalogUpsert",
+        schema=EmbeddingCatalogUpsert,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description="PUT to expose an embedding model to a tenant (+ default_for_new_projects).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="ProjectEmbeddingResponse",
+        schema=ProjectEmbeddingResponse,
+        consumers=("ay_platform_ui", "C7_memory"),
+        transport="rest",
+        description="A project's effective embedding model (explicit or tenant default).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="ProjectEmbeddingUpdate",
+        schema=ProjectEmbeddingUpdate,
+        consumers=("ay_platform_ui",),
+        transport="rest",
+        description="PUT a project's single embedding model selection.",
     )
 )
 

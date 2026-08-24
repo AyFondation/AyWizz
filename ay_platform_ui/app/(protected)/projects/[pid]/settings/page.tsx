@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 3
+// Version: 4
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/settings/page.tsx
 // Description: Project settings page. v2 ships the per-project LLM
 //              system_prompt editor — admin / tenant_admin /
@@ -20,9 +20,11 @@ import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type {
+  EmbeddingCatalogModelPublic,
   EnrichmentConfig,
   ModelQuality,
   Project,
+  ProjectEmbeddingResponse,
   TenantCatalogModelPublic,
 } from "@/lib/types";
 
@@ -269,6 +271,8 @@ export default function ProjectSettingsPage() {
       <EnrichmentSection apiClient={apiClient} projectId={projectId} canEdit={canEdit} />
 
       {isTenantAdmin && <ProjectModelsSection apiClient={apiClient} projectId={projectId} />}
+
+      {isTenantAdmin && <ProjectEmbeddingSection apiClient={apiClient} projectId={projectId} />}
 
       <section className="mt-6 rounded-lg border border-dashed border-neutral-300 p-5 text-sm text-neutral-500">
         <p>Coming later :</p>
@@ -605,6 +609,108 @@ function ProjectModelsSection({
             Save models
           </button>
         </>
+      )}
+    </section>
+  );
+}
+
+function ProjectEmbeddingSection({
+  apiClient,
+  projectId,
+}: {
+  apiClient: ApiClient;
+  projectId: string;
+}) {
+  const [catalogue, setCatalogue] = useState<EmbeddingCatalogModelPublic[] | null>(null);
+  const [current, setCurrent] = useState<ProjectEmbeddingResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    Promise.all([apiClient.listEmbeddingCatalog(), apiClient.getProjectEmbedding(projectId)])
+      .then(([cat, pe]) => {
+        setCatalogue(cat.models);
+        setCurrent(pe);
+      })
+      .catch((err) =>
+        setError(err instanceof ApiError ? `Load failed (${err.status})` : "Load failed."),
+      );
+  }, [apiClient, projectId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const select = async (modelId: string) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await apiClient.setProjectEmbedding(projectId, modelId);
+      setNotice(
+        "Embedding model saved — existing data is re-embedded automatically (no re-parse).",
+      );
+      reload();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422)
+        setError("That model isn't enabled in the tenant catalogue.");
+      else setError(err instanceof ApiError ? `Save failed (${err.status})` : "Save failed.");
+    }
+  };
+
+  const enabled = (catalogue ?? []).filter((m) => m.enabled);
+
+  return (
+    <section className="mt-8 border-t border-neutral-200 pt-6" data-testid="project-embedding">
+      <h2 className="text-base font-semibold text-neutral-800">Embedding</h2>
+      <p className="mt-1 text-sm text-neutral-600">
+        The single embedding model this project&apos;s RAG index uses. Switching it re-embeds the
+        existing data automatically (vectors only — no re-parse).{" "}
+        {current && !current.is_explicit && (
+          <span className="text-amber-700" data-testid="project-embedding-using-default">
+            Currently the tenant default.
+          </span>
+        )}
+      </p>
+
+      {error && (
+        <p className="mt-2 text-sm text-red-700" role="alert" data-testid="project-embedding-error">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p
+          className="mt-2 text-sm text-emerald-700"
+          role="status"
+          data-testid="project-embedding-notice"
+        >
+          {notice}
+        </p>
+      )}
+
+      {catalogue === null ? (
+        <p className="mt-3 text-sm text-neutral-500">Loading…</p>
+      ) : enabled.length === 0 ? (
+        <p className="mt-3 text-sm text-neutral-500" data-testid="project-embedding-empty">
+          No embedding models enabled in the tenant catalogue — add one under Embed catalogue first.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {enabled.map((m) => (
+            <li key={m.model_id} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="project-embedding"
+                checked={current?.model_id === m.model_id}
+                onChange={() => select(m.model_id)}
+                data-testid={`project-embedding-${m.registry.alias}`}
+              />
+              <span className="font-medium text-neutral-800">{m.registry.alias}</span>
+              <span className="text-xs text-neutral-500">
+                {m.registry.dimension}d · {m.registry.upstream_model}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

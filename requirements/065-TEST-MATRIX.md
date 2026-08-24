@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**154 endpoints** across 8 components. Order: by component, method, path.
+**170 endpoints** across 8 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -183,6 +183,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `PUT` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_project_config` | 200 |
 | `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | authenticated | project | any authenticated | — | — | 200 |
 | `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c7_sources` | 204 |
+| `POST` | `/api/v1/memory/projects/{project_id}/reembed` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_chunks` | 200 |
 | `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `project_owner` | `platform_manager` | — | 201 |
 | `GET` | `/api/v1/memory/projects/{project_id}/quota` | authenticated | project | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `project_owner` | `platform_manager` | — | 501 |
@@ -201,6 +202,21 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `PUT` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
 | `PUT` | `/admin/v1/llm/providers/{provider_id}/api-key` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
 | `DELETE` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 204 |
+| `GET` | `/admin/v1/llm/embedding-providers` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/embedding-providers` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 201 |
+| `PUT` | `/admin/v1/llm/embedding-providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 200 |
+| `PUT` | `/admin/v1/llm/embedding-providers/{provider_id}/api-key` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 200 |
+| `DELETE` | `/admin/v1/llm/embedding-providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 204 |
+| `GET` | `/admin/v1/llm/embedding-models` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/embedding-models` | role_gated | — | `platform_manager` | — | arango · `embedding_models` | 201 |
+| `PUT` | `/admin/v1/llm/embedding-models/{model_id}` | role_gated | — | `platform_manager` | — | arango · `embedding_models` | 200 |
+| `DELETE` | `/admin/v1/llm/embedding-models/{model_id}` | role_gated | — | `platform_manager` | — | arango · `embedding_models` | 204 |
+| `GET` | `/api/v1/llm/embedding-catalog` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/llm/embedding-catalog/available` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `PUT` | `/api/v1/llm/embedding-catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `embedding_catalog` | 200 |
+| `DELETE` | `/api/v1/llm/embedding-catalog/{model_id}` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `embedding_catalog` | 204 |
+| `GET` | `/api/v1/llm/projects/{project_id}/embedding` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | — | 200 |
+| `PUT` | `/api/v1/llm/projects/{project_id}/embedding` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | arango · `embedding_project_selection` | 200 |
 | `GET` | `/admin/v1/quota/policy` | role_gated | — | `platform_manager` | — | — | 200 |
 | `PUT` | `/admin/v1/quota/policy` | role_gated | — | `platform_manager` | — | arango · `llm_quota_policy` | 200 |
 | `GET` | `/admin/v1/quota/status` | role_gated | — | `platform_manager` | — | — | 200 |

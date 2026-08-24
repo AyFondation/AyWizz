@@ -176,6 +176,39 @@ export function Navbar() {
               {showRegistry && (
                 <li>
                   <Link
+                    href="/admin/embedding-providers"
+                    className={navLinkClass(pathname?.startsWith("/admin/embedding-providers"))}
+                    data-testid="navbar-link-embedding-providers"
+                  >
+                    Embed providers
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
+                    href="/admin/embedding-registry"
+                    className={navLinkClass(pathname?.startsWith("/admin/embedding-registry"))}
+                    data-testid="navbar-link-embedding-registry"
+                  >
+                    Embed registry
+                  </Link>
+                </li>
+              )}
+              {showCatalogue && (
+                <li>
+                  <Link
+                    href="/admin/embedding-catalogue"
+                    className={navLinkClass(pathname?.startsWith("/admin/embedding-catalogue"))}
+                    data-testid="navbar-link-embedding-catalogue"
+                  >
+                    Embed catalogue
+                  </Link>
+                </li>
+              )}
+              {showRegistry && (
+                <li>
+                  <Link
                     href="/operator/tenants"
                     className={navLinkClass(pathname?.startsWith("/operator/tenants"))}
                     data-testid="navbar-link-tenants"

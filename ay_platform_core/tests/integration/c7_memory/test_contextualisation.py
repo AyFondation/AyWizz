@@ -105,8 +105,6 @@ async def ctx_stack(
     )
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             chunk_token_size=16,
             chunk_overlap=2,
             default_quota_bytes=1024 * 1024 * 1024,
@@ -187,8 +185,6 @@ async def test_contextualisation_disabled_yields_empty_context(
         )
         service = MemoryService(
             config=MemoryConfig(
-                embedding_adapter="deterministic-hash",
-                embedding_dimension=embedder.dimension,
                 chunk_token_size=16,
                 chunk_overlap=2,
                 default_quota_bytes=1024 * 1024 * 1024,
@@ -217,8 +213,6 @@ async def test_no_llm_yields_empty_context(
         embedder = DeterministicHashEmbedder(dimension=64)
         service = MemoryService(
             config=MemoryConfig(
-                embedding_adapter="deterministic-hash",
-                embedding_dimension=embedder.dimension,
                 chunk_token_size=16,
                 chunk_overlap=2,
                 default_quota_bytes=1024 * 1024 * 1024,

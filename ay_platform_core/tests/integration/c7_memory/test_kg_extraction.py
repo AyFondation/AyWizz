@@ -157,8 +157,6 @@ async def kg_stack(
 
     service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,
@@ -376,7 +374,7 @@ async def test_extract_kg_returns_503_when_llm_not_wired(
         repo._ensure_collections_sync()
         embedder = DeterministicHashEmbedder(dimension=64)
         service = MemoryService(
-            config=MemoryConfig(embedding_dimension=embedder.dimension),
+            config=MemoryConfig(),
             repo=repo,
             embedder=embedder,
             # No kg_repo, no llm_client

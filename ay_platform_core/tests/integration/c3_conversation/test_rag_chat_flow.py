@@ -136,8 +136,6 @@ async def rag_stack(
     c7_embedder = DeterministicHashEmbedder(dimension=64)
     c7_service = MemoryService(
         config=MemoryConfig(
-            embedding_adapter="deterministic-hash",
-            embedding_dimension=c7_embedder.dimension,
             chunk_token_size=64,
             chunk_overlap=8,
             default_quota_bytes=1024 * 1024 * 1024,
