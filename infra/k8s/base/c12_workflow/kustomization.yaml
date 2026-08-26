@@ -14,6 +14,10 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
+  # `c12` short-name alias Service so the code/compose convention
+  # `http://c12:5678/...` resolves in-cluster (webhooks: C7 extract-and-ingest
+  # + C8 reembed). See service-alias.yaml.
+  - service-alias.yaml
   # c12-workflow-files ConfigMap (n8n workflows). GENERATED from the single
   # source infra/c12_workflow/workflows/ via
   # infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py — regenerate it

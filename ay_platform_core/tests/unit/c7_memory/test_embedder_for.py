@@ -6,7 +6,9 @@
 #              a project's embedder from the registry resolver, falling back to
 #              the global env embedder when no resolver is wired, the project id
 #              is blank, or the project has no registry selection (D-011,
-#              R-400-222).
+#              R-400-227).
+#
+# @relation validates:R-400-227
 # =============================================================================
 
 from __future__ import annotations

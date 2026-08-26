@@ -1,0 +1,33 @@
+# =============================================================================
+# File: service-alias.yaml
+# Version: 1
+# Path: infra/k8s/base/c7_memory/service-alias.yaml
+# Description: Short-name alias Service `c7` for C7 Memory. The n8n workflows
+#              (extract_and_ingest -> C7 /ingest-chunks, reembed_project -> C7
+#              /reembed) and the platform's compose stack address C7 as
+#              `http://c7:8000`, but the K8s Service is named `c7-memory`.
+#              Without this alias those calls fail DNS in-cluster (NXDOMAIN),
+#              silently breaking the n8n -> C7 integration (BOTH the upload
+#              ingestion AND the auto-reembed trigger). This second Service
+#              selects the same pods so `c7` resolves, matching the compose
+#              service name. `c7-memory` stays as the canonical name.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c7
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c7
+    app.kubernetes.io/component: c7
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c7-memory
+    app.kubernetes.io/component: c7
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

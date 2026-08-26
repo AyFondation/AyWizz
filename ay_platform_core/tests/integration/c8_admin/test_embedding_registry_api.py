@@ -7,6 +7,8 @@
 #              platform_manager drives: providers (endpoint + write-only key),
 #              models (upstream + dimension), the provider DELETE-GUARD, and the
 #              role gate. Covers every /admin/v1/llm/embedding-* endpoint.
+#
+# @relation validates:R-400-226
 # =============================================================================
 
 from __future__ import annotations

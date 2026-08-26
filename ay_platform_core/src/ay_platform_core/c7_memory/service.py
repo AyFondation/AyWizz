@@ -26,6 +26,8 @@
 # @relation implements:R-400-071
 # @relation implements:R-400-207
 # @relation implements:R-400-208
+# @relation implements:R-400-227
+# @relation implements:R-400-228
 # =============================================================================
 
 from __future__ import annotations
@@ -686,7 +688,7 @@ class MemoryService:
         the global env embedder otherwise (or when the project has no
         selection). Callers use the SAME resolved embedder for BOTH the vector
         computation and the `model_id` stamped/filtered alongside it, so
-        ingestion and retrieval stay consistent per project (R-400-222)."""
+        ingestion and retrieval stay consistent per project (R-400-227)."""
         if self._embedder_resolver is None or not project_id:
             return self._embedder
         resolved = await self._embedder_resolver.resolve(tenant_id, project_id)
@@ -1591,7 +1593,7 @@ class MemoryService:
     # working ; only the re-run trigger moved out of C7.
 
     # ------------------------------------------------------------------
-    # Re-embedding (D-011 / R-400-222)
+    # Re-embedding (D-011 / R-400-228)
     # ------------------------------------------------------------------
     # This is NOT the D-020 reprocess. `reembed_project` recomputes ONLY the
     # vectors, from the chunk text already stored in `memory_chunks`
@@ -1866,7 +1868,7 @@ class MemoryService:
         # informational here. Keeping the kwargs ensures the two
         # implementations are call-compatible.
         started = time.monotonic()
-        # R-400-042 / R-400-222: the query is embedded with the project's
+        # R-400-042 / R-400-227: the query is embedded with the project's
         # ACTIVE embedder (per-project registry selection, or the global
         # fallback); we only compare against stored chunks that used the same
         # model. Ingestion stamps the same model_id, so the two stay aligned.

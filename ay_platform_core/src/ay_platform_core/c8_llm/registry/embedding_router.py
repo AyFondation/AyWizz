@@ -8,6 +8,8 @@
 #              encrypted provider key (503 without a master key), provider
 #              delete guarded while models reference it. Mounted by the c8_admin
 #              app factory.
+#
+# @relation implements:R-400-226
 # =============================================================================
 
 from __future__ import annotations

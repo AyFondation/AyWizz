@@ -5,7 +5,7 @@
 # Description: Unit tests for OpenAIEmbedder (D-011) against a mocked OpenAI
 #              `/embeddings` endpoint: request shape (model + input), response
 #              parsing with index ordering, declared-dimension validation
-#              (R-400-222), and HTTP/shape error handling. No network.
+#              (R-400-226), and HTTP/shape error handling. No network.
 # =============================================================================
 
 from __future__ import annotations

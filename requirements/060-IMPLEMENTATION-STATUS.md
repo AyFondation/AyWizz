@@ -40,11 +40,11 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 83 | 9 | 26 | 4 | 0 | 44 |
 | [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 73 | 26 | 28 | 0 | 0 | 19 |
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
-| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 46 | 9 | 13 | 1 | 0 | 23 |
+| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 50 | 13 | 13 | 1 | 0 | 23 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 3 | 21 | 0 | 0 | 0 |
 | [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 60 | 7 | 13 | 1 | 0 | 39 |
-| **Total** | **352** | **54** | **130** | **11** | **8** | **149** |
+| **Total** | **356** | **58** | **130** | **11** | **8** | **149** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -132,7 +132,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-100-123` | v1 | approved | **implemented** | `.github/workflows/ci-tests.yml` | — |
 | `R-100-124` | v1 | approved | **tested** | `ay_platform_core/src/ay_platform_core/_observability/main.py`, `ay_platform_core/src/ay_platform_core/_observability/synthesis.py`, `ay_platform_core/src/ay_platform_core/observability/workflow/__init__.py` (+3 more) | `ay_platform_core/tests/integration/observability/workflow/test_elasticsearch_integration.py`, `ay_platform_core/tests/integration/observability/workflow/test_loki_integration.py`, `ay_platform_core/tests/unit/observability/workflow/test_router.py` |
 | `R-100-125` | v2 | draft | **implemented** | `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml`, `infra/k8s/base/c13_extractor/deployment.yaml` | — |
-| `R-100-140` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/storage/metering.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/repository.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/router.py` (+3 more) | `ay_platform_core/tests/integration/c8_admin/test_storage_router_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_storage_metering.py` |
+| `R-100-140` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/storage/metering.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/repository.py`, `ay_platform_core/src/ay_platform_core/c8_llm/storage/router.py` (+3 more) | `ay_platform_core/tests/integration/c8_admin/test_storage_router_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_storage_metering.py`, `ay_platform_core/tests/unit/c8_llm/test_storage_repository.py` |
 
 ## R-200-* — [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md)
 
@@ -273,8 +273,8 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 
 | ID | v | status | overall | implementing | validating |
 |---|---|---|---|---|---|
-| `R-400-001` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/deterministic.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py` | — |
-| `R-400-002` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py` | — |
+| `R-400-001` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/deterministic.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py` (+1 more) | — |
+| `R-400-002` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/openai.py` | — |
 | `R-400-003` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/deterministic.py` | — |
 | `R-400-004` | v1 | draft | **not-yet** | — | — |
 | `R-400-010` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/db/repository.py`, `ay_platform_core/src/ay_platform_core/c7_memory/models.py` | — |
@@ -313,12 +313,16 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-207` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/artifacts.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py`, `ay_platform_core/src/ay_platform_core/c7_memory/storage/minio_storage.py` | `ay_platform_core/tests/integration/c7_memory/test_artifact_rebuild.py`, `ay_platform_core/tests/unit/c7_memory/test_artifacts.py` |
 | `R-400-208` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/unit/c7_memory/test_processing_version.py` |
 | `R-400-209` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/kg/repository.py` | `ay_platform_core/tests/integration/c7_memory/test_bitemporal.py` |
-| `R-400-220` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
+| `R-400-220` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py` | — |
 | `R-400-221` | v2 | draft | **not-yet** | — | — |
 | `R-400-222` | v2 | draft | **not-yet** | — | — |
 | `R-400-223` | v3 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
 | `R-400-224` | v1 | draft | **not-yet** | — | — |
 | `R-400-225` | v1 | draft | **not-yet** | — | — |
+| `R-400-226` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_models.py` (+2 more) | `ay_platform_core/tests/integration/c8_admin/test_embedding_registry_api.py` |
+| `R-400-227` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/openai.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/registry_resolver.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/unit/c7_memory/test_embedder_for.py` |
+| `R-400-228` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_reembed_flow.py` |
+| `R-400-229` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_reembed_notifier.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_service.py` (+2 more) | `ay_platform_core/tests/unit/c8_llm/test_reembed_trigger.py` |
 
 ## R-500-* — [500-SPEC-UI-UX](./500-SPEC-UI-UX.md)
 
@@ -400,7 +404,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-061` | v1 | draft | **not-yet** | — | — |
 | `R-800-062` | v1 | draft | **not-yet** | — | — |
 | `R-800-063` | v1 | draft | **not-yet** | — | — |
-| `R-800-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost_sink_arango.py`, `ay_platform_core/src/ay_platform_core/c8_llm/main.py` (+4 more) | `ay_platform_core/tests/integration/c8_llm/test_cost_receiver_api.py`, `ay_platform_core/tests/integration/c8_llm/test_quota_attribution_pipeline_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_cost_receiver.py` |
+| `R-800-070` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost_sink_arango.py`, `ay_platform_core/src/ay_platform_core/c8_llm/main.py` (+4 more) | `ay_platform_core/tests/integration/c8_llm/test_cost_receiver_api.py`, `ay_platform_core/tests/integration/c8_llm/test_quota_attribution_pipeline_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_cost_receiver.py` (+1 more) |
 | `R-800-071` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/callbacks/cost_tracker.py`, `ay_platform_core/src/ay_platform_core/c8_llm/cost.py` | — |
 | `R-800-072` | v1 | draft | **not-yet** | — | — |
 | `R-800-073` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py`, `ay_platform_core/src/ay_platform_core/c8_llm/models.py` | — |
@@ -429,8 +433,8 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-142` | v1 | draft | **not-yet** | — | — |
 | `R-800-143` | v1 | draft | **not-yet** | — | — |
 | `R-800-144` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | — |
-| `R-800-145` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py` |
-| `R-800-146` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py` |
+| `R-800-145` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py`, `ay_platform_core/tests/unit/c8_llm/test_quota_repository.py` |
+| `R-800-146` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/integration/c8_llm/test_litellm_clientside_auth.py`, `ay_platform_core/tests/unit/c8_llm/test_model_resolver.py` (+2 more) |
 | `R-800-147` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py` | `ay_platform_core/tests/unit/c8_llm/test_prompt_cache.py` |
 
 ---

@@ -11,6 +11,9 @@
 #              in-use-by-a-PROJECT delete-guard lives one layer up (tenant
 #              catalogue, B3). Cipher-optional: reads work without a master key;
 #              key WRITES raise.
+#
+# @relation implements:R-400-226
+# @relation implements:R-400-229
 # =============================================================================
 
 from __future__ import annotations
@@ -196,7 +199,7 @@ class EmbeddingModelService:
         # projects to re-embed when the model changes.
         self._project_repo = project_repo
         # Optional ReembedNotifier: when wired, a vector-affecting model edit
-        # triggers a best-effort re-embed of every project using it (R-400-222).
+        # triggers a best-effort re-embed of every project using it (R-400-229).
         self._reembed = reembed_notifier
         self._clock = clock
         self._new_id = id_factory

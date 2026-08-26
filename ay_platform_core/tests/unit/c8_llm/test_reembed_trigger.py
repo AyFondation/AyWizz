@@ -2,13 +2,15 @@
 # File: test_reembed_trigger.py
 # Version: 1
 # Path: ay_platform_core/tests/unit/c8_llm/test_reembed_trigger.py
-# Description: Unit tests for the D-011/R-400-222 re-embed auto-trigger: a
+# Description: Unit tests for the D-011/R-400-229 re-embed auto-trigger: a
 #              vector-affecting embedding-model edit notifies every using
 #              project; an alias-only edit does not; a project switching model
 #              notifies (first selection / no-op re-select do not). Plus the
 #              ReembedNotifier itself (no-op when unconfigured, best-effort
 #              POST otherwise). In-memory fakes; no network for the service
 #              tests.
+#
+# @relation validates:R-400-229
 # =============================================================================
 
 from __future__ import annotations

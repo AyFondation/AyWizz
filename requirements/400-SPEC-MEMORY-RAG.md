@@ -881,6 +881,124 @@ AQL interval filters — with no second graph store, preserving D-002.
 
 ---
 
+### 4.x In-app embedding subsystem (D-011 extended to embeddings)
+
+The platform's embedding access is **provider-independent and managed
+in-app** — the same principle D-011 applies to chat LLMs, applied to
+embeddings. NO embedding provider/model is configured via environment; the
+operator declares them in the HMI registry, the tenant curates a catalogue,
+and each project selects one. These four requirements govern that subsystem.
+
+#### R-400-226
+
+```yaml
+id: R-400-226
+version: 1
+status: draft
+category: functional
+derives-from: [D-011, R-400-001, R-400-002]
+```
+
+The platform SHALL host an **in-app embedding registry**, parallel to the
+chat-LLM registry, with three curation layers:
+
+1. **Platform providers + models** (`platform_manager`). A *provider* declares
+   an endpoint + a **protocol/adapter** chosen at creation (`ollama`,
+   `openai`-compatible, `deterministic-hash`) + an optional **write-only** API
+   key encrypted at rest (AES-256-GCM via `SecretCipher`, D-011). A *model*
+   maps a stable `model_id` + `alias` to an `upstream_model` on a provider and
+   declares a fixed output **`dimension`**. Endpoints under
+   `/admin/v1/llm/embedding-{providers,models}`.
+2. **Per-tenant catalogue** (`admin`/`tenant_admin`). A tenant exposes a subset
+   of the registry models to its projects and marks one
+   `default_for_new_projects`. Opt-in (starts empty); an `.../available` picker
+   lists platform models not yet catalogued (the registry list itself is
+   `platform_manager`-only). Endpoints under `/api/v1/llm/embedding-catalog`.
+3. **Per-project selection** — exactly ONE embedding per project (embeddings
+   are index-consistent: a project's whole vector index shares one model +
+   dimension). `PUT/GET /api/v1/llm/projects/{id}/embedding`.
+
+`platform_manager` is EXCLUDED from the tenant/project (content) surfaces per
+E-100-002. Provider keys are NEVER echoed. Delete-guards protect a model in
+use by a project and a provider referenced by a model.
+
+#### R-400-227
+
+```yaml
+id: R-400-227
+version: 1
+status: draft
+category: functional
+derives-from: [D-011, R-400-226, R-400-042]
+```
+
+C7 SHALL resolve a project's embedder **from the registry (R-400-226) at BOTH
+ingestion and retrieval**, so a project's stored chunks and its query are
+always embedded with the same model. Resolution is cached; every
+vector-producing site and every chunk-scan-by-`model_id` site uses the
+resolved embedder (ingest, entity embed, retrieve + KG expansion, KG/structural
+extraction, processing-version). The `openai` adapter consumes the provider's
+**decrypted** key.
+
+Embedding selection is NOT env-configured (the legacy `OLLAMA_URL` /
+`C7_EMBEDDING_*` knobs are removed). When a project has no registry selection,
+C7 falls back to a **fixed, keyless, no-network deterministic-hash** bootstrap
+embedder — a fresh install works (lexical RAG) until the operator configures a
+real model. Because retrieval filters by the current `model_id`, a project is
+never served results from a different embedding model.
+
+#### R-400-228
+
+```yaml
+id: R-400-228
+version: 1
+status: draft
+category: functional
+derives-from: [D-011, R-400-226, R-400-227, R-400-207]
+```
+
+C7 SHALL expose `POST /api/v1/memory/projects/{project_id}/reembed` that
+**recomputes ONLY the vectors** of the project's embedded content with the
+project's CURRENT embedder, reusing the **already-stored chunk text**
+(`content` + `context`), in place. It SHALL cover **every embedded element** —
+indexed sources (external + conversation) AND the source-less
+entity/requirements chunks (`embed_entity`, `source_id = null`). Per-unit
+failures are isolated (recorded, not fatal); units already on the current model
+are skipped.
+
+This is **NOT** the D-020 reprocess (`reprocess_source` was removed in D-020
+session 7): there is NO re-parse, re-chunk, or LLM contextualisation — that full
+re-run stays owned by C12's `extract_and_ingest`. Re-embed-only is a distinct
+C7 operation, justified because the chunk text (the embedding input) is already
+persisted (R-400-207). It restores recall after a project's embedding model
+changes (retrieval, filtering by the current `model_id`, is SAFE meanwhile but
+returns nothing from old-model chunks until they are re-embedded). Gated
+`project_owner`/`admin`; `platform_manager` EXCLUDED (content op).
+
+#### R-400-229
+
+```yaml
+id: R-400-229
+version: 1
+status: draft
+category: functional
+derives-from: [D-011, R-400-228, R-100-081]
+```
+
+A **vector-affecting** edit of a registry embedding model (`upstream_model`,
+`dimension`, or `provider`) OR a project switching its embedding selection
+SHALL trigger a **best-effort automatic re-embed** (R-400-228) of every
+affected project. The trigger runs **decoupled as the system**, not under the
+operator's identity: c8_admin fires a C12/n8n webhook, and the
+`reembed_project` workflow calls the C7 reembed endpoint with self-asserted
+`project_owner` headers. This decoupling is required because the triggering
+operator may be a content-blind `platform_manager` (excluded from the content
+op) and because a model edit can span multiple tenants. Best-effort: a failure
+is logged, never blocks the admin operation, and staleness stays visible via
+`processing_version` drift (R-400-208) for a manual re-embed.
+
+---
+
 ## 5. Non-Functional Requirements
 
 ### 5.1 Performance

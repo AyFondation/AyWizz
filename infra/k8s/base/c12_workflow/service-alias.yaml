@@ -1,0 +1,35 @@
+# =============================================================================
+# File: service-alias.yaml
+# Version: 1
+# Path: infra/k8s/base/c12_workflow/service-alias.yaml
+# Description: Short-name alias Service `c12` for the n8n workflow engine.
+#              The platform code + docker-compose use the service name `c12`
+#              (e.g. C7 c12_webhook_url default `http://c12:5678/...`, the C8
+#              admin reembed webhook `http://c12:5678/uploads/reembed-project`),
+#              but the K8s Service is named `c12-workflow`. Without this alias
+#              those `http://c12:5678` URLs fail DNS in-cluster (NXDOMAIN),
+#              silently breaking BOTH the C7 extract-and-ingest upload trigger
+#              AND the C8 reembed trigger. This second Service selects the same
+#              pods so `c12` resolves, matching the compose service name — no
+#              per-deployment env overrides needed. `c12-workflow` stays for the
+#              seed Job's healthz probe.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c12
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c12
+    app.kubernetes.io/component: c12
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c12-workflow
+    app.kubernetes.io/component: c12
+  ports:
+    - name: http
+      port: 5678
+      targetPort: http
+      protocol: TCP

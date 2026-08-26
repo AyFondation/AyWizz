@@ -14,7 +14,7 @@
 #              key configured) falls back to the caller's global env embedder
 #              rather than failing.
 #
-# @relation implements:R-400-222
+# @relation implements:R-400-227
 # =============================================================================
 
 from __future__ import annotations

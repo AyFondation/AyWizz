@@ -17,7 +17,7 @@
 #              `processing_version` drift, and the operator can reembed
 #              manually. Disabled (no-op) when no webhook_url is configured.
 #
-# @relation implements:R-400-222
+# @relation implements:R-400-229
 # =============================================================================
 
 from __future__ import annotations

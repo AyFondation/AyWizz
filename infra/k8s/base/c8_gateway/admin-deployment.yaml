@@ -1,6 +1,6 @@
 # =============================================================================
 # File: admin-deployment.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c8_gateway/admin-deployment.yaml
 # Description: C8 admin app Deployment (LLM-governance: platform registry +
 #              tenant catalogue + model-quality resolver). Shared `aywizz-api`
@@ -60,6 +60,13 @@ spec:
               value: orchestrator
             - name: MINIO_SECURE
               value: "false"
+            # D-011 / R-400-222 — best-effort re-embed trigger. On a
+            # vector-affecting embedding-model edit or a project selection
+            # change, c8_admin POSTs this C12/n8n webhook; the reembed_project
+            # workflow then calls C7 /reembed as the system. Blank → disabled;
+            # set here so the auto-trigger is live in-cluster.
+            - name: C8_ADMIN_REEMBED_WEBHOOK_URL
+              value: http://c12:5678/uploads/reembed-project
           envFrom:
             - configMapRef:
                 name: aywizz-config

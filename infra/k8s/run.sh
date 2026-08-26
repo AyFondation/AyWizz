@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 4
+# Version: 5
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
@@ -23,6 +23,10 @@
 #              with `IfNotPresent` + `disableNameSuffixHash`, so `apply` is
 #              a no-op and pods keep the old image). Run it after
 #              `infra/scripts/k8s_build_images.sh`.
+#              v5 (2026-08-24): fixed `--no-jobs` — the Job-stripping filter
+#              was fed via a heredoc on `python3 -` which replaced python's
+#              stdin, swallowing the `kubectl kustomize` pipe and applying an
+#              EMPTY manifest. Now uses `python3 -c` + a non-empty guard.
 #
 #              Usage (from monorepo root or anywhere via absolute path):
 #                infra/k8s/run.sh dev          # apply overlays/dev
@@ -142,14 +146,22 @@ echo "==> Applying overlay: ${OVERLAY_PATH}"
 
 if [ "${SKIP_JOBS}" -eq 1 ]; then
     # Build, strip Job documents, then apply. `yq`-free filter via Python.
+    # NB: the filter program is passed via `python3 -c` (NOT a heredoc on
+    # `python3 -`) — a heredoc replaces python's stdin, which would swallow
+    # the `kubectl kustomize` pipe and emit an EMPTY manifest (apply then
+    # fails / no-ops). With `-c`, stdin stays the kustomize pipe.
     BUILD_OUT="$(mktemp)"
     trap 'rm -f "${BUILD_OUT}"' EXIT
-    kubectl kustomize "${OVERLAY_PATH}" | python3 - > "${BUILD_OUT}" <<'PY'
-import sys, yaml
+    kubectl kustomize "${OVERLAY_PATH}" \
+        | python3 -c 'import sys, yaml
 docs = list(yaml.safe_load_all(sys.stdin))
 kept = [d for d in docs if isinstance(d, dict) and d.get("kind") != "Job"]
-sys.stdout.write(yaml.safe_dump_all(kept, sort_keys=False))
-PY
+sys.stdout.write(yaml.safe_dump_all(kept, sort_keys=False))' \
+        > "${BUILD_OUT}"
+    if [ ! -s "${BUILD_OUT}" ]; then
+        echo "ERROR: --no-jobs produced an empty manifest (filter failed)" >&2
+        exit 2
+    fi
     kubectl apply -f "${BUILD_OUT}"
 else
     kubectl apply -k "${OVERLAY_PATH}"

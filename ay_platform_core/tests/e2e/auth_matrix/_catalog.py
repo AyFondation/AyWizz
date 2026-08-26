@@ -1012,7 +1012,7 @@ _C7_MEMORY: list[EndpointSpec] = [
         backend=Backend.ARANGO,
         backend_collection="memory_chunks",
         notes=(
-            "D-011 / R-400-222 — re-embed ONLY (recompute vectors from the "
+            "D-011 / R-400-228 — re-embed ONLY (recompute vectors from the "
             "stored chunk text with the project's current embedder). NOT the "
             "D-020 reprocess: no re-parse / re-chunk / LLM. Rewrites vectors + "
             "model_id in memory_chunks in place."

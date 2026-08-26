@@ -534,7 +534,7 @@ class ChunkListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Re-embedding (D-011 / R-400-222) — recompute a project's vectors with its
+# Re-embedding (D-011 / R-400-228) — recompute a project's vectors with its
 # CURRENT embedder from the already-stored chunk text. This is re-embed ONLY:
 # no re-parse / re-chunk / LLM contextualisation (that full reprocess is C12's
 # `extract_and_ingest`, per D-020). The chunk text (content + context) is the

@@ -8,6 +8,8 @@
 #              embeddings a tenant makes available (+ default) and each project's
 #              single selected embedding. DELETE-GUARD: 409 while a project uses
 #              a model. Mounted by the c8_admin app factory.
+#
+# @relation implements:R-400-226
 # =============================================================================
 
 from __future__ import annotations

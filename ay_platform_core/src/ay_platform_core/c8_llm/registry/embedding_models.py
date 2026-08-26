@@ -14,8 +14,10 @@
 #              Unlike the chat model, an embedding carries NO quality tier,
 #              capabilities or per-token cost — its defining attribute is the
 #              output `dimension` (the hard index-consistency constraint,
-#              R-400-222). Keys live on the PROVIDER (write-only, encrypted);
+#              R-400-226). Keys live on the PROVIDER (write-only, encrypted);
 #              this layer never serialises a secret (use `to_public()`).
+#
+# @relation implements:R-400-226
 # =============================================================================
 
 from __future__ import annotations
@@ -134,7 +136,7 @@ class _EmbeddingModelFields(BaseModel):
     upstream_model: str = Field(min_length=1, max_length=200)
     """The model id AT the provider, e.g. `all-minilm` or `text-embedding-3-small`."""
     dimension: int = Field(ge=1, le=65536)
-    """Output vector size. The HARD index-consistency axis (R-400-222): all
+    """Output vector size. The HARD index-consistency axis (R-400-226): all
     vectors of an index share it; changing it requires re-indexing."""
     enabled: bool = True
 

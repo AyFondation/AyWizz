@@ -8,10 +8,11 @@
 #              with a Bearer api_key. Unlike the Ollama adapter, the dimension
 #              is DECLARED by the registry model (a hosted model has a fixed
 #              output dimension) and validated on every call — a mismatch is a
-#              misconfiguration (R-400-222 index dimension consistency).
+#              misconfiguration (R-400-226 index dimension consistency).
 #
 # @relation implements:R-400-001
 # @relation implements:R-400-002
+# @relation implements:R-400-227
 # @relation implements:E-400-001
 # =============================================================================
 

@@ -9,6 +9,9 @@
 #              a catalogue entry cannot be removed while a project selects it,
 #              and the platform-level model delete is refused while it is in any
 #              tenant catalogue or project selection (`assert_model_deletable`).
+#
+# @relation implements:R-400-226
+# @relation implements:R-400-229
 # =============================================================================
 
 from __future__ import annotations
@@ -55,7 +58,7 @@ class EmbeddingCatalogService:
         self._project = project_repo
         self._models = model_repo
         # Optional ReembedNotifier: switching a project to a DIFFERENT model
-        # triggers a best-effort re-embed of that project (R-400-222).
+        # triggers a best-effort re-embed of that project (R-400-229).
         self._reembed = reembed_notifier
 
     async def _model_public(self, model_id: str) -> EmbeddingModelPublic | None:

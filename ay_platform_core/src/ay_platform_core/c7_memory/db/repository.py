@@ -436,7 +436,7 @@ class MemoryRepository:
         """Active chunk rows NOT tied to a source (entity/requirements
         embeddings from `embed_entity`, `source_id == null`). These have no
         `memory_sources` row, so the per-source re-embed loop skips them — the
-        re-embed entity pass uses this to cover them (R-400-222)."""
+        re-embed entity pass uses this to cover them (R-400-228)."""
         return await self._run(
             self._list_active_entity_chunks_sync, tenant_id, project_id
         )

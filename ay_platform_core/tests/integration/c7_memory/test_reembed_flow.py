@@ -3,12 +3,14 @@
 # Version: 1
 # Path: ay_platform_core/tests/integration/c7_memory/test_reembed_flow.py
 # Description: Integration test for POST /projects/{project_id}/reembed
-#              (D-011 / R-400-222) against a REAL ArangoDB. Ingests a source
+#              (D-011 / R-400-228) against a REAL ArangoDB. Ingests a source
 #              with one embedding model, swaps the project's embedder, calls
 #              the reembed endpoint, and verifies the stored chunks + source
 #              row were moved onto the new model in place — re-embed ONLY, the
 #              text is untouched. Also asserts the role gate (project_viewer
 #              → 403).
+#
+# @relation validates:R-400-228
 # =============================================================================
 
 from __future__ import annotations

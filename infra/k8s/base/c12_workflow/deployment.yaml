@@ -1,10 +1,20 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
-#              `n8nio/n8n:1.74.0` image. SQLite DB on PVC. Workflows
-#              imported via the c12-workflow-seed Job (in _init/).
+#              `n8nio/n8n:1.74.0` image. SQLite DB on PVC.
+#
+#              v2 (2026-08-24): workflows are imported + activated by an
+#              `import-workflows` initContainer that runs BEFORE the n8n
+#              server starts, so n8n always BOOTS with every active
+#              workflow's webhook registered. This removes the race the
+#              standalone c12-workflow-seed Job had — the Job imports into
+#              the shared PVC while the server is ALREADY running, so a
+#              NEWLY-added workflow's webhook only became live on a SECOND
+#              restart. The init runs on every (re)start, is idempotent,
+#              and reads the same `c12-workflow-files` ConfigMap. The seed
+#              Job in `_init/` is now a redundant safety net.
 #
 #              Public webhook endpoints under `/uploads/*` (per
 #              R-100-080..088); routed to this service by C1 Traefik
@@ -34,6 +44,38 @@ spec:
         app.kubernetes.io/component: c12
         app.kubernetes.io/part-of: aywizz-platform
     spec:
+      initContainers:
+        # Import + activate all workflows INTO the PVC before n8n starts, so
+        # the server boots with every webhook registered (no seed-Job race).
+        # Idempotent; runs on every (re)start. `n8n import` runs the SQLite
+        # migrations itself, so it works on a fresh PVC too.
+        - name: import-workflows
+          image: n8nio/n8n:1.74.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_TYPE
+              value: "sqlite"
+            - name: DB_SQLITE_DATABASE
+              value: "/home/node/.n8n/database.sqlite"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              if [ -d /workflows ] && [ -n "$(ls -A /workflows 2>/dev/null)" ]; then
+                echo "Importing n8n workflows from /workflows"
+                n8n import:workflow --separate --input=/workflows
+                n8n update:workflow --all --active=true || true
+              else
+                echo "No /workflows to import (ConfigMap optional/empty)"
+              fi
+              echo "Workflow import (init) done."
+          volumeMounts:
+            - name: data
+              mountPath: /home/node/.n8n
+            - name: workflows
+              mountPath: /workflows
+              readOnly: true
       containers:
         - name: n8n
           image: n8nio/n8n:1.74.0

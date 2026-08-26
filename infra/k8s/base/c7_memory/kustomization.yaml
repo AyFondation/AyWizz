@@ -10,3 +10,6 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+  # `c7` short-name alias Service so the code/compose + n8n-workflow convention
+  # `http://c7:8000/...` resolves in-cluster (extract-and-ingest + reembed).
+  - service-alias.yaml

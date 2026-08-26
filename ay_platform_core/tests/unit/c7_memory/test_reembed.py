@@ -2,7 +2,7 @@
 # File: test_reembed.py
 # Version: 1
 # Path: ay_platform_core/tests/unit/c7_memory/test_reembed.py
-# Description: Unit tests for MemoryService.reembed_project (D-011 / R-400-222).
+# Description: Unit tests for MemoryService.reembed_project (D-011 / R-400-228).
 #              Validates re-embed-ONLY semantics: vectors + model provenance are
 #              recomputed from the stored chunk text (content + context), the
 #              source row's model_id/processing_version are advanced, and the

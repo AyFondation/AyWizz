@@ -9,6 +9,7 @@
 #
 # @relation implements:R-400-040
 # @relation implements:R-400-070
+# @relation implements:R-400-228
 # @relation implements:E-400-005
 # C7 also realises the C7 side of the C12 → C7 ingestion contract:
 # @relation implements:R-100-080 R-100-081
@@ -283,7 +284,7 @@ async def reembed_project(
     x_user_roles: str | None = Header(default=None),
     service: MemoryService = Depends(get_service),
 ) -> ProjectReembedResult:
-    """D-011 / R-400-222 — recompute the project's vectors with its CURRENT
+    """D-011 / R-400-228 — recompute the project's vectors with its CURRENT
     embedder from the already-stored chunk text (re-embed ONLY, no re-parse /
     re-chunk / LLM — that full reprocess stays C12's, per D-020). Invoked after
     an embedding-model selection change to restore recall. Config-level project
