@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 7
+# Version: 8
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/main.py
 # Description: FastAPI app factory for C4 Orchestrator. Wires the in-process
 #              dispatcher backed by a real C8 LLM client (the C8 URL is read
@@ -55,6 +55,7 @@ from ay_platform_core.c4_orchestrator.artifacts_router import (
 )
 from ay_platform_core.c4_orchestrator.artifacts_service import ArtifactsService
 from ay_platform_core.c4_orchestrator.artifacts_storage import ArtifactStorage
+from ay_platform_core.c4_orchestrator.c7_livedocs_client import C7LiveDocsClient
 from ay_platform_core.c4_orchestrator.config import OrchestratorConfig
 from ay_platform_core.c4_orchestrator.db.repository import OrchestratorRepository
 from ay_platform_core.c4_orchestrator.dispatch_storage import DispatchStorage
@@ -146,7 +147,9 @@ def _resolve_domain_plugin(name: str) -> DomainPlugin:
     return CodeDomainPlugin()
 
 
-def create_app(config: OrchestratorConfig | None = None) -> FastAPI:
+def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + services + routers
+    config: OrchestratorConfig | None = None,
+) -> FastAPI:
     cfg = config or OrchestratorConfig()
     log_cfg = LoggingSettings()
     configure_logging(component="c4_orchestrator", settings=log_cfg)
@@ -193,8 +196,14 @@ def create_app(config: OrchestratorConfig | None = None) -> FastAPI:
             admin_username=cfg.gitea_admin_username,
             admin_password=cfg.gitea_admin_password,
         )
+    # D-021 / R-400-232 — light live-docs -> C7 RAG index sync. Empty base URL
+    # disables it (documents still save; they just don't feed the RAG index).
+    livedocs_indexer = C7LiveDocsClient(
+        base_url=cfg.c7_base_url, timeout_s=cfg.c7_timeout_s,
+    )
     artifacts_service = ArtifactsService(
         repo=repo, storage=artifact_storage, gitea=gitea,
+        livedocs_indexer=livedocs_indexer,
     )
 
     # NATS event publisher (R-200-070). Wired only when `C4_NATS_URL`
@@ -255,6 +264,7 @@ def create_app(config: OrchestratorConfig | None = None) -> FastAPI:
             await nats_publisher.connect()
         yield
         await llm_client.aclose()
+        await livedocs_indexer.aclose()
         if gitea is not None:
             await gitea.aclose()
         if nats_publisher is not None:

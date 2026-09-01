@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/page.tsx
 // Description: Index route under a project shell — redirects to the
 //              project's default section (first entry in the profile's
@@ -28,7 +28,7 @@ export default function ProjectIndexRedirect() {
   }, [params.pid, router]);
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="px-6 py-10">
       <p className="text-neutral-500">Loading project overview…</p>
     </main>
   );

@@ -441,6 +441,36 @@ class MemoryRepository:
             self._list_active_entity_chunks_sync, tenant_id, project_id
         )
 
+    def _list_active_index_chunks_sync(
+        self, tenant_id: str, project_id: str, index: str
+    ) -> list[dict[str, Any]]:
+        aql = """
+        FOR c IN memory_chunks
+            FILTER c.tenant_id == @tenant_id
+                AND c.project_id == @project_id
+                AND c.index == @index
+                AND c.status == 'active'
+            RETURN c
+        """
+        cursor = self._db.aql.execute(
+            aql,
+            bind_vars={
+                "tenant_id": tenant_id, "project_id": project_id, "index": index
+            },
+        )
+        return list(cursor)
+
+    async def list_active_chunks_for_index(
+        self, tenant_id: str, project_id: str, index: str
+    ) -> list[dict[str, Any]]:
+        """Active chunk rows for a project under one logical index (e.g.
+        `live_docs`). Live-doc chunks have a synthetic source_id but NO
+        `memory_sources` row, so the re-embed live-docs pass uses this to cover
+        them (R-400-228 / R-400-232)."""
+        return await self._run(
+            self._list_active_index_chunks_sync, tenant_id, project_id, index
+        )
+
     def _get_chunk_sync(
         self, tenant_id: str, project_id: str, source_id: str, chunk_id: str
     ) -> dict[str, Any] | None:

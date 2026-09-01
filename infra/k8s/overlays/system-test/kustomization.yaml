@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/overlays/system-test/kustomization.yaml
 # Description: Overlay for K8s system tests run by pytest
 #              (`tests/system/k8s/`) AND the L2+L3 kind smoke
@@ -57,6 +57,9 @@ resources:
   - ../../base/c5_requirements
   - ../../base/c6_validation
   - ../../base/c7_memory
+  - ../../base/c8_gateway    # c8-admin needed for the reembed-wiring L4 test;
+                             # LiteLLM/receiver/cronjob $patch:delete'd below
+                             # (LLM egress is the _mock_llm here).
   - ../../base/c9_mcp
   - ../../base/c12_workflow
   - ../../base/ay_platform_ui
@@ -112,6 +115,62 @@ patches:
       kind: Job
       metadata:
         name: ollama-seed
+  # c8_gateway is included ONLY for c8-admin (reembed wiring). The real
+  # LiteLLM proxy, the cost receiver and the storage-metering cronjob are
+  # excised — LLM egress is the _mock_llm and those need real config/keys.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: litellm
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: litellm
+  - target:
+      version: v1
+      kind: Service
+      name: litellm
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: litellm
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c8-cost-receiver
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: c8-cost-receiver
+  - target:
+      version: v1
+      kind: Service
+      name: c8-cost-receiver
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: c8-cost-receiver
+  - target:
+      group: batch
+      version: v1
+      kind: CronJob
+      name: c8-storage-metering
+    patch: |-
+      $patch: delete
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: c8-storage-metering
 
 # NON-secret runtime config -> `aywizz-config` ConfigMap (envFrom on every
 # pod + the init Jobs). TEST-ONLY values. Derived from the compose test env

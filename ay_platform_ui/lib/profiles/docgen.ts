@@ -70,6 +70,13 @@ export const DOCGEN_PROFILE: ProfileDefinition = {
       description: "Browse generated documents run by run.",
     },
     {
+      id: "backups",
+      label: "Backups",
+      path: "backups",
+      iconName: "shield-check",
+      description: "Snapshot, download and restore-as-new the project (D-022).",
+    },
+    {
       id: "settings",
       label: "Settings",
       path: "settings",

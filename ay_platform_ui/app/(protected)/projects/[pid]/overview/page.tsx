@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/overview/page.tsx
 // Description: Project Overview — landing section after picking a
 //              project. Phase A renders a minimal layout with cards
@@ -23,7 +23,7 @@ export default function OverviewPage() {
   const sections = CODE_PROFILE.sections.filter((s) => s.id !== "overview");
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="px-6 py-10">
       <header>
         <h2 className="text-2xl font-semibold tracking-tight">Overview</h2>
         <p className="mt-1 text-sm text-neutral-500">{CODE_PROFILE.tagline}</p>

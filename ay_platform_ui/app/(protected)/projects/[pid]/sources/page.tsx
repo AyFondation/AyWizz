@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 5
+// Version: 6
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/sources/page.tsx
 // Description: Sources section — list + upload (Phase C). Lists every
 //              source ingested into the active project's C7 instance
@@ -120,7 +120,7 @@ export default function SourcesPage() {
 
   return (
     <PageShell>
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-200 pb-5">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">Sources</h2>

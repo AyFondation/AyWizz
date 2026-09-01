@@ -47,6 +47,7 @@ from ay_platform_core.c8_llm.registry.provider_router import router as c8_provid
 from ay_platform_core.c8_llm.registry.router import router as c8_admin_router
 from ay_platform_core.c8_llm.storage.router import router as c8_storage_router
 from ay_platform_core.c9_mcp.router import router as c9_router
+from ay_platform_core.c16_backup.router import router as c16_router
 from tests.e2e.auth_matrix._catalog import ENDPOINTS, Auth, EndpointSpec
 
 pytestmark = pytest.mark.coherence
@@ -77,6 +78,7 @@ _ROUTERS: list[tuple[str, object, str]] = [
     ("c8_admin", c8_quota_router, ""),
     ("c8_admin", c8_storage_router, ""),
     ("c9_mcp", c9_router, ""),
+    ("c16_backup", c16_router, ""),
 ]
 
 

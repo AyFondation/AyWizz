@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 4
+// Version: 5
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/settings/page.tsx
 // Description: Project settings page. v2 ships the per-project LLM
 //              system_prompt editor — admin / tenant_admin /
@@ -129,7 +129,7 @@ export default function ProjectSettingsPage() {
 
   if (loadError) {
     return (
-      <main className="mx-auto max-w-3xl px-6 py-10">
+      <main className="px-6 py-10">
         <p
           className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800"
           role="alert"
@@ -142,7 +142,7 @@ export default function ProjectSettingsPage() {
 
   if (project === null) {
     return (
-      <main className="mx-auto max-w-3xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-sm text-neutral-500">Loading settings…</p>
       </main>
     );
@@ -151,7 +151,7 @@ export default function ProjectSettingsPage() {
   const isDefault = project.system_prompt_is_default;
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
+    <main className="px-6 py-10">
       <header>
         <h2 className="text-2xl font-semibold tracking-tight">Project settings</h2>
         <p className="mt-1 text-sm text-neutral-500">

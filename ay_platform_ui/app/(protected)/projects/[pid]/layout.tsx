@@ -1,11 +1,17 @@
 // =============================================================================
 // File: layout.tsx
-// Version: 1
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/layout.tsx
 // Description: Project-scoped shell layered under the global protected
 //              layout. Fetches the project record (to read `profile`),
 //              resolves the matching `ProfileDefinition`, and renders
 //              the sidebar + content area with consistent padding.
+//
+//              v3: dropped the `mx-auto max-w-7xl` centering wrapper from
+//              the header and the state screens. Content is now LEFT-
+//              justified and fills the content column at any viewport
+//              width (matching the Working area), instead of being
+//              centred inside a fixed 80rem box on wide screens.
 //
 //              The project record is fetched once on mount via the
 //              tenant-scoped `GET /api/v1/projects` (we filter the
@@ -77,7 +83,7 @@ export default function ProjectShellLayout({ children }: { children: ReactNode }
 
   if (state.status === "loading") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-neutral-500">Loading project…</p>
       </main>
     );
@@ -85,7 +91,7 @@ export default function ProjectShellLayout({ children }: { children: ReactNode }
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-red-700" role="alert">
           Failed to load project: {state.message}
         </p>
@@ -95,7 +101,7 @@ export default function ProjectShellLayout({ children }: { children: ReactNode }
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <h1 className="text-2xl font-semibold">Project not found</h1>
         <p className="mt-2 text-sm text-neutral-500">
           The project <code className="rounded bg-neutral-100 px-1">{projectId}</code> doesn't exist
@@ -116,7 +122,7 @@ export default function ProjectShellLayout({ children }: { children: ReactNode }
 
   if (profile === null) {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         <p className="mt-2 text-sm text-neutral-500">
           This project uses profile{" "}
@@ -153,7 +159,11 @@ function ProjectShellInner({
       <Sidebar profile={profile} projectId={project.project_id} />
       <div
         className={[
-          "flex-1 transition-[margin] duration-200",
+          // `min-w-0` is REQUIRED: a flex item defaults to min-width:auto, so
+          // an intrinsically-wide child (table, code block, editor) would stop
+          // this column shrinking and push the whole page wider than the
+          // viewport — a horizontal page scroll that hid the fixed sidebar.
+          "flex-1 min-w-0 transition-[margin] duration-200",
           // < md : no margin (sidebar is a drawer, hidden by default).
           // ≥ md : margin tracks sidebar width — 14 collapsed, 56 expanded.
           collapsed ? "md:ml-14" : "md:ml-56",
@@ -170,7 +180,7 @@ function ProjectShellInner({
 function ProjectHeader({ project, profileLabel }: { project: Project; profileLabel: string }) {
   return (
     <div className="border-b border-neutral-200 bg-white px-6 py-4">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="truncate font-mono text-xs text-neutral-500">
             {project.tenant_id} / {project.project_id}

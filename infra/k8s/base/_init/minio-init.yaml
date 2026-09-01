@@ -1,6 +1,6 @@
 # =============================================================================
 # File: minio-init.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/_init/minio-init.yaml
 # Description: One-shot Job creating MinIO buckets + app user with a
 #              readwrite policy (R-100-118 v2). Idempotent: existing
@@ -48,7 +48,7 @@ spec:
                 sleep 2
               done
               echo "Ensuring buckets"
-              for b in orchestrator requirements validation memory c13-extractor-artifacts; do
+              for b in orchestrator requirements validation memory c13-extractor-artifacts backups; do
                 mc mb --ignore-existing "local/$b"
               done
               echo "Ensuring policy ay-app-readwrite"
@@ -64,7 +64,8 @@ spec:
                       "arn:aws:s3:::validation",   "arn:aws:s3:::validation/*",
                       "arn:aws:s3:::memory",       "arn:aws:s3:::memory/*",
                       "arn:aws:s3:::c13-extractor-artifacts",
-                      "arn:aws:s3:::c13-extractor-artifacts/*"
+                      "arn:aws:s3:::c13-extractor-artifacts/*",
+                      "arn:aws:s3:::backups", "arn:aws:s3:::backups/*"
                     ]
                   }
                 ]

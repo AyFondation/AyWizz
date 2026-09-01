@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/requirements/[slug]/page.tsx
 // Description: Single requirements document — fetches the full Markdown
 //              content from C5 and renders it inside a styled <pre>
@@ -63,7 +63,7 @@ export default function RequirementDocumentPage() {
 
   if (state.status === "loading") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-neutral-500">Loading document…</p>
       </main>
     );
@@ -71,7 +71,7 @@ export default function RequirementDocumentPage() {
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <h2 className="text-2xl font-semibold">Document not found</h2>
         <p className="mt-2 text-sm text-neutral-500">
           The document <code className="rounded bg-neutral-100 px-1">{slug}</code> doesn't exist (or
@@ -89,7 +89,7 @@ export default function RequirementDocumentPage() {
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-red-700" role="alert">
           Failed to load: {state.message}
         </p>
@@ -99,7 +99,7 @@ export default function RequirementDocumentPage() {
 
   const { doc } = state;
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10" data-testid="requirement-detail">
+    <main className="px-6 py-10" data-testid="requirement-detail">
       <nav className="text-xs text-neutral-500" aria-label="Breadcrumb">
         <Link
           href={`/projects/${encodeURIComponent(projectId)}/requirements`}

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/config.py
 # Description: Runtime settings for the C8 admin app. Shared infra params
 #              (Arango) are read un-prefixed via validation_alias like the
@@ -36,6 +36,19 @@ class C8AdminConfig(BaseSettings):
     # Whether to seed missing models from `litellm_config_path` on startup.
     # Idempotent; never clobbers existing rows/keys.
     seed_on_start: bool = True
+
+    # DEV-ONLY convenience (D-011 keeps the embedding registry EMPTY by
+    # default): when true, idempotently seed a local Ollama embedding provider
+    # + the `all-minilm` model on startup so a fresh dev cluster has a usable
+    # embedder out of the box. Set true ONLY in the dev overlay; false in
+    # base/prod, where operators declare their real providers via the HMI.
+    seed_ollama_embedding: bool = Field(
+        default=False, validation_alias="C8_SEED_OLLAMA_EMBEDDING"
+    )
+    # Base URL of the in-cluster Ollama used by the dev seed above.
+    ollama_base_url: str = Field(
+        default="http://ollama:11434", validation_alias="C8_OLLAMA_BASE_URL"
+    )
 
     # MinIO — for the per-project storage dashboards (E-100-002 v7). When
     # `minio_endpoint` is blank the storage metering is DISABLED (the storage

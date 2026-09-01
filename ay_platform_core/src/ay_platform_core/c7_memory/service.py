@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 7
+# Version: 9
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/service.py
 # Description: Facade for the C7 Memory Service. Wires ingestion (parse +
 #              chunk + embed + index), federated retrieval, entity-event
@@ -17,6 +17,15 @@
 #              contextually-related-but-not-direct-vector matches).
 #              Both knobs are configurable; default 1-hop, boost 1.3.
 #
+#              v9 (D-021 / R-400-231/232): live-docs also feed the structural
+#              KG. `ingest_live_document` dispatches by document type
+#              (Python code → L1 code graph ; requirements → requirement
+#              graph) into `_extract_livedoc_kg`, idempotent via
+#              `KGRepository.purge_source` (re-index/delete never leaves a
+#              stale node). `LiveDocIndexResult.kg_indexed` surfaces the
+#              signal (R-200-173). Best-effort — a KG failure never fails
+#              the vector-index path.
+#
 # @relation implements:R-400-020
 # @relation implements:R-400-030
 # @relation implements:R-400-031
@@ -28,6 +37,9 @@
 # @relation implements:R-400-208
 # @relation implements:R-400-227
 # @relation implements:R-400-228
+# @relation implements:R-400-230
+# @relation implements:R-400-231
+# @relation implements:R-400-232
 # =============================================================================
 
 from __future__ import annotations
@@ -36,6 +48,7 @@ import contextlib
 import hashlib
 import io
 import json
+import logging
 import mimetypes
 import time
 import uuid
@@ -63,6 +76,7 @@ from ay_platform_core.c7_memory.embedding.base import (
     EmbeddingProvider,
 )
 from ay_platform_core.c7_memory.ingestion.chunker import chunk_text
+from ay_platform_core.c7_memory.ingestion.doc_types import DocType, classify
 from ay_platform_core.c7_memory.ingestion.parser import (
     ParseFailureError,
     UnsupportedMimeError,
@@ -95,6 +109,7 @@ from ay_platform_core.c7_memory.models import (
     KGExtractionResult,
     KGRelationSample,
     KGSummary,
+    LiveDocIndexResult,
     ParseStatus,
     ProjectReembedResult,
     Provenance,
@@ -115,6 +130,8 @@ from ay_platform_core.c7_memory.retrieval.fusion import reciprocal_rank_fusion
 from ay_platform_core.c7_memory.retrieval.similarity import cosine, snippet
 from ay_platform_core.c7_memory.storage.minio_storage import MemorySourceStorage
 from ay_platform_core.c8_llm.client import LLMGatewayClient
+
+_log = logging.getLogger(__name__)
 
 
 def _parse_iso_dt(value: Any) -> datetime | None:
@@ -1634,6 +1651,13 @@ class MemoryService:
         )
         if entity_outcome is not None:
             outcomes.append(entity_outcome)
+        # Cover the LIVE_DOCS chunks (light path, no memory_sources row).
+        livedoc_outcome = await self._reembed_index(
+            tenant_id, project_id, embedder=embedder,
+            index=IndexKind.LIVE_DOCS, unit=self._LIVE_DOCS_UNIT,
+        )
+        if livedoc_outcome is not None:
+            outcomes.append(livedoc_outcome)
         return ProjectReembedResult(
             tenant_id=tenant_id,
             project_id=project_id,
@@ -1764,6 +1788,226 @@ class MemoryService:
             status="reembedded",
             chunk_count=len(new_rows),
         )
+
+    _LIVE_DOCS_UNIT = "<project-live-docs>"
+
+    async def _reembed_index(
+        self,
+        tenant_id: str,
+        project_id: str,
+        *,
+        embedder: EmbeddingProvider,
+        index: IndexKind,
+        unit: str,
+    ) -> SourceReembedOutcome | None:
+        """Re-embed the active chunks of one logical index (e.g. LIVE_DOCS)
+        that carry no `memory_sources` row and so are skipped by the per-source
+        loop. Returns None when there are none. Mirrors `_reembed_entities`."""
+        active = await self._repo.list_active_chunks_for_index(
+            tenant_id, project_id, index.value
+        )
+        if not active:
+            return None
+        off = [r for r in active if r.get("model_id") != embedder.model_id]
+        if not off:
+            return SourceReembedOutcome(
+                source_id=unit,
+                status="skipped",
+                chunk_count=len(active),
+                detail="already on the current embedding model",
+            )
+        new_rows, err = await self._recompute_chunk_vectors(off, embedder)
+        if err is not None or new_rows is None:
+            return SourceReembedOutcome(source_id=unit, status="failed", detail=err)
+        await self._repo.upsert_chunks(new_rows)
+        return SourceReembedOutcome(
+            source_id=unit, status="reembedded", chunk_count=len(new_rows)
+        )
+
+    # ------------------------------------------------------------------
+    # Live-docs light ingestion (D-021 / R-400-230..232)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _livedoc_source_id(path: str) -> str:
+        """Stable, Arango-key-safe synthetic source_id for a live-doc path.
+        Deterministic → re-indexing the same path REPLACES its chunks."""
+        return "livedoc-" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+
+    async def _extract_livedoc_kg(
+        self,
+        *,
+        tenant_id: str,
+        project_id: str,
+        source_id: str,
+        path: str,
+        content: str,
+        doc_type: DocType,
+    ) -> bool:
+        """Best-effort structural KG extraction for a live document (D-021 /
+        R-400-231/232). Python code → the deterministic L1 code graph ;
+        requirements → the requirement entity/relation graph. Idempotent: the
+        source's prior KG contribution is purged before re-persisting, so an
+        edit never leaves a stale node (a renamed function loses its old node).
+        Prose / tabular / non-Python code carry no structure the deterministic
+        extractors handle → skipped. Returns True when a graph was
+        (re)persisted. Never raises — a KG hiccup must not fail the light
+        vector-index path (the chunks are already the primary RAG signal)."""
+        if self._kg_repo is None:
+            return False
+        try:
+            if doc_type == DocType.CODE and path.endswith(".py"):
+                extraction = extract_structural_python(content, module_name=path)
+            elif doc_type == DocType.REQUIREMENTS:
+                extraction = extract_structural(content)
+            else:
+                return False
+            await self._kg_repo.purge_source(
+                tenant_id=tenant_id, project_id=project_id, source_id=source_id,
+            )
+            await self._kg_repo.persist_structural(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                source_id=source_id,
+                extraction=extraction,
+            )
+        except Exception:
+            # Best-effort: a KG/parse failure must not fail the light live-doc
+            # index path; the vector chunks stand alone and the graph self-heals
+            # on the next successful save.
+            _log.exception(
+                "live-doc structural KG extraction failed for %s (source=%s)",
+                path, source_id,
+            )
+            return False
+        return True
+
+    async def ingest_live_document(
+        self,
+        tenant_id: str,
+        project_id: str,
+        *,
+        path: str,
+        content: str,
+        uploaded_by: str = "system",
+    ) -> LiveDocIndexResult:
+        """LIGHT path (R-400-230/232): (re)index one authored/AI-generated
+        project-tree document into the LIVE_DOCS index. Dispatched by document
+        TYPE (R-400-231): prose (default) is chunked + embedded directly; a
+        tabular type falls back to prose with `reduced_fidelity=True` (v2 gap,
+        R-400-233). No C13, no source row — cheap enough to re-run on save."""
+        doc_type = classify(path, content)
+        reduced = doc_type == DocType.TABULAR  # v2 tabular strategy not built
+        source_id = self._livedoc_source_id(path)
+        embedder = await self._embedder_for(tenant_id, project_id)
+        # Re-index REPLACES: clear any prior chunks for this document first.
+        await self._repo.delete_chunks_for_source(tenant_id, project_id, source_id)
+        chunks = chunk_text(
+            content,
+            token_size=self._config.chunk_token_size,
+            overlap=self._config.chunk_overlap,
+        )
+        if not chunks:
+            # Empty document: purge any prior KG too so a doc emptied on edit
+            # doesn't retain stale structural nodes.
+            kg_indexed = await self._extract_livedoc_kg(
+                tenant_id=tenant_id, project_id=project_id, source_id=source_id,
+                path=path, content=content, doc_type=doc_type,
+            )
+            return LiveDocIndexResult(
+                path=path, doc_type=doc_type.value, chunk_count=0,
+                model_id=embedder.model_id, reduced_fidelity=reduced,
+                kg_indexed=kg_indexed,
+            )
+        vectors = await embedder.embed_batch([c.text for c in chunks])
+        if len(vectors) != len(chunks) or any(
+            len(v) != embedder.dimension for v in vectors
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="embedder produced an unexpected vector count/dimension",
+            )
+        now = datetime.now(UTC).isoformat()
+        rows: list[dict[str, Any]] = []
+        for chunk, vector in zip(chunks, vectors, strict=True):
+            chunk_id = f"{source_id}:{chunk.index}"
+            content_hash = (
+                "sha256:" + hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+            )
+            rows.append({
+                "_key": f"{tenant_id}:{project_id}:{chunk_id}",
+                "chunk_id": chunk_id,
+                "tenant_id": tenant_id,
+                "project_id": project_id,
+                "index": IndexKind.LIVE_DOCS.value,
+                "source_id": source_id,
+                "entity_id": None,
+                "entity_version": None,
+                "chunk_index": chunk.index,
+                "content": chunk.text,
+                "context": "",
+                "content_hash": content_hash,
+                "vector": vector,
+                "model_id": embedder.model_id,
+                "model_dim": embedder.dimension,
+                "created_at": now,
+                "status": ChunkStatus.ACTIVE.value,
+                "metadata": {
+                    "live_doc_path": path,
+                    "doc_type": doc_type.value,
+                    "uploaded_by": uploaded_by,
+                },
+            })
+        await self._repo.upsert_chunks(rows)
+        kg_indexed = await self._extract_livedoc_kg(
+            tenant_id=tenant_id, project_id=project_id, source_id=source_id,
+            path=path, content=content, doc_type=doc_type,
+        )
+        return LiveDocIndexResult(
+            path=path, doc_type=doc_type.value, chunk_count=len(rows),
+            model_id=embedder.model_id, reduced_fidelity=reduced,
+            kg_indexed=kg_indexed,
+        )
+
+    async def remove_live_document(
+        self, tenant_id: str, project_id: str, *, path: str
+    ) -> int:
+        """Remove a live-doc's chunks from the index (on delete/move).
+        Returns the number of chunks removed."""
+        source_id = self._livedoc_source_id(path)
+        removed = await self._repo.delete_chunks_for_source(
+            tenant_id, project_id, source_id
+        )
+        # Also drop the document's structural KG contribution (best-effort),
+        # so a deleted/moved doc leaves no orphaned entities behind.
+        if self._kg_repo is not None:
+            try:
+                await self._kg_repo.purge_source(
+                    tenant_id=tenant_id, project_id=project_id, source_id=source_id,
+                )
+            except Exception:
+                # Best-effort KG cleanup; a purge failure must not fail the
+                # chunk removal (the primary effect).
+                _log.exception(
+                    "live-doc KG purge failed for %s (source=%s)", path, source_id,
+                )
+        return removed
+
+    async def livedoc_kg_indexed(
+        self, tenant_id: str, project_id: str, *, path: str
+    ) -> bool:
+        """Whether a live-doc PATH currently contributes to the project's
+        structural knowledge graph (R-200-173 / R-400-232 — the read path that
+        makes `kg_indexed` real, resolving Q-200-018). False when no KG repo is
+        wired or the path has no extracted entities (prose, non-Python code,
+        never-indexed)."""
+        if self._kg_repo is None:
+            return False
+        source_id = self._livedoc_source_id(path)
+        entities = await self._kg_repo.list_entities_for_source(
+            tenant_id, project_id, source_id
+        )
+        return bool(entities)
 
     async def kg_summary(
         self, tenant_id: str, project_id: str, *, sample_limit: int = 10

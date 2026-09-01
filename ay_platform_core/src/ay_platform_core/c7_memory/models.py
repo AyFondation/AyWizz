@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 4
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/models.py
 # Description: Pydantic v2 models for the C7 Memory Service. Mirrors the
 #              contract-critical entities E-400-001..005 from
@@ -35,11 +35,17 @@ class IndexKind(StrEnum):
     chat-with-RAG flow queries `EXTERNAL_SOURCES + CONVERSATIONS` so
     follow-up questions benefit both from uploaded sources and from
     the conversation's own prior turns.
+
+    D-021 adds LIVE_DOCS — documents AUTHORED in the project tree (by the
+    user or the DocGen agents), indexed via the LIGHT ingestion path
+    (R-400-230/232), distinct from uploaded EXTERNAL_SOURCES (the heavy C13
+    path). Editable frequently, so re-indexed cheaply on save (no C13).
     """
 
     REQUIREMENTS = "requirements"
     EXTERNAL_SOURCES = "external_sources"
     CONVERSATIONS = "conversations"
+    LIVE_DOCS = "live_docs"
 
 
 class ChunkStatus(StrEnum):
@@ -564,6 +570,51 @@ class ProjectReembedResult(BaseModel):
     skipped: int
     failed: int
     sources: list[SourceReembedOutcome]
+
+
+# ---------------------------------------------------------------------------
+# Live-docs light ingestion (D-021 / R-400-230..232) — index a project-tree
+# document into the LIVE_DOCS index via the LIGHT path (chunk + per-project
+# embed, type-dispatched), distinct from the heavy C13 upload path.
+# ---------------------------------------------------------------------------
+
+
+class LiveDocIndexRequest(BaseModel):
+    """C4 -> C7 body to (re)index one authored/AI-generated live-doc."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    content: str
+    uploaded_by: str = "system"
+
+
+class LiveDocIndexResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    # The R-400-231 strategy the document was dispatched to.
+    doc_type: Literal["prose", "requirements", "code", "tabular"]
+    chunk_count: int
+    model_id: str
+    # True when a tabular doc fell back to the prose strategy (v2 gap,
+    # R-400-233) — the UX SHALL surface reduced-fidelity indexing.
+    reduced_fidelity: bool = False
+    # True when a deterministic structural knowledge-graph extraction ran for
+    # this document (code → L1 code graph ; requirements → requirement graph).
+    # Resolves the `kg_indexed` signal of R-200-173 for the live-docs path.
+    kg_indexed: bool = False
+
+
+class LiveDocKgStatus(BaseModel):
+    """Read-path membership answer for one live-doc PATH (R-200-173 /
+    R-400-232): whether it currently contributes to the project's structural
+    knowledge graph. Consumed by C4's source-file meta endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    kg_indexed: bool
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/router.py
 # Description: FastAPI APIRouter for C7 per 400-SPEC §6.1. Identity comes
 #              from Traefik forward-auth headers (X-User-Id, X-User-Roles,
@@ -10,6 +10,7 @@
 # @relation implements:R-400-040
 # @relation implements:R-400-070
 # @relation implements:R-400-228
+# @relation implements:R-400-232
 # @relation implements:E-400-005
 # C7 also realises the C7 side of the C12 → C7 ingestion contract:
 # @relation implements:R-100-080 R-100-081
@@ -40,6 +41,9 @@ from ay_platform_core.c7_memory.models import (
     EntityEmbedRequest,
     KGExtractionResult,
     KGSummary,
+    LiveDocIndexRequest,
+    LiveDocIndexResult,
+    LiveDocKgStatus,
     ProjectReembedResult,
     QuotaStatus,
     RetrievalRequest,
@@ -292,6 +296,67 @@ async def reembed_project(
     E-100-002 v2."""
     _require_role(x_user_roles, required=("project_owner", "admin"))
     return await service.reembed_project(tenant_id, project_id)
+
+
+@router.put(
+    "/api/v1/memory/projects/{project_id}/live-docs/index",
+    response_model=LiveDocIndexResult,
+)
+async def index_live_document(
+    project_id: str,
+    payload: LiveDocIndexRequest,
+    _user: str = Depends(_require_actor),
+    tenant_id: str = Depends(_require_tenant),
+    x_user_roles: str | None = Header(default=None),
+    service: MemoryService = Depends(get_service),
+) -> LiveDocIndexResult:
+    """D-021 / R-400-232 — LIGHT path: (re)index one authored/AI-generated
+    live-doc into the LIVE_DOCS index, dispatched by document type (R-400-231).
+    Called by C4 (debounced) on document create/update. Same content gate as
+    ingest: `project_editor` / `project_owner` / `admin`."""
+    _require_role(x_user_roles, required=("project_editor", "project_owner", "admin"))
+    return await service.ingest_live_document(
+        tenant_id, project_id,
+        path=payload.path, content=payload.content, uploaded_by=payload.uploaded_by,
+    )
+
+
+@router.delete(
+    "/api/v1/memory/projects/{project_id}/live-docs/index/{path:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_live_document(
+    project_id: str,
+    path: str,
+    _user: str = Depends(_require_actor),
+    tenant_id: str = Depends(_require_tenant),
+    x_user_roles: str | None = Header(default=None),
+    service: MemoryService = Depends(get_service),
+) -> Response:
+    """D-021 / R-400-232 — remove a live-doc's chunks from the index (on
+    document delete/move). Called by C4."""
+    _require_role(x_user_roles, required=("project_editor", "project_owner", "admin"))
+    await service.remove_live_document(tenant_id, project_id, path=path)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/api/v1/memory/projects/{project_id}/live-docs/kg-indexed",
+    response_model=LiveDocKgStatus,
+)
+async def live_doc_kg_indexed(
+    project_id: str,
+    path: str,
+    _user: str = Depends(_require_actor),
+    tenant_id: str = Depends(_require_tenant),
+    service: MemoryService = Depends(get_service),
+) -> LiveDocKgStatus:
+    """R-200-173 / R-400-232 — whether a live-doc PATH contributes to the
+    project's structural KG. The read path that makes C4's `kg_indexed` meta
+    field real (resolves Q-200-018). Authenticated + tenant/project scoped;
+    `path` is a query parameter (avoids the greedy path-converter)."""
+    indexed = await service.livedoc_kg_indexed(tenant_id, project_id, path=path)
+    return LiveDocKgStatus(path=path, kg_indexed=indexed)
 
 
 @router.get(

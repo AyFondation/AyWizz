@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 7
+// Version: 8
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/sources/[sid]/page.tsx
 // v7 (2026-06-03): EnrichmentDigest renders per-run processing stats
 //   (`00_metadata/run_stats.json`) — per-phase duration + LLM calls + tokens +
@@ -152,7 +152,7 @@ export default function SourceDetailPage() {
 
   if (state.status === "loading") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-neutral-500">Loading source…</p>
       </main>
     );
@@ -160,7 +160,7 @@ export default function SourceDetailPage() {
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <h2 className="text-2xl font-semibold">Source not found</h2>
         <p className="mt-2 text-sm text-neutral-500">
           The source <code className="rounded bg-neutral-100 px-1">{sourceId}</code> doesn't exist
@@ -178,7 +178,7 @@ export default function SourceDetailPage() {
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-red-700" role="alert">
           Failed to load source: {state.message}
         </p>
@@ -192,7 +192,7 @@ export default function SourceDetailPage() {
 
   return (
     <PageShell>
-      <main className="mx-auto max-w-5xl px-6 py-10" data-testid="source-detail">
+      <main className="px-6 py-10" data-testid="source-detail">
         <nav className="text-xs font-medium text-neutral-500" aria-label="Breadcrumb">
           <Link
             href={`/projects/${encodeURIComponent(projectId)}/sources`}

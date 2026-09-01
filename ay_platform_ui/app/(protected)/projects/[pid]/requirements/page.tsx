@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/requirements/page.tsx
 // Description: Requirements documents list (Phase E). Lists every
 //              document slug the project has registered with C5,
@@ -55,7 +55,7 @@ export default function RequirementsListPage() {
   }, [apiClient, projectId]);
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="px-6 py-10">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Requirements</h2>

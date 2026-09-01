@@ -1,0 +1,27 @@
+# =============================================================================
+# File: service.yaml
+# Version: 1
+# Path: infra/k8s/base/c16_backup/service.yaml
+# Description: ClusterIP Service for C16 Backup/Restore. Reachable in-cluster at
+#              `c16-backup:8000`; exposed publicly via the C1 Traefik route
+#              `/api/v1/projects/{pid}/backups` (forward-auth gated).
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c16-backup
+  namespace: aywizz
+  labels:
+    app.kubernetes.io/name: c16-backup
+    app.kubernetes.io/component: c16
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c16-backup
+    app.kubernetes.io/component: c16
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

@@ -132,6 +132,12 @@ async def test_delete_provider_guarded_while_models_reference_it() -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.delete_provider(pub.provider_id)
     assert exc.value.status_code == 409  # in use by a model
+    # The message MUST name the provider + model (human-readable), not the
+    # opaque provider id — regression for the "still has 1 model(s)" gibberish.
+    detail = str(exc.value.detail)
+    assert "Ollama" in detail  # provider NAME
+    assert "mini" in detail  # model ALIAS
+    assert pub.provider_id not in detail  # NOT the opaque id
     # After deleting the model, the provider can be removed.
     models = await msvc.list_models()
     assert await msvc.delete_model(models[0].model_id) is True
@@ -151,6 +157,41 @@ async def test_create_model_unknown_provider_422() -> None:
             )
         )
     assert exc.value.status_code == 422
+
+
+class _FakeProjectRepo:
+    """Minimal project-selection store: reports the projects using a model."""
+
+    def __init__(self, using: list[dict[str, Any]]) -> None:
+        self._using = using
+
+    async def list_using_model(self, model_id: str) -> list[dict[str, Any]]:
+        return self._using
+
+
+async def test_delete_model_guarded_message_is_human_readable() -> None:
+    prov, model = _Store(), _Store()
+    psvc = EmbeddingProviderService(prov, model, None, clock=lambda: "t", id_factory=_ids())
+    pub = await psvc.create_provider(
+        EmbeddingProviderUpsert(name="Ollama", adapter=EmbeddingAdapter.OLLAMA, base_url="http://x")
+    )
+    project_repo = _FakeProjectRepo([{"project_id": "smoke-p-8c5a3c"}])
+    msvc = EmbeddingModelService(
+        model, prov, project_repo, clock=lambda: "t", id_factory=_ids()
+    )
+    created = await msvc.create_model(
+        EmbeddingModelUpsert(
+            alias="mini", provider_id=pub.provider_id,
+            upstream_model="all-minilm", dimension=384,
+        )
+    )
+    with pytest.raises(HTTPException) as exc:
+        await msvc.delete_model(created.model_id)
+    assert exc.value.status_code == 409
+    detail = str(exc.value.detail)
+    assert "mini" in detail  # model ALIAS, not the opaque id
+    assert "smoke-p-8c5a3c" in detail  # the selecting project id
+    assert created.model_id not in detail  # NOT the opaque model id
 
 
 async def test_create_model_duplicate_alias_409() -> None:

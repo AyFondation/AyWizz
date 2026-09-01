@@ -46,6 +46,7 @@ resources:
   - c7_memory
   - c8_gateway    # LiteLLM proxy + cost receiver (R-800-001 / R-800-070).
   - c9_mcp
+  - c16_backup    # Logical per-tenant/project backup & restore (D-022).
   # Ingress tier.
   - c1_gateway
   # Bootstrap Jobs — last, so the Services / StatefulSets are

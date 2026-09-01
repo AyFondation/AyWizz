@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 5
+// Version: 6
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/conversations/page.tsx
 //
 // v5 (2026-05-19): the v4 auto-`router.replace` resume was a TRAP —
@@ -109,7 +109,7 @@ export default function ConversationsListPage() {
       : null;
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="px-6 py-10">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Conversations</h2>

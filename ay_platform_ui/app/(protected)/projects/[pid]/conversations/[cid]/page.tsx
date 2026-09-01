@@ -1,7 +1,11 @@
 // =============================================================================
 // File: page.tsx
-// Version: 18
+// Version: 19
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/conversations/[cid]/page.tsx
+//
+// v19 (2026-09-01): dropped the `mx-auto max-w-5xl` centering on the chat
+// `<main>` (see v17 note below) — the page is now LEFT-justified and fills
+// the content column at any width, consistent with the rest of the app.
 //
 // v17 (2026-06-03): two chat display fixes. (1) The just-sent prompt
 // no longer re-appears in the composer : onSend now marks the draft
@@ -451,7 +455,7 @@ export default function ChatPage() {
 
   if (state.status === "loading") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-neutral-500">Loading conversation…</p>
       </main>
     );
@@ -459,7 +463,7 @@ export default function ChatPage() {
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <h2 className="text-2xl font-semibold">Conversation not found</h2>
         <Link
           href={`/projects/${encodeURIComponent(projectId)}/conversations`}
@@ -473,7 +477,7 @@ export default function ChatPage() {
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-red-700" role="alert">
           Failed to load: {state.message}
         </p>

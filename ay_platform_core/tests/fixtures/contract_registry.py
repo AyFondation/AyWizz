@@ -1032,3 +1032,25 @@ register_contract(
         ),
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# C16 Backup/Restore contracts (D-022 / 900-SPEC)
+# ---------------------------------------------------------------------------
+
+from ay_platform_core.c16_backup.models import BackupRecord  # noqa: E402
+
+register_contract(
+    ExposedContract(
+        producer="C16_backup",
+        name="BackupRecord",
+        schema=BackupRecord,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "Metadata + pointer for one stored logical backup archive "
+            "(tenant/project scope). Listed / selected in the UI for download "
+            "and restore-as-new."
+        ),
+    )
+)

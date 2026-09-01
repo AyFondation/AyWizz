@@ -675,6 +675,40 @@ export interface TenantList {
   items: TenantPublic[];
 }
 
+/*  C16 Backup/Restore (D-022). A stored logical backup archive's metadata
+ *  (`GET /api/v1/projects/{pid}/backups`), and the restore-as-new report. */
+export interface BackupRecord {
+  backup_id: string;
+  scope: "project" | "tenant";
+  tenant_id: string;
+  project_id: string | null;
+  created_at: string;
+  created_by: string;
+  size_bytes: number;
+  object_key: string;
+  checksum: string;
+  origin: "generated" | "uploaded";
+  manifest_version: number;
+}
+
+export interface RestoreComponentCount {
+  store: "arango" | "minio";
+  name: string;
+  count: number;
+}
+
+export interface RestoreReport {
+  dry_run: boolean;
+  committed: boolean;
+  source_tenant_id: string;
+  source_project_id: string | null;
+  target_tenant_id: string;
+  new_project_id: string | null;
+  new_project_ids: string[];
+  manifest_version: number;
+  components: RestoreComponentCount[];
+}
+
 export type UserStatus = "active" | "disabled";
 
 export interface UserAdminView {

@@ -40,11 +40,12 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md) | 83 | 9 | 26 | 4 | 0 | 44 |
 | [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 73 | 26 | 28 | 0 | 0 | 19 |
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
-| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 50 | 13 | 13 | 1 | 0 | 23 |
+| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 54 | 16 | 13 | 1 | 0 | 24 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 3 | 21 | 0 | 0 | 0 |
 | [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 60 | 7 | 13 | 1 | 0 | 39 |
-| **Total** | **356** | **58** | **130** | **11** | **8** | **149** |
+| [900](./900.md) | 13 | 10 | 1 | 1 | 0 | 1 |
+| **Total** | **373** | **71** | **131** | **12** | **8** | **151** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -120,7 +121,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-100-111` | v2 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c2_auth/config.py`, `ay_platform_core/src/ay_platform_core/c3_conversation/main.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/config.py` (+5 more) | — |
 | `R-100-112` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/c2_auth/config.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/config.py`, `ay_platform_core/src/ay_platform_core/c5_requirements/config.py` (+2 more) | — |
 | `R-100-113` | v1 | approved | **test-only** | — | `ay_platform_core/tests/coherence/test_env_completeness.py` |
-| `R-100-114` | v2 | approved | **tested** | `ay_platform_core/src/ay_platform_core/c2_auth/ux_router.py`, `ay_platform_core/src/ay_platform_core/c3_conversation/main.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/main.py` (+8 more) | `ay_platform_core/tests/integration/c2_auth/test_ux_config.py`, `ay_platform_core/tests/integration/c7_memory/test_remote_service.py`, `ay_platform_core/tests/system/k8s/test_basic_smoke.py` (+1 more) |
+| `R-100-114` | v2 | approved | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/main.py`, `ay_platform_core/src/ay_platform_core/c2_auth/ux_router.py`, `ay_platform_core/src/ay_platform_core/c3_conversation/main.py` (+9 more) | `ay_platform_core/tests/integration/c2_auth/test_ux_config.py`, `ay_platform_core/tests/integration/c7_memory/test_remote_service.py`, `ay_platform_core/tests/system/k8s/test_basic_smoke.py` (+1 more) |
 | `R-100-115` | v2 | approved | **implemented** | `ay_platform_core/tests/docker-compose.yml` | — |
 | `R-100-116` | v1 | approved | **implemented** | `ay_platform_core/src/ay_platform_core/_mock_llm/main.py`, `infra/k8s/base/_mock_llm/deployment.yaml` | — |
 | `R-100-117` | v1 | approved | **tested** | `ay_platform_core/src/ay_platform_core/c3_conversation/main.py`, `ay_platform_core/src/ay_platform_core/c7_memory/remote.py`, `ay_platform_core/tests/docker-compose.yml` | `ay_platform_core/tests/system/k8s/test_basic_smoke.py` |
@@ -194,7 +195,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-200-170` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py` |
 | `R-200-171` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py` |
 | `R-200-172` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py` |
-| `R-200-173` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py` |
+| `R-200-173` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/artifacts_service.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/c7_livedocs_client.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_livedocs_rag_sync.py`, `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_c7_livedocs_client.py` |
 | `R-200-174` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py` | `ay_platform_core/tests/integration/c4_orchestrator/test_source_api.py` |
 | `R-200-175` | v1 | draft | **not-yet** | — | — |
 | `R-200-180` | v1 | draft | **not-yet** | — | — |
@@ -319,10 +320,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-223` | v3 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
 | `R-400-224` | v1 | draft | **not-yet** | — | — |
 | `R-400-225` | v1 | draft | **not-yet** | — | — |
-| `R-400-226` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_models.py` (+2 more) | `ay_platform_core/tests/integration/c8_admin/test_embedding_registry_api.py` |
+| `R-400-226` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_models.py` (+3 more) | `ay_platform_core/tests/integration/c8_admin/test_embedding_registry_api.py`, `ay_platform_core/tests/integration/c8_admin/test_embedding_seed_flow.py`, `ay_platform_core/tests/unit/c8_llm/test_embedding_seed.py` |
 | `R-400-227` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/openai.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/registry_resolver.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/unit/c7_memory/test_embedder_for.py` |
 | `R-400-228` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_reembed_flow.py` |
-| `R-400-229` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_reembed_notifier.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_service.py` (+2 more) | `ay_platform_core/tests/unit/c8_llm/test_reembed_trigger.py` |
+| `R-400-229` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_catalog_service.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_reembed_notifier.py`, `ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_service.py` (+2 more) | `ay_platform_core/tests/system/k8s/test_embedding_reembed_wiring.py`, `ay_platform_core/tests/unit/c8_llm/test_reembed_trigger.py` |
+| `R-400-230` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_live_docs_flow.py`, `ay_platform_core/tests/unit/c7_memory/test_live_docs.py` |
+| `R-400-231` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/doc_types.py`, `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_live_docs_kg_flow.py`, `ay_platform_core/tests/unit/c7_memory/test_doc_types.py`, `ay_platform_core/tests/unit/c7_memory/test_live_docs_kg.py` |
+| `R-400-232` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/artifacts_service.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/c7_livedocs_client.py`, `ay_platform_core/src/ay_platform_core/c7_memory/kg/repository.py` (+2 more) | `ay_platform_core/tests/integration/c4_orchestrator/test_livedocs_rag_sync.py`, `ay_platform_core/tests/integration/c7_memory/test_live_docs_flow.py`, `ay_platform_core/tests/integration/c7_memory/test_live_docs_kg_flow.py` (+3 more) |
+| `R-400-233` | v1 | draft | **not-yet** | — | — |
 
 ## R-500-* — [500-SPEC-UI-UX](./500-SPEC-UI-UX.md)
 
@@ -436,6 +441,24 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-145` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py`, `ay_platform_core/tests/unit/c8_llm/test_quota_repository.py` |
 | `R-800-146` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/integration/c8_llm/test_litellm_clientside_auth.py`, `ay_platform_core/tests/unit/c8_llm/test_model_resolver.py` (+2 more) |
 | `R-800-147` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py` | `ay_platform_core/tests/unit/c8_llm/test_prompt_cache.py` |
+
+## R-900-* — [900](./900.md)
+
+| ID | v | status | overall | implementing | validating |
+|---|---|---|---|---|---|
+| `R-900-001` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/data_map.py` | `ay_platform_core/tests/coherence/test_backup_data_map.py`, `ay_platform_core/tests/unit/c16_backup/test_data_map.py` |
+| `R-900-002` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/readers.py`, `ay_platform_core/src/ay_platform_core/c16_backup/router.py`, `ay_platform_core/src/ay_platform_core/c16_backup/service.py` | `ay_platform_core/tests/integration/c16_backup/test_snapshot_flow.py`, `ay_platform_core/tests/integration/c16_backup/test_tenant_flow.py`, `ay_platform_core/tests/unit/c16_backup/test_readers.py` |
+| `R-900-003` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/archive.py` | `ay_platform_core/tests/integration/c16_backup/test_snapshot_flow.py`, `ay_platform_core/tests/unit/c16_backup/test_archive.py` |
+| `R-900-004` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c16_backup/config.py`, `ay_platform_core/src/ay_platform_core/c16_backup/repository.py` | — |
+| `R-900-005` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/router.py` | `ay_platform_core/tests/integration/c16_backup/test_backup_api.py` |
+| `R-900-006` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/router.py` | `ay_platform_core/tests/integration/c16_backup/test_backup_api.py` |
+| `R-900-007` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/router.py` | `ay_platform_core/tests/integration/c16_backup/test_backup_api.py` |
+| `R-900-008` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/remap.py`, `ay_platform_core/src/ay_platform_core/c16_backup/router.py` | `ay_platform_core/tests/e2e/test_backup_restore_usable.py`, `ay_platform_core/tests/integration/c16_backup/test_backup_api.py`, `ay_platform_core/tests/integration/c16_backup/test_restore_flow.py` (+2 more) |
+| `R-900-009` | v1 | draft | **test-only** | — | `ay_platform_core/tests/integration/c16_backup/test_restore_flow.py` |
+| `R-900-010` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/readers.py` | `ay_platform_core/tests/unit/c16_backup/test_readers.py` |
+| `R-900-011` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/router.py` | `ay_platform_core/tests/integration/c16_backup/test_backup_api.py` |
+| `R-900-012` | v1 | draft | **not-yet** | — | — |
+| `R-900-013` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c16_backup/archive.py` | `ay_platform_core/tests/unit/c16_backup/test_archive.py` |
 
 ---
 

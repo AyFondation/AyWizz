@@ -158,4 +158,32 @@ describe("EmbeddingRegistryPage", () => {
     await user.click(screen.getByTestId("embedding-registry-delete-all-minilm"));
     await waitFor(() => expect(del).toHaveBeenCalled());
   });
+
+  it("surfaces the backend's real reason on a guarded delete (409)", async () => {
+    // Regression: a delete blocked because a project still selects the model
+    // MUST show the actionable backend detail, not the old misleading
+    // "alias already exists" (which is a create-conflict message).
+    seedToken(["platform_manager"]);
+    const del = vi.fn(() =>
+      HttpResponse.json(
+        {
+          detail: "embedding model m1 is selected by 1 project(s): ['proj-1']; reassign them first",
+        },
+        { status: 409 },
+      ),
+    );
+    server.use(
+      http.get(MODELS, () => HttpResponse.json({ models: [model()] })),
+      http.get(PROV, () => HttpResponse.json({ providers: [provider()] })),
+      http.delete(`${MODELS}/m1`, del),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("embedding-registry-table")).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("embedding-registry-delete-all-minilm"));
+    const alert = await screen.findByTestId("embedding-registry-error");
+    expect(alert).toHaveTextContent(/selected by 1 project\(s\)/i);
+    expect(alert).toHaveTextContent(/reassign them first/i);
+    expect(alert).not.toHaveTextContent(/alias already exists/i);
+  });
 });

@@ -1,0 +1,12 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/c16_backup/kustomization.yaml
+# Description: Kustomize component for C16 Backup/Restore (D-022).
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml

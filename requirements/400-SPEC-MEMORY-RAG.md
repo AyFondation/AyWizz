@@ -999,6 +999,120 @@ is logged, never blocks the admin operation, and staleness stays visible via
 
 ---
 
+### 4.y Type-aware, two-path RAG ingestion (D-021)
+
+RAG ingestion is NOT one-size-fits-all. It splits by artifact ORIGIN (heavy
+upload vs light live-doc) and dispatches by document TYPE. These four
+requirements operationalise D-021.
+
+#### R-400-230
+
+```yaml
+id: R-400-230
+version: 1
+status: draft
+category: functional
+derives-from: [D-021, D-020, D-015, R-400-020]
+```
+
+C7 ingestion SHALL support TWO paths, selected by the artifact's origin:
+
+1. **Heavy path — uploaded sources.** The C13 pipeline (parse + structure-aware
+   chunk + LLM enrichment + embeddings + auto KG), run ONCE per upload,
+   asynchronously (R-400-220..223, D-020). Unchanged.
+2. **Light path — live-docs.** A DIRECT C7 ingestion of a project-tree document
+   (authored by the user or the DocGen agents), invoked on save and
+   **debounced**, that SHALL NOT invoke the C13 heavy pipeline nor re-run LLM
+   enrichment on every edit. It reuses C7's existing in-process ingest
+   (`_index_parsed_source`-class): chunk + per-project embed (R-400-227) +
+   OPTIONAL light contextualisation / structural KG (per the type strategy,
+   R-400-231).
+
+The path is chosen by origin, never merged: a document edited every minute
+cannot bear the once-per-upload heavy pipeline.
+
+#### R-400-231
+
+```yaml
+id: R-400-231
+version: 1
+status: draft
+category: functional
+derives-from: [D-021, D-016, R-400-200, E-400-006]
+```
+
+C7 SHALL own a single **document-type → ingestion-strategy registry** that both
+paths (R-400-230) dispatch through. v1 strategies:
+
+- **prose** (`.md` / `.txt` / plain) — light structure-aware chunk + embed
+  (+ optional contextualisation, R-400-203). The default fallback.
+- **requirements** (a cascading `R-NNN` spec: `id:` + `derives-from:` /
+  `impacts:` blocks) — the schema-guided structural extractor
+  (`extract_structural_kg(kind="requirements")`): traceability KG + entity
+  embeddings (R-400-030).
+- **code** (`.py`, extensible per language) — the AST structural extractor
+  (`extract_structural_kg(kind="code")`) constrained to the closed
+  `CodeKnowledgeOntology` (E-400-006): code KG.
+- **tabular / structured** (`.xlsx` / `.csv` / …) — a table-aware strategy
+  (schema + per-row/section representation, NOT prose chunking). See R-400-233
+  (deferred).
+
+The registry consolidates the dispatch currently scattered across the `kind`
+argument (C7), the domain plugins (C4/C6), and mime handling (C13). Adding a
+document type = adding a strategy entry; an unknown type SHALL fall back to
+**prose**, never silently drop the document.
+
+#### R-400-232
+
+```yaml
+id: R-400-232
+version: 1
+status: draft
+category: functional
+derives-from: [D-021, D-015, R-400-230, R-400-231, R-400-227]
+impacts: [R-200-173]
+```
+
+The platform SHALL index the project's **live-docs** into the RAG via the light
+path (R-400-230) so authored + AI-generated documents are retrievable and
+graph-linked. Specifically:
+
+- A new `IndexKind.LIVE_DOCS` (joining `EXTERNAL_SOURCES` / `CONVERSATIONS` /
+  `REQUIREMENTS`).
+- On a live-doc **create / update** (C4 documents surface, §5.16/§5.17), C4
+  SHALL trigger a **debounced** authenticated C7 ingest of the document text
+  under `LIVE_DOCS`, dispatched by type (R-400-231). On **delete / move**, C4
+  SHALL update/remove the corresponding chunks. Versioning reuses the existing
+  per-response turn-id (R-200-147).
+- C3 chat retrieval SHALL include `LIVE_DOCS` in its index set.
+- `R-200-173`'s `kg_indexed` SHALL become REAL — reflecting whether the file is
+  present in the C7 index — resolving **Q-200-018** (the deferred C4→C7 path).
+
+Debouncing is REQUIRED (live-docs are edited frequently); a per-keystroke
+re-index is a defect. Re-embedding on an embedding-model change is already
+covered for `LIVE_DOCS` chunks by R-400-228.
+
+#### R-400-233
+
+```yaml
+id: R-400-233
+version: 1
+status: draft
+category: functional
+derives-from: [D-021, R-400-231]
+```
+
+The **tabular / structured** ingestion strategy (`.xlsx` / `.csv` / `.pptx` /
+`.html` / `.json`) is **DEFERRED to v2**, consistent with the upload-format
+deferral in §4.3. It is declared here so the type registry (R-400-231) has an
+explicit seam rather than an implicit gap: until implemented, a tabular
+document falls back to the **prose** strategy (best-effort text extraction),
+and the UX SHALL surface that the file is indexed with reduced fidelity rather
+than silently mis-chunked. A v2 implementation SHALL represent tables
+schema-aware (columns + per-row/section units), NOT as flowing prose.
+
+---
+
 ## 5. Non-Functional Requirements
 
 ### 5.1 Performance

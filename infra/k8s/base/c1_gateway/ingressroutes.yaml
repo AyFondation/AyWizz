@@ -1,12 +1,23 @@
 # =============================================================================
 # File: ingressroutes.yaml
-# Version: 3
+# Version: 7
 # Path: infra/k8s/base/c1_gateway/ingressroutes.yaml
 # Description: Traefik IngressRoute CRDs — K8s mirror of
-#              `infra/c1_gateway/dynamic/routers.yml` (v7). Same path
+#              `infra/c1_gateway/dynamic/routers.yml` (v10). Same path
 #              prefixes/regexps, same priorities, same middlewares, same
 #              backend services as the compose dev stack (resolved through
 #              K8s DNS rather than Docker DNS).
+#
+#              v5 (2026-08-31): add the c8-admin API route /admin/v1/storage
+#              (priority 100) that was omitted — storage metering + snapshot
+#              trigger fell through to /admin→c2 → 404.
+#              v4 (2026-08-26): add the UI governance PAGE route
+#              /admin/embedding (priority 60 → ay-platform-ui, no forward-auth;
+#              compose router `ui-admin-embedding`) that v3 omitted. Without it,
+#              opening the embedding registry/providers/catalogue pages fell
+#              through to /admin→c2 [forward-auth] → {"detail":"Not
+#              authenticated"}. The embedding ADMIN API stays on
+#              /admin/v1/llm/embedding-* (priority 100), unaffected.
 #
 #              v3 (2026-07-27): add the 4 c8-admin API routes (LLM registry /
 #              catalogue / quota) that the v2 mirror omitted — /admin/v1/llm
@@ -168,6 +179,19 @@ spec:
       middlewares:
         - name: forward-auth-c2
         - name: secure-headers
+    # C8 admin storage metering (E-100-002 v7) — per-project/tenant disk usage
+    # + the snapshot trigger. Same c8-admin backend as llm/quota; priority 100
+    # beats the generic /admin→c2. Without it, POST /admin/v1/storage/snapshot
+    # falls through to c2 → 404.
+    - match: PathPrefix(`/admin/v1/storage`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c8-admin
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
     - match: PathPrefix(`/api/v1/llm`)
       kind: Rule
       priority: 50
@@ -198,6 +222,19 @@ spec:
       services:
         - name: ay-platform-ui
           port: 3000
+    # ---- UI governance PAGE paths (Next.js `/admin/embedding-*`) ----
+    # `/admin/embedding-registry` + `/admin/embedding-providers` +
+    # `/admin/embedding-catalogue` are UI pages that collide with the C2
+    # `/admin` API prefix. Same treatment as `/admin/llm`: priority 60
+    # (> 50 c2, < 100 the `/admin/v1/llm` embedding API) sends the PAGE to the
+    # UI, NO forward-auth. Without this, page nav falls through to `/admin` →
+    # c2 [forward-auth] and returns "Not authenticated".
+    - match: PathPrefix(`/admin/embedding`)
+      kind: Rule
+      priority: 60
+      services:
+        - name: ay-platform-ui
+          port: 3000
     # ---- C2 Admin (tenants lifecycle) ----
     - match: PathPrefix(`/admin`)
       kind: Rule
@@ -214,6 +251,28 @@ spec:
       priority: 100
       services:
         - name: c5-requirements
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # ---- C16 Backup/Restore — the /backups subpath, priority 100 (beats the
+    #      generic /api/v1/projects → c2 at 50). Forward-auth so C2 resolves the
+    #      caller's role ON {project_id} (R-900-011). ----
+    - match: PathRegexp(`^/api/v1/projects/[^/]+/backups(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c16-backup
+          port: 8000
+      middlewares:
+        - name: forward-auth-c2
+        - name: secure-headers
+    # C16 tenant-scope backups (whole-tenant archive).
+    - match: PathRegexp(`^/api/v1/tenants/[^/]+/backups(/.*)?$`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: c16-backup
           port: 8000
       middlewares:
         - name: forward-auth-c2

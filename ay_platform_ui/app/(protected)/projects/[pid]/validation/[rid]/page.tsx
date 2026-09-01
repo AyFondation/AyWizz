@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/validation/[rid]/page.tsx
 // Description: Validation run detail. Polls C6's `GET /runs/{rid}` for
 //              status until it hits `completed` or `failed`, then loads
@@ -97,7 +97,7 @@ export default function RunDetailPage() {
 
   if (state.status === "loading") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-neutral-500">Loading run…</p>
       </main>
     );
@@ -105,7 +105,7 @@ export default function RunDetailPage() {
 
   if (state.status === "not-found") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <h2 className="text-2xl font-semibold">Run not found</h2>
         <Link
           href={`/projects/${encodeURIComponent(projectId)}/validation`}
@@ -119,7 +119,7 @@ export default function RunDetailPage() {
 
   if (state.status === "error") {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="px-6 py-10">
         <p className="text-red-700" role="alert">
           Failed to load: {state.message}
         </p>
@@ -129,7 +129,7 @@ export default function RunDetailPage() {
 
   const { run, findings } = state;
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10" data-testid="run-detail">
+    <main className="px-6 py-10" data-testid="run-detail">
       <nav className="text-xs text-neutral-500" aria-label="Breadcrumb">
         <Link
           href={`/projects/${encodeURIComponent(projectId)}/validation`}

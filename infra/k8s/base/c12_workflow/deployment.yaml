@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
 #              `n8nio/n8n:1.74.0` image. SQLite DB on PVC.
@@ -63,6 +63,19 @@ spec:
             - |
               set -e
               if [ -d /workflows ] && [ -n "$(ls -A /workflows 2>/dev/null)" ]; then
+                # GitOps model: the workflow DB is FULLY derived from
+                # /workflows (the versioned source of truth). n8n has no delete
+                # CLI and its sqlite driver path is version-specific, so the
+                # robust, dependency-free way to guarantee the DB matches the
+                # repo — and that orphans (e.g. a workflow that once got a random
+                # n8n id from an import of a file with no stable `id`) cannot
+                # linger — is to RESET the sqlite file, then let import recreate
+                # the schema + the current set. n8n stores no credentials here
+                # (C7/C13 auth is header-based) and execution history is
+                # ephemeral, so the reset is safe.
+                echo "Resetting n8n workflow DB (derived from /workflows)"
+                rm -f "${DB_SQLITE_DATABASE}" "${DB_SQLITE_DATABASE}"-shm \
+                      "${DB_SQLITE_DATABASE}"-wal 2>/dev/null || true
                 echo "Importing n8n workflows from /workflows"
                 n8n import:workflow --separate --input=/workflows
                 n8n update:workflow --all --active=true || true

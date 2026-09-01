@@ -1,6 +1,6 @@
 ---
 document: 999-SYNTHESIS
-version: 8
+version: 9
 path: requirements/999-SYNTHESIS.md
 language: en
 status: draft
@@ -950,6 +950,130 @@ making them opt-in puts cost control in the project owner's hands.
 - `c7_memory.service.ingest_uploaded_source` deprecated in v1.5, removed
   in v2 (session 7).
 
+### D-021 — Type-aware, two-path RAG ingestion (heavy uploads / light live-docs) + document-type strategy registry
+
+```yaml
+id: D-021
+version: 1
+status: draft
+category: memory-rag
+impacts: [R-400-*, R-200-*]
+```
+
+**Decision.** RAG ingestion into C7 SHALL follow **two distinct paths**, chosen
+by the artifact's ORIGIN, not merged into one:
+
+- **Heavy path — uploaded sources** (external files the operator uploads):
+  the full C13 pipeline (parse + structure-aware chunk + LLM enrichment —
+  contextualisation, image vision, decontextualisation — + embeddings + auto
+  KG). Runs **once per upload**, asynchronously (C7 → C12 → C13 → C7
+  ingest-chunks, D-020). Justified because uploads are opaque binary formats
+  processed once.
+
+- **Light path — live-docs** (documents authored in the project tree, by the
+  user or the DocGen agents, edited FREQUENTLY): a **direct C7 ingestion**
+  (chunk + per-project embed + optional light contextualisation / structural
+  KG) invoked on save, **debounced**. It SHALL NOT run the C13 heavy pipeline —
+  a markdown/text doc is already parsed, and re-running LLM enrichment on every
+  edit is prohibitive. This closes **Q-200-018** (the deferred C4→C7 index
+  cross-link).
+
+Both paths SHALL dispatch by **document type** through a single
+**document-type → ingestion-strategy registry** in C7. v1 strategies:
+
+- **prose** (`.md`/`.txt`/plain) → light chunk + embed (+ optional
+  contextualisation). The default.
+- **requirements** (cascading `R-NNN` spec entities, `id:` + `derives-from:` /
+  `impacts:`) → the existing schema-guided structural extractor
+  (`extract_structural_kg(kind="requirements")`) → traceability KG + entity
+  embeddings.
+- **code** (`.py`, …) → the existing AST extractor
+  (`extract_structural_kg(kind="code")`) constrained to the closed
+  `CodeKnowledgeOntology` (E-400-006) → code KG.
+- **tabular / structured** (`.xlsx`/`.csv`/…) → a table-aware strategy
+  (schema + per-row/section representation, NOT prose chunking). **Deferred to
+  v2** (consistent with the 400-SPEC upload-format deferral) — declared here so
+  the registry has a seam, not left implicit.
+
+**Rationale.** Uploaded sources and authored live-docs have opposite edit
+cadences (once vs constant); applying the heavy pipeline to a doc edited every
+minute is infeasible, so the paths MUST differ. Independently, a `.py`, a
+cascading-requirements spec, an Excel sheet, and a prose note carry different
+structure — one-size-fits-all chunking loses the traceability graph of
+requirements and the call graph of code. The platform already owns type-aware
+extractors (kind=code/requirements, closed ontologies) and a domain-plugin
+pattern, but the dispatch is scattered (a `kind` arg in C7, domain plugins in
+C4/C6, mime handling in C13). A single strategy registry consolidates it and is
+the correct home for the light-path dispatch.
+
+**Relationship to prior decisions.** Extends D-013 / D-020 (heavy upload path,
+unchanged) and D-015 (live-docs surface) by giving live-docs a RAG-index path;
+reuses D-016's schema-guided structural extraction (code/requirements). The
+per-project embedder resolution + re-embed (R-400-226..229) already cover the
+embedding-consistency of the new live-docs chunks.
+
+**Consequences.**
+- `400-SPEC-MEMORY-RAG.md` §4 lands R-400-230..233 (two paths, the registry,
+  the light live-docs index + retrieval inclusion + `kg_indexed`, the deferred
+  tabular strategy).
+- A new `IndexKind.LIVE_DOCS` joins `EXTERNAL_SOURCES`/`CONVERSATIONS`/
+  `REQUIREMENTS`; C3 chat retrieval includes it.
+- `200-SPEC` Q-200-018 resolves to R-400-232 (`kg_indexed` becomes real; C4
+  triggers the light ingest on live-doc create/update/delete/move).
+- C4→C7 gains an authenticated internal ingest call for live-docs (debounced,
+  versioned by the existing turn-id).
+
+### D-022 — Logical tenant/project backup & restore (portable archives, C16)
+
+```yaml
+id: D-022
+version: 1
+status: draft
+category: infrastructure
+impacts: [R-900-*, R-100-012, R-100-114, E-100-002]
+```
+
+**Decision.** The platform SHALL provide a **logical, per-tenant/per-project
+backup & restore** capability — portable `tar.gz` archives, generated /
+downloaded / uploaded / selected / restored — distinct from cluster disaster
+recovery (which stays `arangodump`/`mc mirror` on C10/C11). It SHALL be a new
+stateless backbone component **C16 (`c16_backup`)**, packaged from the shared
+`Dockerfile.api`, that reads C11 (ArangoDB) + C10 (MinIO) by a code-owned
+**DataMap** and writes archives to a dedicated, tenant-isolated `backups`
+bucket. Reaching into other components' stores is the one sanctioned exception
+to R-100-012, mediated entirely by the DataMap.
+
+**Locked scope (v1).**
+- **Restore-as-new** — a restore always mints NEW tenant/project ids and remaps
+  every reference; it NEVER overwrites or merges into a live target. (Overwrite
+  / in-place rollback = v2, Q-900-003.)
+- **Secrets excluded** — no password hashes, no encrypted provider keys, no
+  session tokens, no master key in an archive; credentials are re-entered after
+  restore. Archives are therefore portable and safe to download.
+- **Stores = ArangoDB + MinIO** — Gitea git history is deferred to v2
+  (Q-900-002).
+- **Consistency = best-effort point-in-time** — not a globally atomic snapshot;
+  a quiesced mode is v2 (Q-900-004).
+
+**Rationale.** Data for a tenant/project is spread across ~25 Arango collections
++ 6 MinIO buckets (+ Gitea) owned by ~8 components; no single component can back
+it up. A dedicated cross-cutting service driven by an authoritative DataMap is
+the only clean way to enumerate, export, and re-hydrate a scope. Restore-as-new
+removes the hardest and most dangerous part (referential-integrity-preserving
+in-place overwrite of live data) from v1 while still serving the primary uses
+(archive, download, clone, migrate, restore into a fresh target).
+
+**Consequences.**
+- New spec `900-SPEC-BACKUP-RESTORE.md` (E-900-001..003, R-900-001..013,
+  Q-900-001..007).
+- New component C16 + its `/api/v1/backups/*` surface (C1 ingress route +
+  auth-matrix catalog + contract-registry entries).
+- A coherence test SHALL assert DataMap completeness (no tenant/project-scoped
+  store escapes backup).
+- Near-formal verification: a **round-trip deep-equality invariant** (restore ≡
+  source modulo remapped ids + excluded secrets) exercised across every DataMap
+  entry, at unit / contract / integration / e2e tiers.
+
 ---
 
 ## 6. Document Mapping
@@ -964,6 +1088,7 @@ making them opt-in puts cost control in the project owner's hands.
 | Artifact quality | `600-SPEC-CODE-QUALITY.md` | Domain-specific quality enforcement (TDD for `code`, equivalent per-domain gates), dual review, evidence-based verification | planned (scaffold) |
 | Vertical coherence | `700-SPEC-VERTICAL-COHERENCE.md` | MUST/SHOULD/COULD checks per domain, parser internals, reporting, domain plugin registration | **v3 delivered** |
 | LLM abstraction | `800-SPEC-LLM-ABSTRACTION.md` | LiteLLM deployment, routing, feature mapping, eval harness | **v1 delivered** |
+| Backup / Restore | `900-SPEC-BACKUP-RESTORE.md` | Logical per-tenant/project archives (Arango+MinIO), restore-as-new, secrets-excluded, dedicated MinIO zone, C16 service (D-022) | **v1 draft (spec)** |
 | Methodology | `meta/100-SPEC-METHODOLOGY.md` | Authoring conventions, versioning, git flow, review process, domain-neutral entity model, test tier topology (§11) | **v3 delivered** |
 
 ---

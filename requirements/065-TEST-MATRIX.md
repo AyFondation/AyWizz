@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**170 endpoints** across 8 components. Order: by component, method, path.
+**183 endpoints** across 9 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -184,6 +184,9 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | authenticated | project | any authenticated | — | — | 200 |
 | `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c7_sources` | 204 |
 | `POST` | `/api/v1/memory/projects/{project_id}/reembed` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_chunks` | 200 |
+| `PUT` | `/api/v1/memory/projects/{project_id}/live-docs/index` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 200 |
+| `DELETE` | `/api/v1/memory/projects/{project_id}/live-docs/index/{path:path}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 204 |
+| `GET` | `/api/v1/memory/projects/{project_id}/live-docs/kg-indexed` | authenticated | project | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `project_owner` | `platform_manager` | — | 201 |
 | `GET` | `/api/v1/memory/projects/{project_id}/quota` | authenticated | project | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `project_owner` | `platform_manager` | — | 501 |
@@ -244,6 +247,20 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/mcp` | authenticated | tenant | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/mcp/tools` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/mcp/health` | open | — | *(open)* | — | — | 200 |
+### c16_backup
+
+| Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
+|---|---|---|---|---|---|---|---|
+| `POST` | `/api/v1/projects/{project_id}/backups` | role_gated | project | `admin` · `tenant_admin` · `platform_manager` · `project_owner` | — | arango · `backup_records` | 201 |
+| `GET` | `/api/v1/projects/{project_id}/backups` | role_gated | project | `admin` · `tenant_admin` · `platform_manager` · `project_owner` | — | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/backups/{backup_id}/download` | role_gated | project | `admin` · `tenant_admin` · `platform_manager` · `project_owner` | — | — | 200 |
+| `POST` | `/api/v1/projects/{project_id}/backups/archives` | role_gated | project | `admin` · `tenant_admin` · `platform_manager` · `project_owner` | — | arango · `backup_records` | 201 |
+| `POST` | `/api/v1/projects/{project_id}/backups/{backup_id}/restore` | role_gated | project | `admin` · `tenant_admin` · `platform_manager` · `project_owner` | — | — | 200 |
+| `POST` | `/api/v1/tenants/{tenant_id}/backups` | role_gated | tenant | `admin` · `tenant_admin` · `platform_manager` | — | arango · `backup_records` | 201 |
+| `GET` | `/api/v1/tenants/{tenant_id}/backups` | role_gated | tenant | `admin` · `tenant_admin` · `platform_manager` | — | — | 200 |
+| `GET` | `/api/v1/tenants/{tenant_id}/backups/{backup_id}/download` | role_gated | tenant | `admin` · `tenant_admin` · `platform_manager` | — | — | 200 |
+| `POST` | `/api/v1/tenants/{tenant_id}/backups/archives` | role_gated | tenant | `admin` · `tenant_admin` · `platform_manager` | — | arango · `backup_records` | 201 |
+| `POST` | `/api/v1/tenants/{tenant_id}/backups/{backup_id}/restore` | role_gated | tenant | `admin` · `tenant_admin` · `platform_manager` | — | — | 200 |
 
 ## 4. Maintenance contract
 

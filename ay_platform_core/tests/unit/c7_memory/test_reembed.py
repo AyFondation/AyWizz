@@ -58,6 +58,11 @@ class _FakeRepo:
     ) -> list[dict[str, Any]]:
         return self._entity_chunks
 
+    async def list_active_chunks_for_index(
+        self, tenant_id: str, project_id: str, index: str
+    ) -> list[dict[str, Any]]:
+        return []
+
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> None:
         self.upserted_chunks.extend(rows)
 

@@ -1,6 +1,6 @@
 /* =============================================================================
  * File: globals.css
- * Version: 1
+ * Version: 2
  * Path: ay_platform_ui/app/globals.css
  * Description: Platform-wide styles. Tailwind v4 CSS-first configuration —
  *              the @theme block declares design tokens; Tailwind generates
@@ -21,4 +21,9 @@ body {
   background: var(--color-surface);
   color: var(--color-fg);
   font-family: var(--font-sans);
+  /* The page itself SHALL never scroll horizontally — an overflowing view
+   * would otherwise push the fixed left sidebar out of sight. Wide content
+   * (tables, code, diagrams, editors) scrolls inside its OWN overflow-x-auto
+   * container instead. Pairs with `min-w-0` on the project content column. */
+  overflow-x: hidden;
 }

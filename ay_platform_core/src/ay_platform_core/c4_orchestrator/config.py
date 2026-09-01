@@ -1,6 +1,6 @@
 # =============================================================================
 # File: config.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/config.py
 # Description: Runtime settings for the C4 Orchestrator.
 #
@@ -122,6 +122,16 @@ class OrchestratorConfig(BaseSettings):
         description="Base URL of the bundled Gitea instance. Empty "
         "disables artifact pushes (artifacts stay in MinIO only).",
     )
+    # D-021 / R-400-232 — C7 base URL for the light live-docs RAG index sync.
+    # Empty disables the sync (documents are still saved; they just don't feed
+    # the RAG index until the sync is configured).
+    c7_base_url: str = Field(
+        default="http://c7:8000",
+        validation_alias="C4_C7_BASE_URL",
+        description="Base URL of C7 Memory for the live-docs RAG index sync. "
+        "Empty disables the sync.",
+    )
+    c7_timeout_s: float = Field(default=10.0, ge=1.0, validation_alias="C4_C7_TIMEOUT_S")
     gitea_admin_username: str = Field(
         default="aywizz",
         validation_alias="GITEA_ROOT_USERNAME",

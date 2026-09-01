@@ -153,6 +153,29 @@ describe("WorkingAreaPage root file/folder handlers", () => {
     await waitFor(() => expect(post).toHaveBeenCalled());
   });
 
+  it("bootstraps live-docs on a FRESH project (no runs, tree 404s)", async () => {
+    // Regression: a fresh project has zero artifact runs and the live-docs run
+    // doesn't exist yet → the tree 404s. The page must still default to the
+    // live-docs run, show the root toolbar + empty-state, and let the first
+    // create bootstrap the run (C4 ensure_live_docs_run).
+    const post = vi.fn(() => HttpResponse.json({ path: "notes.md", size_bytes: 0, version: 1 }));
+    server.use(
+      http.get(RUNS_URL, () => HttpResponse.json({ runs: [] })),
+      http.get(`${RUNS_URL}/:rid/tree`, () =>
+        HttpResponse.json({ detail: "run not found" }, { status: 404 }),
+      ),
+      http.post("/api/v1/projects/p1/documents", post),
+    );
+    vi.spyOn(window, "prompt").mockReturnValue("notes.md");
+    render(<WorkingAreaPage />);
+
+    expect(await screen.findByTestId("working-live-docs-toolbar")).toBeInTheDocument();
+    expect(await screen.findByTestId("working-live-docs-empty")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("working-new-file"));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+  });
+
   it("rejects a slash in a new file name (client validation, no request)", async () => {
     const post = vi.fn(() => HttpResponse.json({ path: "x", size_bytes: 0, version: 1 }));
     server.use(...liveDocsHandlers(), http.post("/api/v1/projects/p1/documents", post));

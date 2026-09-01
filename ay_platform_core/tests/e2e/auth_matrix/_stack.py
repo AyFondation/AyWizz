@@ -174,6 +174,7 @@ class PlatformStack:
     c7_app: FastAPI
     c9_app: FastAPI
     c8_admin_app: FastAPI
+    c16_app: FastAPI
     c2_service: AuthService
     c5_service: RequirementsService
     c7_service: MemoryService
@@ -196,6 +197,7 @@ class PlatformStack:
             "c7_memory": self.c7_app,
             "c9_mcp": self.c9_app,
             "c8_admin": self.c8_admin_app,
+            "c16_backup": self.c16_app,
         }[component]
 
     def db_for(self, component: str) -> Any:
@@ -378,6 +380,34 @@ def _build_c8_admin(
     return app
 
 
+def _build_c16(
+    client: ArangoClient,
+    db_name: str,
+    password: str,
+    minio_client: Minio,
+    bucket: str,
+) -> FastAPI:
+    """C16 backup app — project-scoped backups (R-900-011 role hierarchy)."""
+    from ay_platform_core.c16_backup.repository import (  # noqa: PLC0415
+        BackupRecordRepository,
+        BackupStorage,
+    )
+    from ay_platform_core.c16_backup.router import router as c16_router  # noqa: PLC0415
+    from ay_platform_core.c16_backup.service import BackupService  # noqa: PLC0415
+
+    db = client.db(db_name, username="root", password=password)
+    records = BackupRecordRepository(db)
+    records.ensure_collections()
+    storage = BackupStorage(minio_client, bucket)
+    storage.ensure_bucket()
+    app = FastAPI()
+    app.include_router(c16_router)
+    app.state.backup_service = BackupService(
+        db=db, minio=minio_client, storage=storage, records=records,
+    )
+    return app
+
+
 def _build_c9(
     c5_app: FastAPI,
     c6_app: FastAPI,
@@ -421,7 +451,8 @@ async def build_stack(
     sys_db = client.db("_system", username="root", password=arango_password)
 
     components = ["c2_auth", "c3_conversation", "c4_orchestrator",
-                  "c5_requirements", "c6_validation", "c7_memory", "c8_admin"]
+                  "c5_requirements", "c6_validation", "c7_memory", "c8_admin",
+                  "c16_backup"]
     db_names = {c: f"e2e_authmtx_{c}_{uuid.uuid4().hex[:6]}" for c in components}
     for db_name in db_names.values():
         sys_db.create_database(db_name)
@@ -436,6 +467,7 @@ async def build_stack(
         "c5_requirements": f"e2e-authmtx-c5-{uuid.uuid4().hex[:6]}",
         "c6_validation": f"e2e-authmtx-c6-{uuid.uuid4().hex[:6]}",
         "c7_memory": f"e2e-authmtx-c7-{uuid.uuid4().hex[:6]}",
+        "c16_backup": f"e2e-authmtx-c16-{uuid.uuid4().hex[:6]}",
     }
 
     cleanup: list[Any] = []
@@ -491,6 +523,10 @@ async def build_stack(
         c8_admin_app = _build_c8_admin(
             client, db_names["c8_admin"], arango_password
         )
+        c16_app = _build_c16(
+            client, db_names["c16_backup"], arango_password,
+            minio_client, bucket_names["c16_backup"],
+        )
 
         stack = PlatformStack(
             c2_app=c2_app,
@@ -501,6 +537,7 @@ async def build_stack(
             c7_app=c7_app,
             c9_app=c9_app,
             c8_admin_app=c8_admin_app,
+            c16_app=c16_app,
             c2_service=c2_service,
             c5_service=c5_service,
             c7_service=c7_service,

@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/validation/page.tsx
 // Description: Validation kick-off (Phase F). v1 scope : trigger a run
 //              (one of the installed plugins / domains) ; on 202 jump
@@ -84,7 +84,7 @@ export default function ValidationPage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
+    <main className="px-6 py-10">
       <header>
         <h2 className="text-2xl font-semibold tracking-tight">Validation</h2>
         <p className="mt-1 text-sm text-neutral-500">

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: embedding_service.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/embedding_service.py
 # Description: Business logic for the platform EMBEDDING registry (D-011,
 #              parallel to the chat provider + model services). Owns the SINGLE
@@ -139,11 +139,18 @@ class EmbeddingProviderService:
         dangling model would have no endpoint/key)."""
         models = await self._model_repo.list_for_provider(provider_id)
         if models:
+            # Use the human-readable provider NAME + model ALIASES, not opaque
+            # ids — the operator sees names in the UI, not internal keys.
+            entry = await self._get_entry(provider_id)
+            name = entry.name if entry is not None else provider_id
+            aliases = ", ".join(
+                str(m.get("alias", m.get("model_id", "?"))) for m in models
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"provider {provider_id} still has {len(models)} model(s); "
-                    "delete those first"
+                    f"Provider {name!r} still has {len(models)} model(s) "
+                    f"({aliases}); delete those first."
                 ),
             )
         return await self._repo.delete(provider_id)
@@ -294,11 +301,18 @@ class EmbeddingModelService:
             users = await self._project_repo.list_using_model(model_id)
             if users:
                 projects = [str(s.get("project_id")) for s in users]
+                # Human-readable model ALIAS instead of the opaque model id. The
+                # project ids stay: C8 has no project display names (they live
+                # in C2), and the id is what the operator selected against.
+                entry = await self._get_entry(model_id)
+                alias = entry.alias if entry is not None else model_id
+                project_list = ", ".join(projects)
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        f"embedding model {model_id} is selected by "
-                        f"{len(projects)} project(s): {projects}; reassign them first"
+                        f"Embedding model {alias!r} is selected by "
+                        f"{len(projects)} project(s) ({project_list}); "
+                        "reassign them to another model first."
                     ),
                 )
         return await self._repo.delete(model_id)

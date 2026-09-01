@@ -673,6 +673,9 @@ class ConversationService:
                     indexes=[
                         IndexKind.EXTERNAL_SOURCES,
                         IndexKind.CONVERSATIONS,
+                        # D-021 / R-400-232 — authored + AI-generated project
+                        # documents (live-docs light path) are retrievable too.
+                        IndexKind.LIVE_DOCS,
                     ],
                     top_k=self._rag_top_k,
                 ),

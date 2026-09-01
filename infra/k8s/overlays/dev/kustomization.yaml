@@ -47,6 +47,7 @@ resources:
   - ../../base/c7_memory
   - ../../base/c8_gateway
   - ../../base/c9_mcp
+  - ../../base/c16_backup      # logical per-tenant/project backup & restore (D-022)
   - ../../base/c13_extractor   # opt-in extractor (R-100-125); bucket seeded by minio-init
   - ../../base/c1_gateway
   - ../../base/_init
@@ -63,6 +64,17 @@ configMapGenerator:
     literals:
       - C2_DEMO_SEED_ENABLED=true
       - C2_UX_DEV_MODE_ENABLED=true
+      # Dev-only: pre-register a local Ollama embedding provider + all-minilm
+      # in the embedding registry on c8-admin startup, so a fresh dev cluster
+      # has a usable embedder out of the box (the ollama-seed Job pulls the
+      # model). D-011 keeps the registry EMPTY in base/prod. §4.6 semantic flag.
+      - C8_SEED_OLLAMA_EMBEDDING=true
+      # Dev has NO bundled Gitea → disable C4/C2 Gitea pushes (empty base_url,
+      # per config: "Empty disables artifact pushes; artifacts stay in MinIO
+      # only"). Without this, C4 defaults to http://gitea:3000 and every
+      # live-docs write / tree read 500s on a DNS ConnectError.
+      - C4_GITEA_BASE_URL=
+      - C2_GITEA_BASE_URL=
 
 secretGenerator:
   - name: aywizz-secrets

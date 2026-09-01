@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/main.py
 # Description: FastAPI app factory for the C8 admin tier (R-100-114). Hosts the
 #              platform LLM registry admin surface behind Traefik forward-auth.
@@ -48,6 +48,7 @@ from ay_platform_core.c8_llm.registry.embedding_repository import (
     EmbeddingProviderRepository,
 )
 from ay_platform_core.c8_llm.registry.embedding_router import router as embedding_router
+from ay_platform_core.c8_llm.registry.embedding_seed import seed_ollama_embedding
 from ay_platform_core.c8_llm.registry.embedding_service import (
     EmbeddingModelService,
     EmbeddingProviderService,
@@ -184,6 +185,15 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
             litellm_cfg = _load_litellm_config(cfg.litellm_config_path)
             if litellm_cfg is not None:
                 await seed_missing(repo, provider_repo, litellm_cfg)
+        # Dev-only: pre-register a local Ollama embedding provider + all-minilm
+        # so the dev registry is usable out of the box (D-011 keeps it empty in
+        # base/prod — this only runs when C8_SEED_OLLAMA_EMBEDDING is enabled).
+        if cfg.seed_ollama_embedding:
+            await seed_ollama_embedding(
+                embedding_provider_service,
+                embedding_model_service,
+                base_url=cfg.ollama_base_url,
+            )
         yield
         await reembed_notifier.aclose()
 

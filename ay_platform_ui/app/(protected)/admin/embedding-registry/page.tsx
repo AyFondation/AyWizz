@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/admin/embedding-registry/page.tsx
 // Description: Platform EMBEDDING model registry admin surface (platform_manager
 //              only), parallel to the LLM registry. A model references a
@@ -16,7 +16,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
-import { ApiClient, ApiError } from "@/lib/apiClient";
+import { ApiClient, ApiError, apiErrorDetail } from "@/lib/apiClient";
 import type {
   EmbeddingModelPublic,
   EmbeddingModelUpsert,
@@ -74,8 +74,11 @@ export default function EmbeddingRegistryPage() {
         setNotice(ok);
         reload();
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409)
-          setError("A model with that alias already exists.");
+        // Prefer the backend's actual reason (e.g. "embedding model … is
+        // selected by 1 project(s): [...]; reassign them first") over a
+        // hardcoded guess that mislabels a delete-guard 409 as an alias clash.
+        const detail = apiErrorDetail(err);
+        if (detail) setError(detail);
         else if (err instanceof ApiError && err.status === 422)
           setError("Unknown provider — pick an existing embedding provider.");
         else setError(err instanceof ApiError ? `Failed (${err.status})` : "Failed.");

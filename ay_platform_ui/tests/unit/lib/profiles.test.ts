@@ -74,6 +74,7 @@ describe("profile definitions", () => {
       "pipeline",
       "validation",
       "artifacts",
+      "backups",
       "settings",
     ]);
   });

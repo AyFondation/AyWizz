@@ -1,6 +1,6 @@
 # =============================================================================
 # File: artifacts_service.py
-# Version: 7
+# Version: 9
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/artifacts_service.py
 # Description: Facade for the project-artifacts surface. Bridges the
 #              Arango run metadata (R-200-132) and the MinIO blob
@@ -52,6 +52,8 @@
 # @relation implements:R-200-162
 # @relation implements:R-200-163
 # @relation implements:R-200-164
+# @relation implements:R-200-173
+# @relation implements:R-400-232
 # =============================================================================
 
 from __future__ import annotations
@@ -191,6 +193,7 @@ class ArtifactsService:
         repo: OrchestratorRepository,
         storage: ArtifactStorage,
         gitea: GiteaClient | None = None,
+        livedocs_indexer: Any | None = None,
     ) -> None:
         self._repo = repo
         self._storage = storage
@@ -199,6 +202,10 @@ class ArtifactsService:
         # (R-200-146). None disables the push (legacy stack without
         # Gitea ; artifacts stay in MinIO only).
         self._gitea = gitea
+        # Optional C7 live-docs indexer (D-021 / R-400-232). When set, a
+        # document write/delete/move keeps the C7 LIVE_DOCS RAG index in sync
+        # (best-effort). None disables the sync (index stays as-is).
+        self._livedocs = livedocs_indexer
 
     # ------------------------------------------------------------------
     # Read API
@@ -654,6 +661,14 @@ class ArtifactsService:
         version = await self._live_docs_version_for_path(
             project_id=project_id, tenant_id=tenant_id, path=path,
         )
+        # D-021 / R-400-232 — keep the C7 LIVE_DOCS RAG index in sync (light
+        # path, best-effort). Saves are deliberate (the UI debounces keystrokes
+        # → one save), so per-save indexing is the intended cadence.
+        if self._livedocs is not None:
+            await self._livedocs.index(
+                tenant_id=tenant_id, project_id=project_id,
+                path=path, content=content,
+            )
         return {"path": path, "size_bytes": len(data), "version": version}
 
     async def delete_document(
@@ -701,6 +716,11 @@ class ArtifactsService:
             run["file_count"] = len(remaining)
             run["total_bytes"] = sum(s for _, s in remaining)
             await self._repo.upsert_artifact_run(run)
+        # D-021 / R-400-232 — drop the doc from the C7 LIVE_DOCS index.
+        if self._livedocs is not None:
+            await self._livedocs.remove(
+                tenant_id=tenant_id, project_id=project_id, path=path,
+            )
 
     # ------------------------------------------------------------------
     # Live-docs operator-driven CRUD beyond the LLM tool-loop (§5.17)
@@ -800,6 +820,9 @@ class ArtifactsService:
             moves=moves,
             commit_message=f"docgen — rename {src} -> {dst}",
         )
+        await self._sync_moved_livedocs(
+            project_id=project_id, tenant_id=tenant_id, moves=moves,
+        )
         return {"from_path": src, "to_path": dst, "moved": len(moves)}
 
     async def move_document(
@@ -846,7 +869,42 @@ class ArtifactsService:
             moves=moves,
             commit_message=f"docgen — move {src} -> {target_dir or '/'}",
         )
+        await self._sync_moved_livedocs(
+            project_id=project_id, tenant_id=tenant_id, moves=moves,
+        )
         return {"from_path": src, "to_dir": target_dir, "moved": len(moves)}
+
+    async def _sync_moved_livedocs(
+        self,
+        *,
+        project_id: str,
+        tenant_id: str,
+        moves: list[tuple[str, str]],
+    ) -> None:
+        """D-021 / R-400-232 — after a rename/move, keep the C7 LIVE_DOCS index
+        in sync: drop each OLD path and re-index each NEW path with its (moved,
+        unchanged) content. Best-effort per file; a blob that isn't UTF-8 text
+        is only removed (not re-indexed) — binary live-docs aren't RAG text."""
+        if self._livedocs is None:
+            return
+        for old, new in moves:
+            await self._livedocs.remove(
+                tenant_id=tenant_id, project_id=project_id, path=old,
+            )
+            try:
+                blob = await self._storage.get_blob(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    run_id=self.LIVE_DOCS_RUN_ID,
+                    relative_path=new,
+                )
+                text = blob.data.decode("utf-8")
+            except (ValueError, UnicodeDecodeError, KeyError, LookupError):
+                continue  # missing/binary → old index entry already dropped
+            await self._livedocs.index(
+                tenant_id=tenant_id, project_id=project_id,
+                path=new, content=text,
+            )
 
     async def _build_move_plan(
         self,
@@ -1220,8 +1278,9 @@ class ArtifactsService:
         self, *, project_id: str, tenant_id: str, run_id: str, path: str,
     ) -> dict[str, Any]:
         """Return metadata for one source-files entry (R-200-173).
-        `last_commit_*` are best-effort from Gitea ; `kg_indexed` is
-        deferred (Q-200-018) and emitted as None in v1."""
+        `last_commit_*` are best-effort from Gitea ; `kg_indexed` is real
+        (R-400-232 / D-021 — a best-effort C7 KG-membership read that resolves
+        Q-200-018), None when the C7 sync is disabled/unreachable."""
         _validate_doc_path(path)
         clean = path.strip("/")
         await self._load_run_or_404(
@@ -1266,6 +1325,14 @@ class ArtifactsService:
                     out["modified_at"] = last.committed_at.isoformat()
             except GiteaError:
                 pass
+        # Best-effort KG membership (R-200-173 / R-400-232, resolves Q-200-018).
+        # `kg_indexed` reflects whether the path contributes to the project's
+        # structural KG in C7. None (indexer absent / unreachable / sync
+        # disabled) leaves the field null rather than failing the meta request.
+        if self._livedocs is not None:
+            out["kg_indexed"] = await self._livedocs.kg_indexed(
+                tenant_id=tenant_id, project_id=project_id, path=clean,
+            )
         return out
 
     async def _push_one_doc_to_gitea(

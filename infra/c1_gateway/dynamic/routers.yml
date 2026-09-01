@@ -1,8 +1,16 @@
 # =============================================================================
 # File: routers.yml
-# Version: 9
+# Version: 13
 # Path: infra/c1_gateway/dynamic/routers.yml
-# Description: Traefik HTTP router definitions. v9 adds `ui-admin-llm`
+# Description: Traefik HTTP router definitions. v11 adds `c8-admin-storage`
+#              (`/admin/v1/storage`, priority 100) — the storage metering +
+#              snapshot API that was missing (fell through to c2 → 404).
+#              v10 adds `ui-admin-embedding`
+#              (priority 60) so the UI governance PAGE paths `/admin/embedding-*`
+#              reach the Next.js UI instead of C2 — the exact same fix v9 made
+#              for `/admin/llm-*`, which had been forgotten for the (newer)
+#              embedding registry pages (they returned "Not authenticated").
+#              v9 adds `ui-admin-llm`
 #              (priority 60) so the UI governance PAGE paths `/admin/llm-*`
 #              reach the Next.js UI instead of C2 (they collided with the
 #              c2-admin `/admin` prefix). The API prefix `/admin/v1/llm`
@@ -183,6 +191,20 @@ http:
         - web
       priority: 60
 
+    # UI governance pages for the EMBEDDING registry live at
+    # `/admin/embedding-registry` + `/admin/embedding-providers` +
+    # `/admin/embedding-catalogue` (Next.js routes). Same collision as
+    # `/admin/llm-*` with the C2 `/admin` prefix — this priority-60 router
+    # sends the PAGE document to the UI. NO forward-auth (browser page nav).
+    # The embedding ADMIN API stays on `/admin/v1/llm/embedding-*` (priority
+    # 100, distinct string) so it is unaffected.
+    ui-admin-embedding:
+      rule: "PathPrefix(`/admin/embedding`)"
+      service: ui
+      entryPoints:
+        - web
+      priority: 60
+
     # -------------------------------------------------------------------------
     # C2 — Projects (lifecycle + membership grants)
     # -------------------------------------------------------------------------
@@ -223,6 +245,29 @@ http:
     c5-requirements:
       rule: "PathRegexp(`^/api/v1/projects/[^/]+/requirements(/.*)?$`)"
       service: c5
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    # C16 Backup/Restore — the `/backups` subpath, priority 100 (beats the
+    # generic /api/v1/projects → c2 at 50). Forward-auth so C2 resolves the
+    # caller's role ON {project_id} (R-900-011 / D-022).
+    c16-backup:
+      rule: "PathRegexp(`^/api/v1/projects/[^/]+/backups(/.*)?$`)"
+      service: c16-backup
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
+
+    c16-backup-tenant:
+      rule: "PathRegexp(`^/api/v1/tenants/[^/]+/backups(/.*)?$`)"
+      service: c16-backup
       entryPoints:
         - web
       middlewares:
@@ -310,6 +355,19 @@ http:
         - forward-auth-c2
         - secure-headers
       priority: 50
+
+    # C8 admin storage metering (E-100-002 v7): per-project/tenant disk usage +
+    # the snapshot trigger. Same c8-admin backend; priority 100 beats
+    # c2-admin (`/admin`). Without it, /admin/v1/storage/* → c2 → 404.
+    c8-admin-storage:
+      rule: "PathPrefix(`/admin/v1/storage`)"
+      service: c8-admin
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 100
 
     # -------------------------------------------------------------------------
     # C9 — MCP Server (public MCP surface for external LLM agents)

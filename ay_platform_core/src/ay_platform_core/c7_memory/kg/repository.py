@@ -1,6 +1,6 @@
 # =============================================================================
 # File: repository.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/kg/repository.py
 # Description: ArangoDB persistence for the knowledge graph extracted by
 #              `extractor.py` (Phase F.1 of v1 plan). Two collections:
@@ -25,9 +25,13 @@
 #              persisted records ; `supersede_relation` (append-only
 #              correction : close current versions, insert a new one) ;
 #              `relations_as_of` (valid_at / known_as_of filtering).
+#              v6 (D-021 / R-400-232): `purge_source` — remove a source's
+#              contribution to the structural KG so a live-doc re-index is
+#              idempotent (shared entities survive, orphaned ones deleted).
 #
 # @relation implements:R-400-200
 # @relation implements:R-400-209
+# @relation implements:R-400-232
 # =============================================================================
 
 from __future__ import annotations
@@ -541,6 +545,49 @@ class KGRepository:
     ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             self._list_relations_for_source_sync, tenant_id, project_id, source_id,
+        )
+
+    def _purge_source_sync(
+        self, *, tenant_id: str, project_id: str, source_id: str
+    ) -> tuple[int, int]:
+        """Remove a source's contribution to the structural KG so a re-index of
+        that source is idempotent (no stale entities/relations accumulate across
+        edits — a renamed function must not leave its old node behind). An entity
+        shared with other sources keeps their `source_ids` and survives; an
+        entity that becomes source-less is deleted. Relations carry a single
+        `source_id` and are removed outright (a shared edge self-heals on the
+        other source's next index). Returns (entities_removed, relations_removed).
+        """
+        ent_coll = self._db.collection(COLL_ENTITIES)
+        rel_coll = self._db.collection(COLL_RELATIONS)
+        removed_entities = 0
+        for ent in self._list_entities_for_source_sync(
+            tenant_id, project_id, source_id
+        ):
+            remaining = [s for s in ent.get("source_ids", []) if s != source_id]
+            if remaining:
+                ent_coll.update({"_key": ent["_key"], "source_ids": remaining})
+            else:
+                ent_coll.delete(ent["_key"])
+                removed_entities += 1
+        removed_relations = 0
+        for rel in self._list_relations_for_source_sync(
+            tenant_id, project_id, source_id
+        ):
+            rel_coll.delete(rel["_key"])
+            removed_relations += 1
+        return removed_entities, removed_relations
+
+    async def purge_source(
+        self, *, tenant_id: str, project_id: str, source_id: str
+    ) -> tuple[int, int]:
+        """Async wrapper for `_purge_source_sync` (D-021 / R-400-232 — idempotent
+        structural KG re-index for live documents)."""
+        return await asyncio.to_thread(
+            self._purge_source_sync,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            source_id=source_id,
         )
 
     # ------------------------------------------------------------------

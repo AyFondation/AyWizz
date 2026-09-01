@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/app/(protected)/admin/embedding-providers/page.tsx
 // Description: Embedding provider registry admin surface (platform_manager
 //              only), parallel to the LLM providers page. A provider is an
@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
-import { ApiClient, ApiError } from "@/lib/apiClient";
+import { ApiClient, ApiError, apiErrorDetail } from "@/lib/apiClient";
 import type {
   EmbeddingAdapter,
   EmbeddingProviderPublic,
@@ -64,9 +64,11 @@ export default function EmbeddingProvidersPage() {
         setNotice(ok);
         reload();
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409)
-          setError("A provider with that name already exists, or a model still references it.");
-        else setError(err instanceof ApiError ? `Failed (${err.status})` : "Failed.");
+        // Prefer the backend's actual reason (e.g. "provider … still has 1
+        // model(s); delete those first") over a hardcoded guess that mislabels
+        // a delete-guard 409 as a name clash.
+        const detail = apiErrorDetail(err);
+        setError(detail ?? (err instanceof ApiError ? `Failed (${err.status})` : "Failed."));
       }
     },
     [reload],

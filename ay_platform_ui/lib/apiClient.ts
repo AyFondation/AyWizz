@@ -55,6 +55,7 @@ import type {
   ArtifactCommitList,
   ArtifactRunList,
   ArtifactTree,
+  BackupRecord,
   ChunkContent,
   ConsumptionReport,
   Conversation,
@@ -106,6 +107,7 @@ import type {
   RequirementDocumentDetail,
   RequirementDocumentList,
   RequirementEntityList,
+  RestoreReport,
   RunArtifactListing,
   Source,
   SourceDiagnostics,
@@ -141,6 +143,30 @@ export class ApiError extends Error {
     super(`API ${status} ${url}: ${body || "(empty body)"}`);
     this.name = "ApiError";
   }
+}
+
+/**
+ * Extract the human-readable `detail` a FastAPI backend returns
+ * (`{"detail": "..."}`) from an ApiError's raw body, so the UI can show the
+ * server's actual reason instead of a hardcoded guess. Returns null when the
+ * value isn't an ApiError, the body isn't JSON, or there is no string `detail`.
+ */
+export function apiErrorDetail(err: unknown): string | null {
+  if (!(err instanceof ApiError) || !err.body) return null;
+  try {
+    const parsed: unknown = JSON.parse(err.body);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "detail" in parsed &&
+      typeof (parsed as { detail: unknown }).detail === "string"
+    ) {
+      return (parsed as { detail: string }).detail;
+    }
+  } catch {
+    // Body was not JSON — fall through to null.
+  }
+  return null;
 }
 
 /** Token storage key — same shape as auth-matrix tests use, but in
@@ -976,6 +1002,53 @@ export class ApiClient {
   /** GET /api/v1/quota/me — the caller's OWN tenant quota status (any user). */
   async getMyQuota(): Promise<QuotaStatus> {
     return this.request<QuotaStatus>("/api/v1/quota/me", { method: "GET" });
+  }
+
+  // ---- C16 Backup/Restore (D-022) — project scope ------------------------
+
+  /** GET /api/v1/projects/{pid}/backups — the project's stored backups. */
+  async listProjectBackups(projectId: string): Promise<BackupRecord[]> {
+    return this.request<BackupRecord[]>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups`,
+      { method: "GET" },
+    );
+  }
+
+  /** POST /api/v1/projects/{pid}/backups — snapshot the project now. */
+  async createProjectSnapshot(projectId: string): Promise<BackupRecord> {
+    return this.request<BackupRecord>(`/api/v1/projects/${encodeURIComponent(projectId)}/backups`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /api/v1/projects/{pid}/backups/{id}/restore — restore-as-new. */
+  async restoreProjectBackup(
+    projectId: string,
+    backupId: string,
+    body: { dry_run: boolean; new_project_id?: string | null },
+  ): Promise<RestoreReport> {
+    return this.request<RestoreReport>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}/restore`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
+
+  /** GET .../backups/{id}/download — the archive bytes (auth-bearing fetch,
+   *  so a plain <a href> can't be used). Returns a Blob the caller saves. */
+  async downloadProjectBackup(projectId: string, backupId: string): Promise<Blob> {
+    const url = this.url(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/backups/${encodeURIComponent(backupId)}/download`,
+    );
+    const headers = new Headers();
+    const token = readStoredToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const resp = await fetch(url, { method: "GET", headers, cache: "no-store" });
+    if (!resp.ok) {
+      const b = await resp.text().catch(() => "");
+      if (resp.status === 401 && token) _notifySessionRevoked();
+      throw new ApiError(resp.status, url, b);
+    }
+    return resp.blob();
   }
 
   /** GET /sources/{sid}/runs/{run_id}/artifacts — browse one run's tree. */

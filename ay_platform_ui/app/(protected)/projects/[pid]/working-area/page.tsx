@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 10
+// Version: 12
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/working-area/page.tsx
 //
 // v10 (2026-05-28) : R-500-010 v2 — file-manager parity with the
@@ -276,7 +276,13 @@ export default function WorkingAreaPage() {
           if (prev && resp.runs.some((r) => r.run_id === prev)) return prev;
           const live = resp.runs.find((r) => r.run_id === "live-docs");
           if (live) return live.run_id;
-          return resp.runs.length > 0 ? resp.runs[0].run_id : null;
+          if (resp.runs.length > 0) return resp.runs[0].run_id;
+          // Fresh project — NO runs yet. Default to the canonical `live-docs`
+          // run (which doesn't exist server-side until the first write) so the
+          // root `+ New file` / `+ New folder` affordances show and the first
+          // create bootstraps the run in C4. Without this the tree is empty
+          // AND uncreatable.
+          return "live-docs";
         });
       })
       .catch((err) => {
@@ -322,6 +328,13 @@ export default function WorkingAreaPage() {
       })
       .catch((err) => {
         if (cancelled) return;
+        // A not-yet-created `live-docs` run 404s — that's an EMPTY tree, not an
+        // error: render zero nodes so the root create affordances show and the
+        // first `+ New file`/`New folder` bootstraps the run.
+        if (selectedRunId === "live-docs" && err instanceof ApiError && err.status === 404) {
+          setTreeLoad({ status: "ready", nodes: [] });
+          return;
+        }
         setTreeLoad({
           status: "error",
           error: err instanceof ApiError ? `Failed to load tree (${err.status})` : String(err),
@@ -773,33 +786,16 @@ export default function WorkingAreaPage() {
           data-testid="working-viewer-pane"
         >
           {selectedPath ? (
-            <div className="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <p className="truncate font-mono text-sm text-neutral-900">{selectedPath}</p>
-                {viewingRef && (
-                  <span
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                    data-testid="working-viewing-revision"
-                  >
-                    revision {viewingRef.slice(0, 8)}
-                    <button
-                      type="button"
-                      onClick={() => setViewingRef(null)}
-                      className="underline hover:no-underline"
-                      data-testid="working-back-to-latest"
-                    >
-                      back to latest
-                    </button>
-                  </span>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {/* R-500-010 v2 — inline Edit/Save for live-docs latest
-                    revision. Hidden when viewing a past commit (history
-                    viewer) — editing those would silently fork the
-                    history ; the operator must "back to latest" first. */}
-                {selectedRunId === "live-docs" && !viewingRef && blobLoad.status === "ready" ? (
-                  editing ? (
+            <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-2">
+              {/* R-500-010 v2 — inline Edit/Save for live-docs latest revision.
+                  Placed on the LEFT, ahead of the path, so the cursor travels
+                  the shortest distance from the file tree (left pane) to the
+                  edit controls once a file is selected. Hidden when viewing a
+                  past commit (history viewer) — editing those would silently
+                  fork the history ; the operator must "back to latest" first. */}
+              {selectedRunId === "live-docs" && !viewingRef && blobLoad.status === "ready" ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  {editing ? (
                     <>
                       <button
                         type="button"
@@ -829,17 +825,36 @@ export default function WorkingAreaPage() {
                         setDraft(blobLoad.text ?? "");
                         setEditing(true);
                       }}
-                      className="rounded bg-neutral-200 px-2 py-1 text-xs text-neutral-800 dark:bg-neutral-700 dark:text-neutral-100"
+                      className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
                       data-testid="working-edit"
                     >
                       Edit
                     </button>
-                  )
-                ) : null}
-                {blobLoad.status === "ready" || blobLoad.status === "binary" ? (
-                  <span className="text-xs text-neutral-500">{blobLoad.contentType}</span>
-                ) : null}
+                  )}
+                </div>
+              ) : null}
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <p className="truncate font-mono text-sm text-neutral-900">{selectedPath}</p>
+                {viewingRef && (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                    data-testid="working-viewing-revision"
+                  >
+                    revision {viewingRef.slice(0, 8)}
+                    <button
+                      type="button"
+                      onClick={() => setViewingRef(null)}
+                      className="underline hover:no-underline"
+                      data-testid="working-back-to-latest"
+                    >
+                      back to latest
+                    </button>
+                  </span>
+                )}
               </div>
+              {blobLoad.status === "ready" || blobLoad.status === "binary" ? (
+                <span className="shrink-0 text-xs text-neutral-500">{blobLoad.contentType}</span>
+              ) : null}
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto">

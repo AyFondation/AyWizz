@@ -175,4 +175,31 @@ describe("EmbeddingProvidersPage", () => {
     await user.click(screen.getByTestId("embedding-provider-delete-p1"));
     await waitFor(() => expect(del).toHaveBeenCalled());
   });
+
+  it("surfaces the backend's real reason on a guarded delete (409)", async () => {
+    // Regression: a delete blocked because a model still references the provider
+    // MUST show the actionable backend detail, not the old ambiguous
+    // "name already exists, or a model still references it".
+    seedToken(["platform_manager"]);
+    const del = vi.fn(() =>
+      HttpResponse.json(
+        { detail: "provider p1 still has 1 model(s); delete those first" },
+        { status: 409 },
+      ),
+    );
+    server.use(
+      http.get(PROV, () => HttpResponse.json({ providers: [provider()] })),
+      http.delete(`${PROV}/p1`, del),
+    );
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("embedding-providers-table")).toBeInTheDocument(),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("embedding-provider-delete-p1"));
+    const alert = await screen.findByTestId("embedding-providers-error");
+    expect(alert).toHaveTextContent(/still has 1 model\(s\)/i);
+    expect(alert).toHaveTextContent(/delete those first/i);
+    expect(alert).not.toHaveTextContent(/name already exists, or a model still references/i);
+  });
 });

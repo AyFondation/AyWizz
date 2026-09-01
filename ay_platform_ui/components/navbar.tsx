@@ -1,6 +1,6 @@
 // =============================================================================
 // File: navbar.tsx
-// Version: 8
+// Version: 9
 // Path: ay_platform_ui/components/navbar.tsx
 // Description: Top header rendered on every protected page. Brand
 //              (left) is read from the runtime config ; user menu
@@ -147,7 +147,7 @@ export function Navbar() {
                     className={navLinkClass(pathname?.startsWith("/admin/llm-providers"))}
                     data-testid="navbar-link-llm-providers"
                   >
-                    Providers
+                    LLM providers
                   </Link>
                 </li>
               )}

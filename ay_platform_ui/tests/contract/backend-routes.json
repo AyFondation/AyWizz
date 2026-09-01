@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 170,
+  "route_count": 183,
   "routes": [
     {
       "method": "GET",
@@ -459,6 +459,24 @@
       "auth": "authenticated"
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/memory/projects/{project_id}/live-docs/index",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/memory/projects/{project_id}/live-docs/index/{path:path}",
+      "component": "c7_memory",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/memory/projects/{project_id}/live-docs/kg-indexed",
+      "component": "c7_memory",
+      "auth": "authenticated"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/quota",
       "component": "c7_memory",
@@ -676,6 +694,36 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/projects/{project_id}/backups",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/backups",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/backups/archives",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/{project_id}/backups/{backup_id}/download",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/backups/{backup_id}/restore",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/projects/{project_id}/documents",
       "component": "c4_orchestrator",
       "auth": "authenticated"
@@ -889,6 +937,36 @@
       "path": "/api/v1/quota/me",
       "component": "c8_admin",
       "auth": "authenticated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tenants/{tenant_id}/backups",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tenants/{tenant_id}/backups",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tenants/{tenant_id}/backups/archives",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tenants/{tenant_id}/backups/{backup_id}/download",
+      "component": "c16_backup",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tenants/{tenant_id}/backups/{backup_id}/restore",
+      "component": "c16_backup",
+      "auth": "role_gated"
     },
     {
       "method": "GET",

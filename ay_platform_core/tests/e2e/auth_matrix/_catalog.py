@@ -1020,6 +1020,51 @@ _C7_MEMORY: list[EndpointSpec] = [
     ),
     EndpointSpec(
         component="c7_memory",
+        method="PUT",
+        path="/api/v1/memory/projects/{project_id}/live-docs/index",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        accept_roles=("project_editor", "project_owner"),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="memory_chunks",
+        notes=(
+            "D-021 / R-400-232 — LIGHT live-docs index. Chunk + per-project "
+            "embed of an authored/AI-generated doc into the LIVE_DOCS index, "
+            "type-dispatched (R-400-231). NOT the C13 heavy path."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="DELETE",
+        path="/api/v1/memory/projects/{project_id}/live-docs/index/{path:path}",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=204,
+        accept_roles=("project_editor", "project_owner"),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
+        backend=Backend.ARANGO,
+        backend_collection="memory_chunks",
+        notes="D-021 / R-400-232 — remove a live-doc's chunks (on delete/move).",
+    ),
+    EndpointSpec(
+        component="c7_memory",
+        method="GET",
+        path="/api/v1/memory/projects/{project_id}/live-docs/kg-indexed",
+        auth=Auth.AUTHENTICATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        notes=(
+            "R-200-173 / R-400-232 — read whether a live-doc path contributes "
+            "to the project KG (makes C4's kg_indexed meta real; resolves "
+            "Q-200-018). Authenticated read, `path` query param."
+        ),
+    ),
+    EndpointSpec(
+        component="c7_memory",
         method="POST",
         path="/api/v1/memory/entities/embed",
         auth=Auth.ROLE_GATED,
@@ -2059,6 +2104,131 @@ _C8_ADMIN: list[EndpointSpec] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# C16 Backup/Restore (D-022 / 900-SPEC). Project-scoped ; R-900-011 hierarchy:
+# project_owner (own project) + tenant_admin/admin + platform_manager (all).
+# platform_manager is ACCEPTED here (backups are governance, not content), so
+# it is NOT in excluded_global_roles.
+# ---------------------------------------------------------------------------
+_C16_BACKUP: list[EndpointSpec] = [
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/projects/{project_id}/backups",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=201,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        backend=Backend.ARANGO,
+        backend_collection="backup_records",
+        notes="R-900-002 — snapshot a project into a stored archive.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="GET",
+        path="/api/v1/projects/{project_id}/backups",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-005 — list a project's backups.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="GET",
+        path="/api/v1/projects/{project_id}/backups/{backup_id}/download",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-006 — download a stored archive (tar.gz).",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/projects/{project_id}/backups/archives",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=201,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        backend=Backend.ARANGO,
+        backend_collection="backup_records",
+        notes="R-900-007 — upload + register an archive for later restore.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/projects/{project_id}/backups/{backup_id}/restore",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.PROJECT,
+        success_status=200,
+        accept_roles=("project_owner",),
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-008 — restore a backup as a NEW project (restore-as-new).",
+    ),
+    # Tenant-scope surface: tenant_admin/admin (own tenant) + platform_manager;
+    # project_owner is NOT sufficient (no project role accepted).
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/tenants/{tenant_id}/backups",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=201,
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        backend=Backend.ARANGO,
+        backend_collection="backup_records",
+        notes="R-900-002 — snapshot a WHOLE tenant.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="GET",
+        path="/api/v1/tenants/{tenant_id}/backups",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=200,
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-005 — list a tenant's backups.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="GET",
+        path="/api/v1/tenants/{tenant_id}/backups/{backup_id}/download",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=200,
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-006 — download a tenant archive.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/tenants/{tenant_id}/backups/archives",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=201,
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        backend=Backend.ARANGO,
+        backend_collection="backup_records",
+        notes="R-900-007 — upload + register an archive under a tenant.",
+    ),
+    EndpointSpec(
+        component="c16_backup",
+        method="POST",
+        path="/api/v1/tenants/{tenant_id}/backups/{backup_id}/restore",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.TENANT,
+        success_status=200,
+        accept_global_roles=("admin", "tenant_admin", "platform_manager"),
+        notes="R-900-008 — restore a tenant archive as a NEW tenant.",
+    ),
+]
+
+
 ENDPOINTS: list[EndpointSpec] = [
     *_C2_AUTH,
     *_C3_CONVERSATION,
@@ -2068,6 +2238,7 @@ ENDPOINTS: list[EndpointSpec] = [
     *_C7_MEMORY,
     *_C8_ADMIN,
     *_C9_MCP,
+    *_C16_BACKUP,
 ]
 
 
