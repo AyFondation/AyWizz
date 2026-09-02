@@ -1,11 +1,34 @@
 # =============================================================================
 # Dockerfile for Ubuntu Dev Environment
-# Version: 1.11.0
+# Version: 1.12.1
 # Path: .devcontainer/Dockerfile
 # Description: Development container with Python 3.13, Node.js 25, kubectl,
-#              Claude Code CLI. Python 3.13 installed via deadsnakes PPA.
+#              Docker CLI (docker-outside-of-docker), Claude Code CLI.
+#              Python 3.13 installed via deadsnakes PPA.
 #
 # Versions:
+#   1.12.1: comments only — no layer changes. 1.12.0 (and devcontainer.json
+#           v9) asserted that a "docker-group-GID alignment in
+#           postCreateCommand" granted `developer` access to the socket. It
+#           did not: on Docker Desktop for macOS the bind-mounted socket is
+#           root:root, and GID 0 cannot be moved onto the `docker` group.
+#           devcontainer.json v10 replaces that with a `chgrp docker` on the
+#           socket at postStartCommand. The `usermod -aG docker developer`
+#           below is what makes that work and is now the ONLY membership
+#           step — do not remove it.
+#   1.12.0: install the Docker CLI + Compose/Buildx plugins directly from
+#           Docker's official apt repo, replacing the
+#           `docker-outside-of-docker` devcontainer feature (removed from
+#           devcontainer.json v9). The feature's install script failed on an
+#           unauthenticated `git ls-remote https://github.com` version-
+#           resolution step (rate-limited/proxied in this environment) —
+#           an inconsistency no feature option could bypass. DooD capability
+#           is UNCHANGED: the CLI targets the HOST daemon via the socket
+#           bind-mounted in devcontainer.json v9 (DOCKER_HOST=
+#           unix:///var/run/docker.sock), with socket access granted by the
+#           chgrp in postStartCommand (see 1.12.1 above — the original claim
+#           about a postCreateCommand GID alignment was wrong).
+#           Pure apt, no dynamic git resolution → deterministic build.
 #   1.11.0: editable-install the `ay_extractor` (C13) sub-project with its
 #           full dependency set (`[all,dev,integration]`) at build time,
 #           mirroring the ay_platform_core install. This makes the C13
@@ -89,6 +112,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install kubectl (latest stable)
 RUN curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
  && chmod +x kubectl && mv kubectl /usr/local/bin/
+
+# Docker CLI + Compose/Buildx plugins from Docker's official apt repo.
+# docker-outside-of-docker (DooD): only the CLIENT is installed here — no
+# daemon. Commands hit the HOST docker daemon through the socket bind-mounted
+# by devcontainer.json (DOCKER_HOST=unix:///var/run/docker.sock). That socket
+# arrives root:root, so devcontainer.json v10 chgrp's it to the `docker` group
+# at postStartCommand; the `usermod -aG docker developer` below is the other
+# half of that grant.
+# arch/codename hardcoded (amd64/jammy) to match the pinned ubuntu:22.04 base
+# and the rest of this file (kubectl linux/amd64, deadsnakes jammy PPA).
+# `docker-ce` (daemon) is deliberately NOT installed — we reuse the host's.
+RUN install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+ && chmod a+r /etc/apt/keyrings/docker.asc \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable" \
+    > /etc/apt/sources.list.d/docker.list \
+ && apt-get update && apt-get install -y --no-install-recommends \
+    docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 25 - required for Claude Code CLI AND to match the rest
 # of the stack (CI `node-version: "25"`, `ay_platform_ui` engines `>=25`,
@@ -174,7 +216,10 @@ RUN cd /opt/ui-deps/ay_platform_ui \
  && npx --yes playwright install --with-deps chromium \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Docker group (GID will be re-aligned at container start by postCreateCommand)
+# Docker group. Its GID is arbitrary and deliberately NOT aligned with the
+# host socket's — devcontainer.json v10 chgrp's the SOCKET onto this group at
+# postStartCommand instead, which works whatever GID the socket arrives with
+# (root:root on Docker Desktop for macOS, where alignment was impossible).
 RUN getent group docker || groupadd -g 999 docker
 
 # Non-root developer user

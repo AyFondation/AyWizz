@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_kind_smoke.sh
-# Version: 2
+# Version: 3
 # Path: infra/scripts/k8s_kind_smoke.sh
 # Description: L2 + L3 — apply the system-test overlay to an ephemeral
 #              kind cluster and verify endpoints respond.
@@ -12,7 +12,7 @@
 #              applying, mirroring `run_k8s_system_tests.sh` (L4). The dev
 #              overlay is operator-facing — it pulls private GHCR `:latest`
 #              images (not present in a fresh kind node) and sources its
-#              ConfigMap/Secret from gitignored Tier-2 `.env`/`.env.secret`
+#              ConfigMap/Secret from gitignored Tier-2 `.env.config`/`.env.secret`
 #              files (absent in CI). The system-test overlay uses locally
 #              built images and self-contained literal config, so it is the
 #              only CI-runnable target.

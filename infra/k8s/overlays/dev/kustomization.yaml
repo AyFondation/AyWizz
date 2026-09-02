@@ -1,9 +1,9 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 3
+# Version: 6
 # Path: infra/k8s/overlays/dev/kustomization.yaml
 # Description: Dev overlay. Wires the base manifests with the dev
-#              ConfigMap (.env) and Secret (.env.secret) sources.
+#              ConfigMap (.env.config) and Secret (.env.secret) sources.
 #              `kustomize build infra/k8s/overlays/dev` produces a
 #              ready-to-apply manifest stream.
 #
@@ -20,7 +20,7 @@
 #              configMapGenerator + secretGenerator hash the source
 #              file contents into the ConfigMap / Secret name (e.g.
 #              `aywizz-config-7c4f...`); Deployments are auto-patched
-#              to reference the hashed name, so a change to .env
+#              to reference the hashed name, so a change to .env.config
 #              triggers a fresh rollout. Set `disableNameSuffixHash:
 #              true` if you prefer stable names + manual rollouts.
 # =============================================================================
@@ -34,6 +34,7 @@ namespace: aywizz
 # overlays/system-test pattern. c4_workers + _mock_llm are intentionally absent.
 resources:
   - ../../base/_namespace
+  - ../../base/networkpolicies
   - ../../base/c11_arangodb
   - ../../base/c10_minio
   - ../../base/ollama
@@ -51,16 +52,19 @@ resources:
   - ../../base/c13_extractor   # opt-in extractor (R-100-125); bucket seeded by minio-init
   - ../../base/c1_gateway
   - ../../base/_init
+  # THE EDGE — the single object wiring the external URL to C1.
+  - ingress.yaml
 
 configMapGenerator:
   - name: aywizz-config
     behavior: create
     envs:
-      - .env
+      - .env.config
     # Dev-parity with `e2e_stack.sh dev` : seed the demo tenant + 4 users on
     # C2 startup AND surface their credentials on the login page. Dev-only
-    # conveniences (NOT for prod) — added as literals since overlays/dev/.env
-    # is Tier-2 (operator-owned). §4.6 semantic flags, scoped to this overlay.
+    # conveniences (NOT for prod) — added as literals since
+    # overlays/dev/.env.config is Tier-2 (operator-owned). §4.6 semantic
+    # flags, scoped to this overlay.
     literals:
       - C2_DEMO_SEED_ENABLED=true
       - C2_UX_DEV_MODE_ENABLED=true
@@ -84,7 +88,7 @@ secretGenerator:
     type: Opaque
 
 # Stable names so the Deployments' `envFrom` references survive across
-# overlay rebuilds. Tradeoff: changes to .env / .env.secret do NOT
+# overlay rebuilds. Tradeoff: changes to .env.config / .env.secret do NOT
 # auto-trigger a rollout — you must `kubectl rollout restart` the
 # affected Deployments. Worth it for dev predictability.
 generatorOptions:
@@ -98,34 +102,18 @@ images:
   - name: ghcr.io/ayfondation/aywizz-ui
     newTag: latest
 
-# DEV-LOCAL access : expose ONLY the ingress (Traefik) via a LoadBalancer so
-# docker-desktop binds it on the host at `localhost:56000` (mirrors the compose
-# URL) — no `kubectl port-forward` host/container gap. Every other service
-# stays ClusterIP : access is still "only via the ingress" (Traefik routes
-# everything; nothing else is reachable from the host). The dashboard Service
-# (c1-gateway-dashboard) is untouched → stays ClusterIP. Prod overlays choose
-# their own edge (cloud LoadBalancer / IngressClass).
-patches:
-  - target:
-      version: v1
-      kind: Service
-      name: c1-gateway
-    patch: |
-      - op: replace
-        path: /spec/type
-        value: LoadBalancer
-      - op: replace
-        path: /spec/ports/0/port
-        value: 56000
-  # C13 defaults to a 1-CPU request; on a small local node (≈4 CPU) that
-  # would leave it Pending alongside the rest of the stack. Lower only the
-  # scheduling REQUEST — the 4-CPU limit is untouched, so heavy extraction
-  # passes still burst. Dev-local tuning per R-100-125 §9.
-  - target:
-      version: v1
-      kind: Deployment
-      name: c13-extractor
-    patch: |
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/cpu
-        value: 250m
+# NO Service-type patch on c1-gateway any more (v5). The edge is now the
+# standard `Ingress` object in `ingress.yaml`, handled by whatever ingress
+# controller the cluster runs — so `c1-gateway` stays ClusterIP in EVERY
+# environment and no manifest carries a cloud-specific Service type or
+# annotation. That is what makes dev and prod structurally identical and the
+# whole tree portable.
+#
+# Dev access changed accordingly: `http://aywizz.localhost` (through the
+# ingress-nginx controller on :80) instead of the former `localhost:56000`
+# LoadBalancer shortcut. Install the controller once per cluster with
+# `infra/k8s/run.sh dev --ingress`.
+# NO resource patch either (v6). The c13-extractor CPU-request override that
+# used to live here is gone: `base/` now carries request values sized for a
+# small node (see the sizing policy in base/kustomization.yaml), so the dev
+# overlay has nothing left to correct.

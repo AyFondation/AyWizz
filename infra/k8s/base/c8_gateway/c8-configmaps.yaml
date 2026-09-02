@@ -15,7 +15,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: c8-litellm-config
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c8-litellm-config
     app.kubernetes.io/component: c8
@@ -24,8 +23,41 @@ data:
   config.yaml: |-
     # =============================================================================
     # File: litellm-config.yaml
-    # Version: 4
+    # Version: 6
     # Path: infra/c8_gateway/config/litellm-config.yaml
+    #
+    #              v6 (provider-independence, D-011): removed ALL Anthropic-specific
+    #              model entries + every `os.environ/ANTHROPIC_API_KEY`. `model_list`
+    #              is now the `"*"` catch-all plus three PROVIDER-NEUTRAL routing
+    #              tiers (`flagship` / `balanced` / `fast`, each `model: "*"` +
+    #              clientside auth, full feature set). `agent_routes` reference the
+    #              neutral tiers. The registry (operator-managed, HMI) resolves each
+    #              tier → provider model + api_base + decrypted key per call, so NO
+    #              provider is hardcoded. Bootstrap is Option B: the registry starts
+    #              EMPTY (seed skips `model == "*"` pass-throughs), so LLM calls fail
+    #              cleanly until an operator registers a provider and maps the tiers.
+    #              Proven by tests/integration/c8_llm/test_litellm_clientside_auth.
+    #
+    #              v5 (2026-06-07): LLM-governance Lot 1 — `api_base` added to each
+    #              model's `configurable_clientside_auth_params` (per-request URL
+    #              override for self-hosted / custom endpoints) bounded by an
+    #              allowlist REGEX (anti-SSRF: https-any or internal http only). The
+    #              registry stores api_base per-model ; the C8 client injects it.
+    #
+    #              v4 (2026-06-04): LLM-governance #3 — each model gains
+    #              `configurable_clientside_auth_params: ["api_key"]` so a caller
+    #              MAY override the upstream api_key per request with a
+    #              registry-managed key (decrypted client-side). ONLY api_key is
+    #              configurable (NOT api_base) → upstream stays pinned, no SSRF
+    #              seam. The `os.environ/ANTHROPIC_API_KEY` above stays the
+    #              FALLBACK for callers that do not inject.
+    #
+    #              v3 (2026-06-03): cost optimisation. Routes the C13 ingestion
+    #              enrichment agents (summarizer / decontextualizer / densifier /
+    #              image_analyzer) to Haiku (descriptive leaf work, ~4x cheaper
+    #              than Sonnet). Marks Haiku `vision` + `prompt_caching` capable
+    #              (both supported by Claude Haiku 4.5) so image captioning and the
+    #              shared cache_control primitive can target it.
     # Description: Canonical (prod-shaped) LiteLLM configuration. The shape
     #              mirrors Appendix 8.1 of 800-SPEC-LLM-ABSTRACTION and validates
     #              against ay_platform_core.c8_llm.config.LiteLLMConfig.
@@ -40,33 +72,46 @@ data:
     #              `litellm_settings.callbacks` wire the cost forwarder
     #              (R-800-070) — a mounted CustomLogger that POSTs each call to
     #              the AyWizz cost receiver. Keys read from env (os.environ/...).
-    #              v3 (provider-independence, D-011) : added a `model_name: "*"`
-    #              passthrough with `configurable_clientside_auth_params`
-    #              ["api_base","api_key"] so the C8 client injects the provider
-    #              endpoint + decrypted key PER CALL from the in-app registry —
-    #              no provider hardcoded. Proven by the litellm testcontainers
-    #              integration test (tests/integration/c8_llm/test_litellm_
-    #              clientside_auth.py).
-    #              v4 (provider-independence, D-011) : REMOVED all Anthropic model
-    #              entries + every `os.environ/ANTHROPIC_API_KEY`. model_list is
-    #              now the neutral tiers flagship/balanced/fast (+ the bare "*"
-    #              catch-all); agent_routes reference the tiers. Registry (HMI)
-    #              resolves each tier per call. Option B bootstrap: registry
-    #              EMPTY until configured (seed skips `model == "*"`). Mirrors the
-    #              canonical infra/c8_gateway/config/litellm-config.yaml v6.
+    #              v3 (2026-05-23) : adds the `c6-judge` route for the opt-in T3
+    #              LLM-as-judge (R-700-032). NOTE — strict D-011 (judge on a
+    #              DIFFERENT model family than the generator) is NOT satisfied
+    #              yet : all routes are Anthropic Claude tiers (same family). The
+    #              `c6-judge` entry below is a different-TIER placeholder ; before
+    #              enabling `C6_JUDGE_ENABLED`, point it at a non-Anthropic family.
     # =============================================================================
 
     model_list:
-      # Provider-INDEPENDENT routing tiers (D-011) — mirror of the canonical
-      # infra/c8_gateway/config/litellm-config.yaml. NO provider/model, NO env
-      # key: the C8 client injects the registry-resolved `<wire>/<upstream>` +
-      # api_base + decrypted api_key PER CALL; these entries name the quality
-      # tier an agent routes to and honour those clientside overrides (api_base
-      # bounded by the anti-SSRF allowlist). Real capability + cost are governed
-      # by the registry model the operator maps to each tier (Option B: the
-      # registry is EMPTY until configured via the HMI). `features` is the full
-      # set — passthrough placeholder; the routed provider's real features are
-      # enforced at registration. The registry SEED skips `model == "*"`.
+      # Wildcard pass-through (provider normalisation, LLM-governance): the platform
+      # now sends `<wire_format>/<upstream_model>` (e.g. anthropic/claude-haiku-4-5)
+      # resolved from the registry, and injects the provider's `api_base` + `api_key`
+      # per call. LiteLLM routes by the provider prefix; the named entries below stay
+      # as a fallback for any direct caller. api_base bounded by the anti-SSRF
+      # allowlist (any https, or internal http for self-hosted).
+      - model_name: "*"
+        litellm_params:
+          model: "*"
+          configurable_clientside_auth_params:
+            - "api_key"
+            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
+        model_info:
+          # Placeholder metadata so the AyWizz LiteLLMConfig validator accepts the
+          # wildcard. The registry SEED skips `model_name == "*"` (it is a routing
+          # pass-through, not a seedable model).
+          display_name: "Wildcard pass-through"
+          features: []
+          context_window: 200000
+          cost_per_million_input: 0.0
+          cost_per_million_output: 0.0
+      # Provider-INDEPENDENT routing tiers (D-011). These name the QUALITY tier an
+      # agent routes to; they carry NO provider/model and NO env key. The C8 client
+      # injects the registry-resolved `<wire>/<upstream>` + api_base + decrypted
+      # api_key per call, and these entries honour those clientside overrides
+      # (api_base bounded by the anti-SSRF allowlist). Real capability + cost are
+      # governed by the registry model the operator maps to each tier via the HMI
+      # (Option B: the registry is EMPTY until configured, so LLM calls fail cleanly
+      # until an operator registers a provider + model and assigns these aliases).
+      # `features` is the full set — a passthrough placeholder; the routed
+      # provider's real features are enforced when it is registered.
       - model_name: flagship
         litellm_params:
           model: "*"
@@ -130,20 +175,6 @@ data:
           cost_per_million_input: 0.0
           cost_per_million_output: 0.0
 
-      # Bare catch-all: matches the registry-REWRITTEN `<wire>/<upstream>` model.
-      - model_name: "*"
-        litellm_params:
-          model: "*"
-          configurable_clientside_auth_params:
-            - "api_key"
-            - api_base: "^https://[^@\\s]+$|^http://(localhost|host\\.docker\\.internal|ollama)(:[0-9]+)?(/.*)?$"
-        model_info:
-          display_name: "Wildcard pass-through"
-          features: []
-          context_window: 200000
-          cost_per_million_input: 0.0
-          cost_per_million_output: 0.0
-
     # Per-agent routing by best quality/cost ratio (R-800-030 v1, client-side).
     # Orchestrator roles : deep reasoning → Opus (architect), balanced → Sonnet,
     # cheap leaf work → Haiku. The C3/C7 service agents (chat RAG, the DocGen
@@ -161,6 +192,20 @@ data:
       c3-rag: fast
       c3-docgen: fast
       c7-kg-extractor: fast
+      c7-contextualizer: fast
+      # C13 (AyExtractor) ingestion enrichment — descriptive leaf work (per-chunk
+      # summarisation, decontextualisation, image captioning) → Haiku at lowest
+      # cost. The densifier (premium document summary, high tier, one call) MAY be
+      # promoted to Sonnet if top quality is wanted there.
+      summarizer: fast
+      decontextualizer: fast
+      densifier: fast
+      image_analyzer: fast
+      # T3 LLM-as-judge (R-700-032). D-011 wants a DIFFERENT family than the
+      # generator ; with Anthropic-only routing this is the strongest available
+      # tier (different-tier, NOT cross-family). Re-point at a non-Anthropic
+      # family once a second provider is wired, before enabling the judge.
+      c6-judge: flagship
       default: balanced
 
     budgets:
@@ -201,7 +246,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: c8-litellm-forwarder
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c8-litellm-forwarder
     app.kubernetes.io/component: c8

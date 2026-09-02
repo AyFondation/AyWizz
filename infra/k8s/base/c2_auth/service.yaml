@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c2_auth/service.yaml
 # Description: ClusterIP Service for C2 Auth. C1 Traefik IngressRoute
 #              targets `c2-auth:8000` for /auth/* routes.
@@ -9,7 +9,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: c2-auth
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c2-auth
     app.kubernetes.io/component: c2

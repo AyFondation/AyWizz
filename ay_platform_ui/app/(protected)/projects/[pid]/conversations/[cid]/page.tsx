@@ -145,6 +145,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useConvRuntime, useProjectUi, useWorkspaceSend } from "@/app/(protected)/workspace-store";
 import { Avatar, ThinkingDots } from "@/components/avatar";
 import { InlineLog, ModifiedDocsLinks } from "@/components/inline-log";
+import { MessageBody } from "@/components/message-body";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import { fullNameForTooltip, getEffectiveTrigram } from "@/lib/preferences";
 import type { Conversation, InlineEvent, Message, MessageRole } from "@/lib/types";
@@ -710,7 +711,10 @@ function MessageBubble({
         }
       : undefined;
   const bubbleClasses = [
-    "rounded-lg border px-4 py-2 text-sm whitespace-pre-wrap",
+    // No `whitespace-pre-wrap` any more: <MessageBody> renders markdown, and
+    // pre-wrap would double every blank line already turned into a paragraph
+    // break (Q-500-003).
+    "rounded-lg border px-4 py-2 text-sm",
     isUser
       ? userColor
         ? ""
@@ -719,7 +723,15 @@ function MessageBubble({
   ].join(" ");
   // Empty assistant bubble while inFlight → animated ThinkingDots.
   const showThinkingDots = !isUser && inFlight === true && (content === "" || content == null);
-  const bubbleContent = content ? content : isUser ? "" : showThinkingDots ? <ThinkingDots /> : "…";
+  const bubbleContent = content ? (
+    <MessageBody content={content} />
+  ) : isUser ? (
+    ""
+  ) : showThinkingDots ? (
+    <ThinkingDots />
+  ) : (
+    "…"
+  );
 
   return (
     <div

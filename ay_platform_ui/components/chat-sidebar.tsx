@@ -67,6 +67,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvRuntime, useProjectUi, useWorkspaceSend } from "@/app/(protected)/workspace-store";
 import { InlineLog } from "@/components/inline-log";
+import { MessageBody } from "@/components/message-body";
 import { ReferenceTray } from "@/components/reference-tray";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type { Conversation, Message, PlatformConfig, PromptReference } from "@/lib/types";
@@ -541,7 +542,7 @@ function MessageRow({ message }: { message: Message }) {
       ].join(" ")}
       data-testid={`chat-msg-${message.role}`}
     >
-      <pre className="whitespace-pre-wrap break-words font-sans">{message.content}</pre>
+      <MessageBody content={message.content} />
       {/* Persisted inline-activity ledger (audit) — re-rendered from
           the server on reload, identical to the live render. */}
       {!isUser && message.events && message.events.length > 0 ? (

@@ -1,6 +1,6 @@
 // =============================================================================
 // File: live-docs-manager.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/components/live-docs-manager.tsx
 // Description: Shared live-docs file manager — used by BOTH the project
 //              Documents tab AND the Working area Documents pane
@@ -9,7 +9,9 @@
 //                - default root + empty-state affordance (New file /
 //                  New folder when the tree is empty) ;
 //                - inline content editor (view → Edit → Save) backed by
-//                  `PUT /documents/{path}` ;
+//                  `PUT /documents/{path}`, the read mode carrying a
+//                  Source ↔ Preview toggle (raw text by default, markdown
+//                  rendered via <MessageBody> on demand — Q-500-003) ;
 //                - blank-file creation (`+ New file`) backed by
 //                  `POST /documents`.
 //              Folder ops (mkdir / rename / move / delete) reuse the
@@ -27,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useReadyConfig } from "@/app/providers";
 import { FileTree, type FileTreeContextMenuTarget } from "@/components/file-tree";
 import { type ContextMenuAction, FileTreeContextMenu } from "@/components/file-tree-context-menu";
+import { MessageBody } from "@/components/message-body";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type { ArtifactNode } from "@/lib/types";
 
@@ -66,6 +69,12 @@ export function LiveDocsManager({
   const [content, setContent] = useState<string>("");
   const [contentLoading, setContentLoading] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Read-mode rendering: raw source (default) vs. rendered markdown.
+  // Source is the default ON PURPOSE — this pane sits next to a raw
+  // textarea editor, and what you verify before editing (indentation,
+  // YAML frontmatter, exact offsets) is the source, not its rendering.
+  // Sticky across selections: it is a view mode, not per-file state.
+  const [preview, setPreview] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -384,18 +393,29 @@ export function LiveDocsManager({
                     </button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraft(content);
-                      setEditing(true);
-                    }}
-                    disabled={contentLoading}
-                    className="rounded bg-neutral-200 px-2 py-1 text-xs dark:bg-neutral-700 disabled:opacity-50"
-                    data-testid="live-docs-edit"
-                  >
-                    Edit
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPreview((p) => !p)}
+                      disabled={contentLoading}
+                      className="rounded bg-neutral-200 px-2 py-1 text-xs dark:bg-neutral-700 disabled:opacity-50"
+                      data-testid="live-docs-preview-toggle"
+                    >
+                      {preview ? "Source" : "Preview"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(content);
+                        setEditing(true);
+                      }}
+                      disabled={contentLoading}
+                      className="rounded bg-neutral-200 px-2 py-1 text-xs dark:bg-neutral-700 disabled:opacity-50"
+                      data-testid="live-docs-edit"
+                    >
+                      Edit
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -408,8 +428,18 @@ export function LiveDocsManager({
                 className="flex-1 min-h-[280px] w-full resize-y rounded border border-neutral-300 bg-white p-2 font-mono text-xs dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
                 data-testid="live-docs-editor"
               />
+            ) : preview ? (
+              <div
+                className="flex-1 overflow-auto rounded bg-neutral-50 p-2 text-xs text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+                data-testid="live-docs-preview"
+              >
+                <MessageBody content={content} />
+              </div>
             ) : (
-              <pre className="flex-1 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 font-mono text-xs text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
+              <pre
+                className="flex-1 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 font-mono text-xs text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+                data-testid="live-docs-source"
+              >
                 {content}
               </pre>
             )}

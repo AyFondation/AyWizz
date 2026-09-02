@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: gen_k8s_c8_configmaps.py
-# Version: 1
+# Version: 2
 # Path: infra/c8_gateway/scripts/gen_k8s_c8_configmaps.py
 # Description: Generate the C8 K8s ConfigMaps from their single sources of
 #              truth so the SAME files feed docker-compose (mounted) AND
@@ -60,7 +60,6 @@ def _configmap(name: str, component: str, filename: str, body: str) -> list[str]
         "kind: ConfigMap",
         "metadata:",
         f"  name: {name}",
-        "  namespace: aywizz",
         "  labels:",
         f"    app.kubernetes.io/name: {name}",
         f"    app.kubernetes.io/component: {component}",

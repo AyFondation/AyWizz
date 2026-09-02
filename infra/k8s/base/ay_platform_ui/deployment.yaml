@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/ay_platform_ui/deployment.yaml
 # Description: Next.js UI Deployment. Image built from
 #              `infra/docker/Dockerfile.ui`. The runtime-config.json
@@ -13,7 +13,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ay-platform-ui
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: ay-platform-ui
     app.kubernetes.io/component: ui

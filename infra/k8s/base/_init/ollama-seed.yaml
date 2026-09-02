@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ollama-seed.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/_init/ollama-seed.yaml
 # Description: One-shot Job pulling an embedding model into Ollama's
 #              persistent cache so it is available to REGISTER as an in-app
@@ -14,7 +14,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ollama-seed
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: ollama-seed
     app.kubernetes.io/component: ollama

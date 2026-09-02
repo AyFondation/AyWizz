@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 1
+# Version: 3
 # Path: infra/k8s/base/ollama/deployment.yaml
 # Description: Ollama embeddings provider — production C7 default
 #              (`C7_EMBEDDING_ADAPTER=ollama`, `all-minilm` model). Single
@@ -15,7 +15,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ollama
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: ollama
     app.kubernetes.io/component: ollama
@@ -69,8 +68,13 @@ spec:
               cpu: "2000m"
               memory: "2048Mi"
             requests:
-              cpu: "500m"
-              memory: "1024Mi"
+              # Serves EMBEDDINGS only (all-minilm, 22M params, ~45MB — see
+              # _init/ollama-seed.yaml), not generation. Idle between
+              # ingestions, milliseconds per chunk when active: the load is
+              # bursty, so the reservation is small and the 2000m limit
+              # carries the burst.
+              cpu: "100m"
+              memory: "512Mi"
       volumes:
         - name: data
           persistentVolumeClaim:

@@ -1,8 +1,41 @@
 // =============================================================================
 // VS Code Dev Container Configuration
-// Version: 8
+// Version: 10
 // Path: .devcontainer/devcontainer.json
 // Description: Dev container for Python/K8s development with Claude Code.
+// v10: FIX the docker-socket permission path v9 relied on. v9 claimed the
+//     "docker-group-GID alignment in postCreateCommand" granted access; it
+//     cannot on Docker Desktop for macOS, where the bind-mounted socket is
+//     owned root:root. That code moved the GROUP onto the SOCKET's GID —
+//     `groupmod -g 0 docker` fails (GID 0 is root's and is not movable), the
+//     `groupadd -g 0 docker` fallback fails too (the group already exists),
+//     and both failures were swallowed by `2>/dev/null` + `;`. Net effect:
+//     `developer` in docker=999, socket in group 0, mode 660 → every
+//     `docker` call returned "permission denied ... /var/run/docker.sock",
+//     silently breaking `infra/scripts/k8s_build_images.sh` and
+//     testcontainers.
+//     The direction is now inverted — move the SOCKET onto the GROUP
+//     (`chgrp docker`), which is correct whatever the socket's original
+//     group, so no special case is needed. It lives in postStartCommand,
+//     NOT postCreateCommand: Docker Desktop recreates the socket root:root
+//     on every daemon restart, so a create-time one-shot does not hold.
+//     `developer`'s membership of `docker` is already granted in the
+//     Dockerfile, so the whole groupmod/groupadd/usermod block is dropped.
+//     SECURITY: the daemon socket becomes reachable by the container's
+//     `docker` group = root-equivalent on the Docker Desktop VM. That is
+//     inherent to the DooD design (unchanged since v5), not new here. The
+//     chgrp mutates the inode inside the Linux VM only — never the macOS
+//     filesystem.
+// v9: drop the `docker-outside-of-docker` feature — its install script
+//     failed on an unauthenticated `git ls-remote https://github.com`
+//     version-resolution step (rate-limited/proxied here), unbypassable via
+//     options. The Docker CLI + compose/buildx plugins are now installed
+//     deterministically in the Dockerfile (v1.12.0) from Docker's official
+//     apt repo. DooD is preserved: we bind-mount the HOST socket directly at
+//     /var/run/docker.sock (the feature's docker-init.sh socat shim is no
+//     longer present, but DOCKER_HOST already points there and the
+//     docker-group-GID alignment in postCreateCommand grants access). No
+//     runtime behaviour change for testcontainers/compose.
 // v8: extend postCreateCommand chown to /opt/playwright-browsers so the
 //     developer user can write Playwright trace/screenshot output next
 //     to the browsers (Dockerfile v1.9.0 bakes Chromium there at build
@@ -44,10 +77,14 @@
       "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
     }
   },
-  "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
-  },
   "mounts": [
+    // Host docker socket (docker-outside-of-docker). The Docker CLI baked
+    // into the image (Dockerfile v1.12.0) talks to the HOST daemon through
+    // this socket; DOCKER_HOST below points here. It arrives owned root:root
+    // (mode 660) from the Docker Desktop VM, so postStartCommand chgrp's it
+    // to the container's `docker` group — of which `developer` is a member
+    // per the Dockerfile — to make it reachable without root (v10).
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     // Workspace bind — target == source so docker-outside-of-docker bind
     // mounts in tests/docker-compose.yml resolve to a real host path.
     "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
@@ -68,14 +105,20 @@
     "DOCKER_HOST": "unix:///var/run/docker.sock"
   },
 
-  // Align docker group GID with the host socket + ensure developer is a
-  // member, then pre-pull the Ryuk image (v0.8.1, pinned by
-  // testcontainers-python 4.x) so the first integration test does not pay
-  // the pull cost. Non-fatal: offline runs fall back to pull-on-demand.
-  "postCreateCommand": "bash -c 'DOCKER_SOCK_GID=$(stat -c \"%g\" /var/run/docker.sock 2>/dev/null || echo 999); sudo groupmod -g $DOCKER_SOCK_GID docker 2>/dev/null || sudo groupadd -g $DOCKER_SOCK_GID docker; sudo usermod -aG docker developer; echo \"Docker group configured with GID $DOCKER_SOCK_GID\"; sudo docker pull testcontainers/ryuk:0.8.1 || echo \"Ryuk pre-pull skipped (offline/network) — testcontainers will pull on demand\"; for d in /opt/ui-deps /opt/playwright-browsers; do if [ -d \"$d\" ]; then sudo chown -R developer:developer \"$d\" && echo \"$d owned by developer\" || echo \"$d chown failed (non-fatal)\"; fi; done'",
+  // Pre-pull the Ryuk image (v0.8.1, pinned by testcontainers-python 4.x)
+  // so the first integration test does not pay the pull cost. Non-fatal:
+  // offline runs fall back to pull-on-demand. Socket permissions are NOT
+  // handled here — see postStartCommand (v10).
+  "postCreateCommand": "bash -c 'sudo docker pull testcontainers/ryuk:0.8.1 || echo \"Ryuk pre-pull skipped (offline/network) — testcontainers will pull on demand\"; for d in /opt/ui-deps /opt/playwright-browsers; do if [ -d \"$d\" ]; then sudo chown -R developer:developer \"$d\" && echo \"$d owned by developer\" || echo \"$d chown failed (non-fatal)\"; fi; done'",
 
-  // Copy read-only host kube config to a writable location + rewrite API URL for Docker Desktop K8s
-  "postStartCommand": "set -e; mkdir -p ~/.kube-local; if [ -f /tmp/host-kube/config ]; then cp -rf /tmp/host-kube/* ~/.kube-local/; fi; if [ -f ~/.kube-local/config ]; then sed -i 's#https://127\\.0\\.0\\.1:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; sed -i 's#https://host\\.docker\\.internal:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; fi; UI_HOST_DIR=\"${localWorkspaceFolder}/ay_platform_ui\"; UI_BAKED=\"/opt/ui-deps/ay_platform_ui/node_modules\"; if [ -d \"$UI_HOST_DIR\" ] && [ ! -e \"$UI_HOST_DIR/node_modules\" ] && [ -d \"$UI_BAKED\" ]; then ln -s \"$UI_BAKED\" \"$UI_HOST_DIR/node_modules\" && echo \"ay_platform_ui/node_modules → $UI_BAKED (baked deps)\" || true; fi",
+  // Runs on EVERY container start (unlike postCreateCommand). Three jobs:
+  // (1) hand the root:root docker socket to the `docker` group — redone each
+  //     start because Docker Desktop recreates it root:root on every daemon
+  //     restart (v10; `|| true` so `set -e` cannot abort the rest);
+  // (2) copy the read-only host kube config to a writable location + rewrite
+  //     the API URL for Docker Desktop K8s;
+  // (3) symlink ay_platform_ui/node_modules → the baked deps if absent.
+  "postStartCommand": "set -e; if [ -S /var/run/docker.sock ]; then sudo chgrp docker /var/run/docker.sock || true; sudo chmod g+rw /var/run/docker.sock || true; fi; mkdir -p ~/.kube-local; if [ -f /tmp/host-kube/config ]; then cp -rf /tmp/host-kube/* ~/.kube-local/; fi; if [ -f ~/.kube-local/config ]; then sed -i 's#https://127\\.0\\.0\\.1:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; sed -i 's#https://host\\.docker\\.internal:6443#https://kubernetes.docker.internal:6443#g' ~/.kube-local/config || true; fi; UI_HOST_DIR=\"${localWorkspaceFolder}/ay_platform_ui\"; UI_BAKED=\"/opt/ui-deps/ay_platform_ui/node_modules\"; if [ -d \"$UI_HOST_DIR\" ] && [ ! -e \"$UI_HOST_DIR/node_modules\" ] && [ -d \"$UI_BAKED\" ]; then ln -s \"$UI_BAKED\" \"$UI_HOST_DIR/node_modules\" && echo \"ay_platform_ui/node_modules → $UI_BAKED (baked deps)\" || true; fi",
 
   "remoteUser": "developer",
   "updateRemoteUserUID": "on",

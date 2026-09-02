@@ -1,6 +1,6 @@
 # =============================================================================
 # File: minio-init.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/_init/minio-init.yaml
 # Description: One-shot Job creating MinIO buckets + app user with a
 #              readwrite policy (R-100-118 v2). Idempotent: existing
@@ -13,7 +13,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: minio-init
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: minio-init
     app.kubernetes.io/component: c10

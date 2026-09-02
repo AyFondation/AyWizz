@@ -1,6 +1,6 @@
 # =============================================================================
 # File: receiver-deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c8_gateway/receiver-deployment.yaml
 # Description: C8 cost receiver Deployment (R-800-070). Shared `aywizz-api`
 #              image, runtime selected via `COMPONENT_MODULE=c8_llm`. The
@@ -17,7 +17,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c8-cost-receiver
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c8-cost-receiver
     app.kubernetes.io/component: c8
@@ -82,7 +81,7 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              cpu: "25m"
               memory: "128Mi"
       volumes:
         - name: litellm-config

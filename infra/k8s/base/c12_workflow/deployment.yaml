@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 3
+# Version: 5
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
 #              `n8nio/n8n:1.74.0` image. SQLite DB on PVC.
@@ -24,7 +24,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c12-workflow
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c12-workflow
     app.kubernetes.io/component: c12
@@ -152,7 +151,7 @@ spec:
               cpu: "500m"
               memory: "1024Mi"
             requests:
-              cpu: "100m"
+              cpu: "50m"
               memory: "256Mi"
       volumes:
         - name: data

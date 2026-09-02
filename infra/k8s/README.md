@@ -1,5 +1,5 @@
 <!-- =============================================================================
-Version: 1
+Version: 6
 Path: infra/k8s/README.md
 Description: From-scratch install guide for deploying the AyWizz platform on a
              Kubernetes cluster. Essential, didactic — the happy path only.
@@ -29,12 +29,12 @@ The dev overlay reads two files (both git-ignored — you create them from the
 committed templates):
 
 ```bash
-cp infra/k8s/overlays/dev/.env.example         infra/k8s/overlays/dev/.env
-cp infra/k8s/overlays/dev/.env.secret.example  infra/k8s/overlays/dev/.env.secret
+cp infra/k8s/overlays/dev/.env.config.example   infra/k8s/overlays/dev/.env.config
+cp infra/k8s/overlays/dev/.env.secret.example   infra/k8s/overlays/dev/.env.secret
 ```
 
-- **`.env`** — non-secret config (service URLs, DB/bucket names). The defaults
-  work as-is for local dev.
+- **`.env.config`** — non-secret config (service URLs, DB/bucket names). The
+  defaults work as-is for local dev.
 - **`.env.secret`** — the secrets. Fill them in (next step).
 
 These become the `aywizz-config` ConfigMap and the `aywizz-secrets` Secret,
@@ -52,7 +52,7 @@ injected into every pod.
 | `MINIO_SECRET_KEY` | app → MinIO at runtime | yes |
 | `C2_JWT_SECRET_KEY` | signs the auth JWTs | yes |
 | `C2_LOCAL_ADMIN_PASSWORD` | password of the seeded admin user | yes |
-| `C2_LOCAL_PLATFORM_MANAGER_PASSWORD` | password of the seeded super-root (set its username in `.env` too) | recommended |
+| `C2_LOCAL_PLATFORM_MANAGER_PASSWORD` | password of the seeded super-root (set its username in `.env.config` too) | recommended |
 | `C8_GATEWAY_API_KEY` | shared gateway credential (clients + LiteLLM master key) | yes (any strong value) |
 | `AY_SECRET_MASTER_KEY` | **encrypts the LLM provider keys** stored in the in-app registry | yes |
 
@@ -79,11 +79,39 @@ Produces `aywizz-api` and `aywizz-ui` in the Docker store the cluster shares.
 **First install** on a fresh cluster:
 
 ```bash
-infra/k8s/run.sh dev --crds --wait
+infra/k8s/run.sh dev --crds --ingress --wait
 ```
 
 - `--crds` installs the Traefik CRDs — **once per cluster** (omit it afterwards).
+- `--ingress` installs the ingress-nginx controller — **once per cluster**.
+  Skip it if the cluster already has an ingress controller, and instead set
+  `spec.ingressClassName` in `overlays/dev/ingress.yaml` to that controller's
+  class (`webapprouting.kubernetes.io` on the AKS managed addon,
+  `azure-application-gateway` with AGIC, …).
 - `--wait` blocks until every Deployment is ready.
+
+### The edge
+
+External access goes through **one** object: the `Ingress` named
+`aywizz-edge`, declared per environment in `overlays/<env>/ingress.yaml`. It
+has exactly two values to configure — `ingressClassName` and `host` — and it
+forwards everything to the C1 Traefik gateway, which owns the ~20 path rules
+and the forward-auth chain.
+
+Every Service of the platform, C1 included, is **ClusterIP** in every
+environment. No manifest carries a cloud-specific Service type or annotation,
+which is what makes the tree portable across Docker Desktop, kind, bare-metal
+and any managed cloud.
+
+TLS is additive and independent of the application. To terminate it at the
+edge, add a `spec.tls` block to the overlay's `ingress.yaml` and supply the
+referenced `kubernetes.io/tls` Secret — no manifest under `base/` changes:
+
+```yaml
+spec:
+  tls:
+    - secretName: aywizz-tls
+```
 
 The apply also runs one-shot **bootstrap Jobs** (ArangoDB, MinIO, workflow seed,
 Ollama) and seeds the demo tenant + users on first C2 startup.
@@ -96,8 +124,27 @@ Ollama) and seeds the demo tenant + users on first C2 startup.
 kubectl get pods -n aywizz      # ~17 pods, all Running / Completed
 ```
 
-Open the UI at **http://localhost:56000** (local Docker Desktop) and sign in
-with the admin / platform-manager credentials from step 2.
+Add the dev hostname to your machine's hosts file — **once**:
+
+```
+127.0.0.1   aywizz.kube.local
+```
+
+Then open the UI at **http://aywizz.kube.local** and sign in with the admin /
+platform-manager credentials from step 2. Docker Desktop binds the
+ingress-nginx LoadBalancer on the host's :80.
+
+> Why a real hostname rather than the bare `localhost`: dev then behaves
+> exactly like prod — the edge filters on a FQDN in both — and the host's :80
+> is not claimed under a generic name that collides with other local
+> projects. A `*.localhost` sub-domain is avoided on purpose: Chrome and
+> Firefox resolve those internally, but Safari defers to the macOS resolver,
+> which maps only `localhost` itself.
+
+> Changed in this version: the dev overlay no longer patches `c1-gateway` to a
+> LoadBalancer on `:56000`. That shortcut was replaced by the portable
+> `Ingress` edge described above. The **compose** stack (`e2e_stack.sh`) is
+> unaffected and still publishes `http://localhost:56000`.
 
 ---
 
@@ -132,6 +179,6 @@ No `--crds` this time. Use `--reinit` as well if you changed a bootstrap Job.
 ## Notes
 
 - **Production** uses `infra/k8s/overlays/prod/` (SHA-pinned images, its own
-  `.env` / `.env.secret`, TLS/ingress as separate operator decisions). Same
+  `.env.config` / `.env.secret`, TLS/ingress as separate operator decisions). Same
   flow, different overlay.
 - **Validate a build without applying**: `infra/scripts/k8s_validate.sh dev`.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_validate.sh
-# Version: 3
+# Version: 4
 # Path: infra/scripts/k8s_validate.sh
 # Description: L1 — static lint of K8s manifests. Two stages:
 #                (1) `kubectl kustomize` builds the overlay — catches
@@ -12,7 +12,7 @@
 #                    is not on PATH (CI installs it).
 #
 #              v3 (2026-05-29): synthesize missing Tier-2 env sources
-#              (.env / .env.secret) before building. The dev overlay's
+#              (.env.config / .env.secret) before building. The dev overlay's
 #              configMapGenerator/secretGenerator read operator-owned
 #              files that are gitignored (§4.6) and thus absent on a
 #              fresh checkout / CI runner — without this, `kubectl
@@ -63,7 +63,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The dev overlay reads Tier-2 env sources (.env / .env.secret) that are
+# The dev overlay reads Tier-2 env sources (.env.config / .env.secret) that are
 # gitignored (§4.6) and absent on a fresh checkout / CI runner. L1 lints
 # STRUCTURE only, so synthesize a placeholder when a referenced source is
 # missing: copy the committed `<name>.example` if present, else an empty
@@ -86,7 +86,7 @@ ensure_env_source() {
     SYNTH_ENV+=("${target}")
     echo "==> Synthesized missing env source (L1 lint only): ${fname}"
 }
-ensure_env_source ".env"
+ensure_env_source ".env.config"
 ensure_env_source ".env.secret"
 
 echo "==> Building overlay: ${OVERLAY_PATH}"

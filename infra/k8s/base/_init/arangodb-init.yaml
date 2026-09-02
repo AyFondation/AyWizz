@@ -1,6 +1,6 @@
 # =============================================================================
 # File: arangodb-init.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_init/arangodb-init.yaml
 # Description: One-shot Job creating the platform ArangoDB database +
 #              the dedicated app user (R-100-012 v3, R-100-118 v2).
@@ -15,7 +15,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: arangodb-init
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: arangodb-init
     app.kubernetes.io/component: c11

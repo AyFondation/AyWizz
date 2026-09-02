@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { MessageBody } from "@/components/message-body";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type { RequirementDocumentDetail } from "@/lib/types";
 
@@ -122,15 +123,10 @@ export default function RequirementDocumentPage() {
         className="mt-8 overflow-x-auto rounded-lg border border-neutral-200 bg-white p-6"
         data-testid="document-content"
       >
-        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-neutral-900">
-          {doc.content}
-        </pre>
+        <div className="text-sm leading-relaxed text-neutral-900">
+          <MessageBody content={doc.content} />
+        </div>
       </article>
-
-      <p className="mt-4 text-xs text-neutral-400">
-        Rich Markdown rendering deferred — v1 surfaces the raw spec source so you can copy / search
-        verbatim. Add a renderer (e.g. <code>marked</code>) when prettier viewing is needed.
-      </p>
     </main>
   );
 }

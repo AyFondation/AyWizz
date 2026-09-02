@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/_mock_llm/deployment.yaml
 # Description: `_mock_llm` — test-tier substitute for the C8 LiteLLM
 #              proxy. Lives under `ay_platform_core/_mock_llm/`; same
@@ -19,7 +19,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mock-llm
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: mock-llm
     app.kubernetes.io/component: mock-llm

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 5
+# Version: 6
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
@@ -23,6 +23,12 @@
 #              with `IfNotPresent` + `disableNameSuffixHash`, so `apply` is
 #              a no-op and pods keep the old image). Run it after
 #              `infra/scripts/k8s_build_images.sh`.
+#              v6 (2026-09-02): adds `--ingress` — installs the ingress-nginx
+#              controller (pinned in `base/ingress_nginx/`) that serves the
+#              edge `Ingress` declared by each overlay. Needed once per
+#              cluster on any cluster that ships no ingress controller
+#              (docker-desktop, kind, bare-metal). SKIP it when the cluster
+#              already has one and point `ingressClassName` at that class.
 #              v5 (2026-08-24): fixed `--no-jobs` — the Job-stripping filter
 #              was fed via a heredoc on `python3 -` which replaced python's
 #              stdin, swallowing the `kubectl kustomize` pipe and applying an
@@ -53,6 +59,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAEFIK_VERSION="v3.3"
 TRAEFIK_CRDS_URL="https://raw.githubusercontent.com/traefik/traefik/${TRAEFIK_VERSION}/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml"
 
+# The ingress controller that serves the edge `Ingress` object. Pinned in
+# `base/ingress_nginx/kustomization.yaml`; applied as its OWN kustomize
+# target because it declares its own namespace (see that file's header).
+INGRESS_NGINX_PATH="${SCRIPT_DIR}/base/ingress_nginx"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") <env> [options]
@@ -63,6 +74,10 @@ Environments:
 
 Options:
   --crds        install Traefik CRDs (v3.3) before applying — once per cluster
+  --ingress     install the ingress-nginx controller before applying — once
+                per cluster. SKIP on a cluster that already has an ingress
+                controller (AKS app routing, AGIC, an existing nginx); set
+                `ingressClassName` in overlays/<env>/ingress.yaml instead.
   --wait        wait for every Deployment to become Available (5 min cap)
   --no-jobs     skip bootstrap Jobs (use when re-applying without re-init)
   --reinit      delete + recreate bootstrap Jobs (needed when a Job spec
@@ -90,6 +105,7 @@ shift
 WAIT=0
 SKIP_JOBS=0
 WANT_CRDS=0
+WANT_INGRESS=0
 REINIT=0
 RESTART=0
 while [ "$#" -gt 0 ]; do
@@ -97,6 +113,7 @@ while [ "$#" -gt 0 ]; do
         --wait) WAIT=1 ;;
         --no-jobs) SKIP_JOBS=1 ;;
         --crds) WANT_CRDS=1 ;;
+        --ingress) WANT_INGRESS=1 ;;
         --reinit) REINIT=1 ;;
         --restart) RESTART=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -131,6 +148,19 @@ echo "==> kubectl context: ${CONTEXT}"
 if [ "${WANT_CRDS}" -eq 1 ]; then
     echo "==> Installing Traefik ${TRAEFIK_VERSION} CRDs"
     kubectl apply -f "${TRAEFIK_CRDS_URL}"
+fi
+
+# Applied as a SEPARATE kustomize target on purpose: the bundle owns an
+# `ingress-nginx` Namespace that the overlays' `namespace: aywizz`
+# transformer would rename (same trap as base/c4_workers, Q-100-023).
+if [ "${WANT_INGRESS}" -eq 1 ]; then
+    echo "==> Installing ingress-nginx controller"
+    kubectl apply -k "${INGRESS_NGINX_PATH}"
+    echo "==> Waiting for the ingress-nginx admission webhook to be ready"
+    kubectl wait --namespace ingress-nginx \
+        --for=condition=Ready pod \
+        --selector=app.kubernetes.io/component=controller \
+        --timeout=180s
 fi
 
 # Bootstrap Jobs are immutable: once Completed, `apply` cannot change their

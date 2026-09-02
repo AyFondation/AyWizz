@@ -1,6 +1,6 @@
 # =============================================================================
 # File: statefulset.yaml
-# Version: 1
+# Version: 3
 # Path: infra/k8s/base/c11_arangodb/statefulset.yaml
 # Description: ArangoDB single-node StatefulSet (C11). Stateful workload
 #              with a persistent volume claim for /var/lib/arangodb3.
@@ -8,7 +8,7 @@
 #              ArangoDB cluster mode out of scope until horizontal scaling
 #              is needed). Root password sourced from the platform Secret
 #              `aywizz-secrets` populated via Kustomize secretGenerator
-#              from the overlay's `.env`.
+#              from the overlay's `.env.config`.
 #
 #              Resource limits mirror the docker-compose v6 budget
 #              (R-100-106 v2, R-100-119): heaviest single workload —
@@ -18,7 +18,6 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: arangodb
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: arangodb
     app.kubernetes.io/component: c11
@@ -85,7 +84,10 @@ spec:
               cpu: "1500m"
               memory: "1536Mi"
             requests:
-              cpu: "500m"
+              # Background work (WAL, compaction, index maintenance) is real
+              # but light at the dataset sizes this platform sees; the 1500m
+              # limit absorbs query + ingestion bursts.
+              cpu: "150m"
               memory: "512Mi"
   volumeClaimTemplates:
     - metadata:

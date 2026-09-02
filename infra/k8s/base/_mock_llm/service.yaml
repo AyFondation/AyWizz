@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_mock_llm/service.yaml
 # Description: ClusterIP Service for the mock LLM (test-tier only).
 #              Reachable as `mock-llm.aywizz.svc.cluster.local:8000`
@@ -11,7 +11,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mock-llm
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: mock-llm
     app.kubernetes.io/component: mock-llm

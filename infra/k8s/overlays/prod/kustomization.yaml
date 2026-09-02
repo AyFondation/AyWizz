@@ -1,10 +1,10 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/overlays/prod/kustomization.yaml
 # Description: Production overlay. Same `infra/k8s/base/` as dev, but :
 #                - SHA-pinned image tags (NOT :latest) for reproducibility ;
-#                - `disableNameSuffixHash: false` so a change to .env /
+#                - `disableNameSuffixHash: false` so a change to .env.config /
 #                  .env.secret triggers a rolling restart automatically
 #                  (the opposite tradeoff to dev — prod prefers safety
 #                  over predictability) ;
@@ -13,7 +13,7 @@
 #                  level via base manifests.
 #
 # Operator-authored sources at deploy time (NEVER committed) :
-#   infra/k8s/overlays/prod/.env         — non-secret config values.
+#   infra/k8s/overlays/prod/.env.config  — non-secret config values.
 #   infra/k8s/overlays/prod/.env.secret  — credentials (Tier-2 per
 #                                          CLAUDE.md §4.6). Operator
 #                                          populates from Vault/KMS
@@ -43,16 +43,19 @@ namespace: aywizz
 # overlays/dev. To enable the K8s sub-agent dispatcher, apply the opt-in worker
 # layer SEPARATELY (it must NOT go through the `namespace: aywizz` transformer):
 #   kubectl apply -k infra/k8s/base/c4_workers
-# and set C4_DISPATCHER=k8s in .env.
+# and set C4_DISPATCHER=k8s in .env.config.
 resources:
   - ../../base
   - ../../base/c13_extractor
+  # THE EDGE — the single object wiring the external URL to C1. Set its
+  # `ingressClassName` + `host` before deploying (see ingress.yaml).
+  - ingress.yaml
 
 configMapGenerator:
   - name: aywizz-config
     behavior: create
     envs:
-      - .env
+      - .env.config
 secretGenerator:
   - name: aywizz-secrets
     behavior: create
@@ -60,7 +63,7 @@ secretGenerator:
       - .env.secret
     type: Opaque
 
-# Hash-suffix the generated names so a change to .env / .env.secret
+# Hash-suffix the generated names so a change to .env.config / .env.secret
 # triggers a rolling restart automatically — prod prefers safety
 # (changes propagate) over predictability (manual rollout).
 generatorOptions:

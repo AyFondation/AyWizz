@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c6_validation/deployment.yaml
 # Description: C6 Validation Pipeline Deployment. Shared `aywizz-api`
 #              image, runtime selected via `COMPONENT_MODULE=c6_validation`.
@@ -9,7 +9,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c6-validation
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c6-validation
     app.kubernetes.io/component: c6
@@ -66,5 +65,5 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              cpu: "25m"
               memory: "128Mi"

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c12-workflow-seed.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_init/c12-workflow-seed.yaml
 # Description: One-shot Job importing every workflow JSON under the
 #              c12-workflow-files ConfigMap into the running n8n.
@@ -10,7 +10,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: c12-workflow-seed
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c12-workflow-seed
     app.kubernetes.io/component: c12

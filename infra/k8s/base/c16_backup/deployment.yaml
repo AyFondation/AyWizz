@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 1
+# Version: 3
 # Path: infra/k8s/base/c16_backup/deployment.yaml
 # Description: C16 Backup/Restore Deployment (D-022 / 900-SPEC). Shared
 #              `aywizz-api` image, runtime selected via
@@ -13,7 +13,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c16-backup
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c16-backup
     app.kubernetes.io/component: c16
@@ -79,5 +78,5 @@ spec:
               cpu: "300m"
               memory: "256Mi"
             requests:
-              cpu: "50m"
+              cpu: "25m"
               memory: "96Mi"

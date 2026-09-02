@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c13_extractor/deployment.yaml
 # Description: C13 (AyExtractor) Deployment — the HTTP wrapper for the
 #              extract + chunk pipeline (D-020 R-100-125 v2).
@@ -19,7 +19,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c13-extractor
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c13-extractor
     app.kubernetes.io/component: c13
@@ -85,11 +84,18 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: "1"
-              memory: "2Gi"
+              # Extraction is bursty: nothing at rest, heavy while a document
+              # is processed. Reserve little, burst into the limit.
+              cpu: "100m"
+              memory: "512Mi"
             limits:
               # R-100-125 v2 §9 baseline. Image vision (Phase 1e) and
               # densification (Phase 2d) are the heaviest passes — tune
               # per-env in an overlay once production telemetry lands.
-              cpu: "4"
-              memory: "8Gi"
+              #
+              # CPU capped at 2 (was 4): on a 4-CPU node a 4-CPU limit lets a
+              # single extraction starve etcd and the apiserver, which can
+              # freeze the whole cluster. 2 keeps extraction fast while
+              # leaving half the node to everything else.
+              cpu: "2"
+              memory: "4Gi"

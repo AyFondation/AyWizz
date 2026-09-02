@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 4
+# Version: 5
 # Path: infra/k8s/overlays/system-test/kustomization.yaml
 # Description: Overlay for K8s system tests run by pytest
 #              (`tests/system/k8s/`) AND the L2+L3 kind smoke
@@ -9,9 +9,10 @@
 #              deterministic on a CI runner / kind cluster:
 #
 #              v3 (2026-05-29): the configMap + Secret sources are now
-#              INLINE `literals` instead of `envs: [.env]` / [.env.secret].
+#              INLINE `literals` instead of `envs: [.env.config]` /
+#              [.env.secret].
 #              Rationale: this overlay is the CI bring-up target, so its
-#              config must live in the repo — but `.env` / `.env.secret`
+#              config must live in the repo — but `.env.config` / `.env.secret`
 #              are gitignored Tier-2 names (CLAUDE.md §4.6) that cannot be
 #              committed. Literals carry deterministic TEST-ONLY values
 #              (no real secrets), are reviewable in the diff, and make the

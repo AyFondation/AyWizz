@@ -1,6 +1,6 @@
 ---
 document: 500-SPEC-UI-UX
-version: 4
+version: 6
 path: requirements/500-SPEC-UI-UX.md
 language: en
 status: draft
@@ -171,7 +171,7 @@ The **Conversations** section SHALL surface :
 
 ```yaml
 id: R-500-005
-version: 1
+version: 3
 status: approved
 category: functional
 derives-from: [R-300-040]
@@ -180,9 +180,28 @@ derives-from: [R-300-040]
 The **Requirements** section SHALL be **read-only in v1**, listing
 documents (slug, version, status, language) via
 `GET /api/v1/projects/{pid}/requirements/documents` and rendering a
-single document's raw Markdown content in a styled `<pre>` block.
-Rich Markdown-to-HTML rendering is deferred (no new dep in v1) ;
-the raw spec corpus is human-readable as-is.
+single document's Markdown content **rendered** (v2, resolving
+Q-500-003) via the shared `<MessageBody>` renderer.
+
+v1 surfaced the raw source in a `<pre>` block and deferred rich
+rendering. That deferral is lifted: every Markdown-bearing surface
+(chat bubbles both roles, the chat sidebar, this document view, and
+the live-docs viewer) SHALL go through the SAME renderer, so the
+security posture below is stated and enforced once.
+
+The live-docs viewer is the one surface where rendering is **opt-in**
+(v3): it SHALL default to the raw source and expose a Source ↔ Preview
+toggle. It sits beside a raw editor, and what the operator verifies
+before editing — indentation, YAML frontmatter, exact offsets — is the
+source itself, which a rendering hides. The toggle is a view mode and
+SHALL persist across file selections within a session. Every other
+Markdown-bearing surface renders unconditionally.
+
+The renderer SHALL emit React elements and SHALL NOT mount an HTML
+string. Rendered content is LLM output or ingested corpus content —
+untrusted by construction — so raw HTML embedded in the Markdown
+SHALL be escaped and displayed as text. `rehype-raw`, or any
+equivalent that re-enables raw HTML, SHALL NOT be used.
 
 #### R-500-006
 
@@ -526,8 +545,21 @@ states.
   filesystem ? Tied to C5's PUT-with-If-Match contract.
 - **Q-500-002** : multi-file upload in Sources (today : one file at
   a time). Same endpoint or a new batch endpoint on C7 ?
-- **Q-500-003** : real Markdown rendering — `marked` or a Server
-  Component MDX path ? Dep + bundle-size trade-off.
+- ~~**Q-500-003**~~ : **RESOLVED (v5)** — real Markdown rendering.
+  Chosen: `react-markdown` + `remark-gfm`, in the shared
+  `<MessageBody>` component (R-500-005).
+  `marked` was rejected on security, not bundle size: it emits an HTML
+  string that can only be mounted via `dangerouslySetInnerHTML`, which
+  opens an XSS path on content that is untrusted by construction (LLM
+  output, influenceable through the ingested RAG corpus). It would have
+  to be closed by never forgetting to sanitise. `react-markdown` emits
+  React elements and escapes raw HTML, closing the hole by construction.
+  The Server-Component / MDX path was rejected as structurally unfit:
+  the assistant bubble is filled by a client-side SSE stream token by
+  token, and a server render cannot follow an in-flight stream — it
+  would only ever cover persisted messages, never the live row.
+  v6 adds the one exception: the live-docs viewer defaults to raw
+  source behind a Source ↔ Preview toggle (R-500-005 v3).
 - **Q-500-004** : list-runs-by-project endpoint on C6 — required to
   surface a project's run history on the Validation page.
 - **Q-500-005** : real-tokenizer integration for the reference tray

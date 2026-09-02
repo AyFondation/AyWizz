@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c9_mcp/deployment.yaml
 # Description: C9 MCP Server Deployment. Shared `aywizz-api` image,
 #              runtime selected via `COMPONENT_MODULE=c9_mcp`. Exposes
@@ -10,7 +10,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c9-mcp
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c9-mcp
     app.kubernetes.io/component: c9
@@ -67,5 +66,5 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              cpu: "25m"
               memory: "128Mi"

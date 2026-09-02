@@ -1,0 +1,43 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/ingress_nginx/kustomization.yaml
+# Description: Cluster prerequisite — the ingress-nginx controller. This is
+#              the component that reads the `Ingress` object declared by each
+#              overlay (`overlays/<env>/ingress.yaml`) and forwards external
+#              traffic to the C1 Traefik gateway Service.
+#
+#              APPLIED SEPARATELY, never from an overlay:
+#                kubectl apply -k infra/k8s/base/ingress_nginx
+#                # or, the wrapper:
+#                infra/k8s/run.sh dev --ingress
+#
+#              WHY SEPARATE (same rationale as `base/c4_workers`, Q-100-023):
+#              the upstream bundle declares its OWN `ingress-nginx` Namespace
+#              plus cluster-scoped RBAC. Listing it in an overlay's
+#              `resources:` would put it under the `namespace: aywizz`
+#              transformer, which renames that Namespace to `aywizz` and
+#              produces an ID conflict that breaks `kubectl kustomize`.
+#
+#              PORTABILITY (the reason this exists at all): the platform's
+#              edge is a STANDARD `Ingress` object, understood by any
+#              ingress controller on any cluster — no cloud LoadBalancer
+#              annotation, no provider-specific Service type in our
+#              manifests. This bundle is only the DEFAULT controller for
+#              clusters that ship none (docker-desktop, kind, bare-metal).
+#              On a cluster that already has one (AKS application routing,
+#              AGIC, an existing nginx), SKIP this target entirely and set
+#              `ingressClassName` in the overlay's `ingress.yaml` to that
+#              controller's class.
+#
+#              The `cloud` provider variant is used because it is the
+#              portable one: it exposes the controller through a Service of
+#              type LoadBalancer, which docker-desktop binds on the host's
+#              localhost and which every managed cloud fulfils natively.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Pinned upstream bundle — bump deliberately, never float.
+resources:
+  - https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.3/deploy/static/provider/cloud/deploy.yaml

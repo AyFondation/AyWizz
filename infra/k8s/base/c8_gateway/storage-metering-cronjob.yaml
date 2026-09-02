@@ -1,6 +1,6 @@
 # =============================================================================
 # File: storage-metering-cronjob.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c8_gateway/storage-metering-cronjob.yaml
 # Description: Periodic per-project disk-storage metering pass (E-100-002 v7).
 #              Runs the shared aywizz-api image with the storage snapshot
@@ -16,7 +16,6 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: c8-storage-metering
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c8-storage-metering
     app.kubernetes.io/component: c8

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: admin-deployment.yaml
-# Version: 3
+# Version: 5
 # Path: infra/k8s/base/c8_gateway/admin-deployment.yaml
 # Description: C8 admin app Deployment (LLM-governance: platform registry +
 #              tenant catalogue + model-quality resolver). Shared `aywizz-api`
@@ -18,7 +18,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c8-admin
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c8-admin
     app.kubernetes.io/component: c8
@@ -93,5 +92,5 @@ spec:
               cpu: "300m"
               memory: "256Mi"
             requests:
-              cpu: "50m"
+              cpu: "25m"
               memory: "96Mi"

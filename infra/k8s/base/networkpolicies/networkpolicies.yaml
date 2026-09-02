@@ -1,0 +1,113 @@
+# =============================================================================
+# File: networkpolicies.yaml
+# Version: 1
+# Path: infra/k8s/base/networkpolicies/networkpolicies.yaml
+# Description: The enforcement of the platform's two access levels.
+#
+#              LEVEL 1 (public) — one DNS name, one door: the edge `Ingress`
+#              → the C1 Traefik gateway. Nothing else is reachable from
+#              outside the namespace.
+#              LEVEL 2 (private) — every other component (ArangoDB, MinIO,
+#              n8n, LiteLLM, Ollama, the API tier) is internal only.
+#
+#              Before these policies, level 2 was guaranteed only by the
+#              ABSENCE of a route: every Service was ClusterIP, so nothing
+#              was published — but any pod in any namespace could still open
+#              a connection to `arangodb:8529` or the MinIO console. These
+#              policies turn that convention into a rule.
+#
+#              INGRESS ONLY. `policyTypes` deliberately omits Egress, so
+#              outbound traffic stays unrestricted: C8/LiteLLM keeps its
+#              provider egress, DNS keeps working, and image pulls are
+#              unaffected. Egress lockdown is a separate decision with a
+#              much larger blast radius.
+#
+#              ── CAVEAT, READ BEFORE RELYING ON THIS ────────────────────
+#              A NetworkPolicy is enforced by the CNI, not by Kubernetes.
+#              Docker Desktop's default CNI does NOT enforce them: the API
+#              server accepts these objects and silently ignores them, so
+#              they are INERT in local dev and CANNOT be validated there.
+#              On AKS they require Azure CNI with Calico or Cilium network
+#              policy enabled at cluster creation.
+#
+#              They also do not stop `kubectl port-forward` / `exec` — that
+#              is an RBAC concern, not a network one.
+#
+#              FIRST DEPLOY on a policy-enforcing cluster: watch for pods
+#              going NotReady. Some CNIs subject kubelet health probes to
+#              ingress policy; if readiness probes start failing, that is
+#              the cause. Rollback is one command:
+#                kubectl delete networkpolicy -n aywizz --all
+#
+#              SCOPE — this is a NAMESPACE boundary, not micro-segmentation.
+#              Traffic BETWEEN platform components stays open (policy 3):
+#              locking down each pairwise flow requires the component call
+#              graph and is a separate, larger piece of work.
+# =============================================================================
+---
+# 1. Deny every inbound connection to every pod in the namespace. Each
+#    policy below re-opens exactly one path.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    app.kubernetes.io/name: default-deny-ingress
+    app.kubernetes.io/component: security
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. LEVEL 1 — the only door. The ingress controller (in its own namespace)
+#    may reach the C1 gateway, and nothing else. `kubernetes.io/metadata.name`
+#    is set automatically by the API server on every namespace, so this
+#    selector needs no labelling of the controller's namespace.
+#
+#    Using a different controller? Change the namespace name here to match
+#    where it runs (e.g. `app-routing-system` for the AKS managed addon).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-to-c1-gateway
+  labels:
+    app.kubernetes.io/name: allow-edge-to-c1-gateway
+    app.kubernetes.io/component: security
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: c1
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+---
+# 3. LEVEL 2 — platform components talk to each other freely, and ONLY to
+#    each other. The selector matches the `part-of` label carried by every
+#    pod the platform owns, so a pod from any other namespace is denied by
+#    policy 1 even though it can resolve the Service name.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-platform
+  labels:
+    app.kubernetes.io/name: allow-intra-platform
+    app.kubernetes.io/component: security
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: aywizz-platform

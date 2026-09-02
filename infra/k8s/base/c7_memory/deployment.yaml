@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c7_memory/deployment.yaml
 # Description: C7 Memory Service Deployment. Shared `aywizz-api` image,
 #              runtime selected via `COMPONENT_MODULE=c7_memory`.
@@ -9,7 +9,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c7-memory
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c7-memory
     app.kubernetes.io/component: c7
@@ -66,5 +65,7 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              # On the ingestion path (embedding orchestration) — see
+              # base/kustomization.yaml.
+              cpu: "50m"
               memory: "128Mi"

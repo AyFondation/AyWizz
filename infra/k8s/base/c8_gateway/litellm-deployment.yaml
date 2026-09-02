@@ -1,6 +1,6 @@
 # =============================================================================
 # File: litellm-deployment.yaml
-# Version: 3
+# Version: 5
 # Path: infra/k8s/base/c8_gateway/litellm-deployment.yaml
 # Description: C8 LLM gateway — the off-the-shelf LiteLLM proxy (R-800-001).
 #              Image pinned by tag, consumed UNMODIFIED (§4.5) : the config
@@ -17,7 +17,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: litellm
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: litellm
     app.kubernetes.io/component: c8
@@ -95,7 +94,8 @@ spec:
               # comfortable headroom ; tune down per-env in an overlay.
               memory: "2Gi"
             requests:
-              cpu: "100m"
+              # Pure proxy — the work happens upstream at the provider.
+              cpu: "50m"
               memory: "256Mi"
       volumes:
         - name: litellm-config

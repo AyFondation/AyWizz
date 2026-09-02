@@ -1,6 +1,6 @@
 # =============================================================================
 # File: middlewares.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c1_gateway/middlewares.yaml
 # Description: Traefik Middleware CRDs — K8s mirror of
 #              `infra/c1_gateway/dynamic/middlewares.yml` (the file
@@ -13,7 +13,6 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: rate-limit-auth
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c1-gateway
     app.kubernetes.io/component: c1
@@ -31,7 +30,6 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: forward-auth-c2
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c1-gateway
     app.kubernetes.io/component: c1
@@ -50,7 +48,6 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: secure-headers
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c1-gateway
     app.kubernetes.io/component: c1

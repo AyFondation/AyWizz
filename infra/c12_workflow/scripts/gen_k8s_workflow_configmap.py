@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: gen_k8s_workflow_configmap.py
-# Version: 1
+# Version: 2
 # Path: infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py
 # Description: Generate the `c12-workflow-files` ConfigMap manifest from the
 #              single source of truth — `infra/c12_workflow/workflows/*.json`
@@ -67,7 +67,6 @@ def main() -> int:
         "kind: ConfigMap",
         "metadata:",
         "  name: c12-workflow-files",
-        "  namespace: aywizz",
         "  labels:",
         "    app.kubernetes.io/name: c12-workflow-files",
         "    app.kubernetes.io/component: c12",

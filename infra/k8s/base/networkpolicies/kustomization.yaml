@@ -1,0 +1,13 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/networkpolicies/kustomization.yaml
+# Description: Namespace-boundary NetworkPolicies enforcing the platform's
+#              two access levels. See networkpolicies.yaml for the full
+#              rationale and the CNI-enforcement caveat.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - networkpolicies.yaml

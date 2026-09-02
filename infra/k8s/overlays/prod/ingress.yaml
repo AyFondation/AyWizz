@@ -1,0 +1,69 @@
+# =============================================================================
+# File: ingress.yaml
+# Version: 2
+# Path: infra/k8s/overlays/prod/ingress.yaml
+# Description: THE EDGE — the single object wiring the external URL to the
+#              platform. Identical in shape to `overlays/dev/ingress.yaml`;
+#              only the two configurable values differ. See that file's
+#              header for the full rationale.
+#
+#              OPERATOR: set BOTH values below before deploying.
+#                1. `spec.ingressClassName` — the ingress controller of the
+#                   target cluster. `nginx` if you applied
+#                   `kubectl apply -k infra/k8s/base/ingress_nginx`; on AKS
+#                   with the managed addon, `webapprouting.kubernetes.io`;
+#                   with Application Gateway, `azure-application-gateway`.
+#                2. `spec.rules[0].host` — the DNS name users type. Point
+#                   its A record at the ingress controller's external
+#                   address (`kubectl get svc -n ingress-nginx`). For an
+#                   internal-only deployment the controller's Service is the
+#                   place to make the address private — NOT this object,
+#                   which stays cloud-agnostic.
+#
+#              TLS — additive, and independent of the application. To
+#              terminate TLS at this edge, add to `spec` below:
+#
+#                tls:
+#                  - secretName: aywizz-tls
+#
+#              plus the annotation `nginx.ingress.kubernetes.io/
+#              force-ssl-redirect: "true"` to push HTTP to HTTPS. Omitting
+#              `hosts:` under `tls` is deliberate: the entry then applies to
+#              every rule of this Ingress, so the hostname stays declared
+#              once, in `rules[0].host`.
+#
+#              Provide the `aywizz-tls` Secret (type kubernetes.io/tls)
+#              either from cert-manager, or from an internal PKI when the
+#              domain is not publicly resolvable — ACME cannot issue for a
+#              name it cannot reach. No manifest under `base/` is involved
+#              either way.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aywizz-edge
+  labels:
+    app.kubernetes.io/name: aywizz-edge
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/part-of: aywizz-platform
+  annotations:
+    # C3 streams conversation tokens over SSE — nginx buffers proxied
+    # responses by default, which would hold the stream until completion.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # Document ingestion posts to /uploads (n8n); the 1m default rejects
+    # any real document.
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: aywizz.replace-me-at-deploy.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: c1-gateway
+                port:
+                  number: 80

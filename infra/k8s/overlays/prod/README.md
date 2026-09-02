@@ -1,6 +1,6 @@
 <!-- =============================================================================
 File: README.md
-Version: 2
+Version: 3
 Path: infra/k8s/overlays/prod/README.md
 Description: Operator handoff for the production K8s overlay (P3.b).
              Read this before running `kubectl apply -k`.
@@ -21,10 +21,11 @@ config hashing, and credential discipline.
    docker buildx imagetools inspect ghcr.io/ayfondation/aywizz-api:sha-<sha>
    ```
 
-2. **Author `.env` and `.env.secret`** in this directory. Both files
+2. **Author `.env.config` and `.env.secret`** in this directory. Both files
    are git-ignored (Tier-2 per CLAUDE.md §4.6) — operator-authored
    from Vault/KMS at deploy time, never committed.
-   - `.env` : non-secret runtime config. Mirror `/.env.example`
+   - `.env.config` : non-secret runtime config. Mirror
+     `overlays/dev/.env.config.example`
      structure but with prod values (ArangoDB URL, MinIO endpoint,
      Gitea URL, NATS URL when wired, C8 gateway URL, etc.).
    - `.env.secret` : credentials (ArangoDB password, MinIO secret
@@ -81,7 +82,7 @@ SHALL be addressed before exposing the platform to real users :
 
 ## Rollback
 
-The overlay uses `disableNameSuffixHash: false` ; every `.env` change
+The overlay uses `disableNameSuffixHash: false` ; every `.env.config` change
 generates a fresh ConfigMap / Secret name and rolls deployments. To
 roll back, `kubectl rollout undo deployment/<name>` for each affected
 Deployment.

@@ -54,6 +54,8 @@ Thumbs.db
 .env
 .env.local
 .env.secret
+# Operator-authored k8s overlay config (non-secret, but environment-specific)
+.env.config
 *.pem
 *.key
 **/research/**

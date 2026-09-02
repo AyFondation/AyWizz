@@ -1,6 +1,6 @@
 // =============================================================================
 // File: live-docs-manager.test.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/tests/integration/live-docs-manager.test.tsx
 // Description: Integration tests for the shared <LiveDocsManager>
 //              component (R-500-010 v2). Exercises the three gaps the
@@ -14,6 +14,8 @@
 //                (c) Inline content editor — selecting a file loads
 //                    its text via `getDocumentText` ; `Edit` flips
 //                    to a textarea ; `Save` PUTs via `updateDocument`.
+//                (d) Source ↔ Preview read mode (Q-500-003) — raw text
+//                    by default, markdown rendered only on demand.
 //              Uses MSW to stub the artifacts + documents endpoints
 //              and the renderWithProviders helper for the ConfigProvider
 //              + AuthProvider tree.
@@ -167,7 +169,7 @@ const FILE_NODE = {
 };
 
 function renderManager() {
-  renderWithProviders(
+  return renderWithProviders(
     <BootstrapGate>
       <LiveDocsManager projectId="proj-a" variant="full" />
     </BootstrapGate>,
@@ -194,6 +196,37 @@ describe("LiveDocsManager — content editor", () => {
     fireEvent.change(editor, { target: { value: "edited body" } });
     fireEvent.click(screen.getByTestId("live-docs-save"));
     await waitFor(() => expect(put).toHaveBeenCalled());
+  });
+
+  it("shows raw source by default and renders markdown only after Preview", async () => {
+    // Q-500-003 wired markdown rendering into the chat + requirements
+    // surfaces. Here the default stays SOURCE : this pane sits next to a
+    // raw editor, and what is verified before editing (indentation, YAML
+    // frontmatter, exact offsets) is the source. Preview is opt-in.
+    server.use(
+      http.get(TREE, () => HttpResponse.json({ run_id: "live-docs", nodes: [FILE_NODE] })),
+      http.get(`${DOCS}/intro.md`, () =>
+        HttpResponse.text("# Hello\n", { headers: { "Content-Type": "text/markdown" } }),
+      ),
+    );
+    const { container } = renderManager();
+
+    fireEvent.click(await screen.findByTestId("file-tree-file-intro.md"));
+    await waitFor(() => expect(screen.getByTestId("live-docs-source")).toBeInTheDocument());
+    // The `#` marker is still on screen, and nothing rendered it away.
+    expect(screen.getByTestId("live-docs-source").textContent).toContain("# Hello");
+    expect(container.querySelector("h1")).toBeNull();
+    expect(screen.queryByTestId("live-docs-preview")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("live-docs-preview-toggle"));
+    await waitFor(() => expect(screen.getByTestId("live-docs-preview")).toBeInTheDocument());
+    expect(container.querySelector("h1")?.textContent).toBe("Hello");
+    expect(screen.queryByTestId("live-docs-source")).toBeNull();
+
+    // The toggle is a round trip, not a one-way switch.
+    fireEvent.click(screen.getByTestId("live-docs-preview-toggle"));
+    await waitFor(() => expect(screen.getByTestId("live-docs-source")).toBeInTheDocument());
+    expect(container.querySelector("h1")).toBeNull();
   });
 });
 

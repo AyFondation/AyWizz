@@ -1,6 +1,6 @@
 # =============================================================================
 # File: configmap-runtime.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/ay_platform_ui/configmap-runtime.yaml
 # Description: Runtime config served at the UI's `/runtime-config.json`
 #              path. Mounted into the UI Pod at
@@ -18,7 +18,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: aywizz-ui-runtime-config
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: ay-platform-ui
     app.kubernetes.io/component: ui

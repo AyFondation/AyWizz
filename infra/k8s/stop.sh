@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: stop.sh
-# Version: 1
+# Version: 2
 # Path: infra/k8s/stop.sh
 # Description: Tear down a K8s overlay from the active kubectl context.
 #              Wrapper around the denied `kubectl delete -k` (per
@@ -16,7 +16,12 @@
 #              Usage:
 #                infra/k8s/stop.sh dev
 #                infra/k8s/stop.sh dev --wipe   # destroy data too
+#                infra/k8s/stop.sh dev --wipe --ingress  # true from-scratch
 #                infra/k8s/stop.sh prod
+#
+#              v2 (2026-09-02): adds `--ingress`, symmetric to
+#              `run.sh --ingress` — removes the ingress-nginx controller so
+#              a full teardown really returns the cluster to a bare state.
 # =============================================================================
 
 set -euo pipefail
@@ -35,6 +40,10 @@ Options:
   --wipe        also delete PVCs + the namespace itself (DESTRUCTIVE).
                 Without --wipe, PVCs remain so re-running run.sh
                 re-attaches the existing data volumes.
+  --ingress     ALSO remove the ingress-nginx controller installed by
+                \`run.sh <env> --ingress\`. Symmetric to that flag. Leave it
+                off to keep the controller across redeploys — it is a
+                cluster prerequisite, not part of the application.
   -h, --help    this message
 EOF
 }
@@ -52,9 +61,11 @@ ENV="$1"
 shift
 
 WIPE=0
+DROP_INGRESS=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --wipe) WIPE=1 ;;
+        --ingress) DROP_INGRESS=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -91,6 +102,14 @@ if [ "${WIPE}" -eq 1 ]; then
     kubectl delete pvc --all -n "${NS}" --ignore-not-found=true
     echo "==> Deleting namespace ${NS}"
     kubectl delete namespace "${NS}" --ignore-not-found=true
+fi
+
+# The ingress controller is a CLUSTER prerequisite, not part of the app, so
+# it survives a normal teardown. --ingress removes it too, for a genuine
+# from-scratch state.
+if [ "${DROP_INGRESS}" -eq 1 ]; then
+    echo "==> --ingress set: removing the ingress-nginx controller"
+    kubectl delete -k "${SCRIPT_DIR}/base/ingress_nginx" --ignore-not-found=true
 fi
 
 echo "==> stop ${ENV} OK"

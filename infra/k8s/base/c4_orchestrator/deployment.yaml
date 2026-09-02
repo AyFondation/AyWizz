@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c4_orchestrator/deployment.yaml
 # Description: C4 Orchestrator Deployment. Shared `aywizz-api` image,
 #              runtime selected via `COMPONENT_MODULE=c4_orchestrator`.
@@ -9,7 +9,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c4-orchestrator
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c4-orchestrator
     app.kubernetes.io/component: c4
@@ -70,5 +69,5 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              cpu: "25m"
               memory: "128Mi"

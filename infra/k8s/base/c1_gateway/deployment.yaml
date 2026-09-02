@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c1_gateway/deployment.yaml
 # Description: Traefik v3 Deployment (C1 ingress tier). Uses the
 #              Kubernetes CRD provider (`--providers.kubernetescrd`) +
@@ -16,7 +16,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c1-gateway
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c1-gateway
     app.kubernetes.io/component: c1

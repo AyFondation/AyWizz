@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 2
+# Version: 4
 # Path: infra/k8s/base/c3_conversation/deployment.yaml
 # Description: C3 Conversation Service Deployment. Shared `aywizz-api`
 #              image, runtime selected via `COMPONENT_MODULE=c3_conversation`.
@@ -9,7 +9,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: c3-conversation
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c3-conversation
     app.kubernetes.io/component: c3
@@ -66,5 +65,6 @@ spec:
               cpu: "400m"
               memory: "512Mi"
             requests:
-              cpu: "100m"
+              # Holds open SSE streams — see base/kustomization.yaml.
+              cpu: "50m"
               memory: "128Mi"

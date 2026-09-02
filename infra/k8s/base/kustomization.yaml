@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/kustomization.yaml
 # Description: Root base for all platform components. Overlays
 #              (`overlays/dev/`, `overlays/prod/`) reference this base
@@ -20,6 +20,44 @@
 #              The default in-process dispatcher does not need it. This keeps
 #              the base dispatcher-agnostic so every overlay can reference it
 #              without dragging the extra namespace.
+#
+#              ── RESOURCE SIZING POLICY (v3) ────────────────────────────
+#              Target: a functional full-scale deployment for 2-5 concurrent
+#              users on a SMALL node (4 CPU). Not a performance-tuned
+#              profile — that comes later, from measurements.
+#
+#              The rule: RESERVE LITTLE, BURST WIDE.
+#                - `requests` reflect STEADY-STATE cost. They are a
+#                  scheduling reservation, held whether used or not, so an
+#                  over-stated request wastes capacity permanently. Setting
+#                  them low is near-zero risk: it affects scheduling and
+#                  eviction order, never throughput.
+#                - `limits` are a hard CFS-throttled ceiling — the only
+#                  place where an under-estimate actually slows the
+#                  platform. They are left generous.
+#
+#              Applied per class:
+#                - FastAPI tier (C2-C9, C16): I/O-bound glue, idle at a few
+#                  milli-CPU, blocked on ArangoDB/MinIO/the LLM provider.
+#                  25m, or 50m for the three on a hot path (C2 forward-auth
+#                  on every request, C3 SSE streams, C7 ingestion).
+#                - Edge (C1 Traefik, UI): 50m — every request crosses them.
+#                - Data tier (C11, C10) + LiteLLM + n8n: 50-150m.
+#                - The only genuinely CPU-hungry components are OLLAMA
+#                  (local embeddings) and C13 (extraction), and both are
+#                  BURSTY: small request, large limit.
+#
+#              Totals: ~925m of CPU requests for the whole namespace (was
+#              2550m), i.e. ~47% of a 4-CPU node once kube-system's
+#              incompressible ~850m and the ingress controller are counted.
+#              Memory is not a constraint (~14% of a 40GB node), so memory
+#              requests were left alone except on the two that dominated
+#              them (C13 2Gi→512Mi, Ollama 1Gi→512Mi).
+#
+#              These values are ESTIMATES derived from each component's
+#              behaviour, NOT measurements — metrics-server is not installed
+#              on the dev cluster. Revisit them against real telemetry
+#              before drawing performance conclusions.
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -27,6 +65,10 @@ kind: Kustomization
 resources:
   # Namespace first.
   - _namespace
+  # Security boundary — enforces the public/private split (see
+  # networkpolicies/networkpolicies.yaml). INERT on a CNI that does not
+  # implement NetworkPolicy (Docker Desktop's default).
+  - networkpolicies
   # Data tier.
   - c11_arangodb
   - c10_minio

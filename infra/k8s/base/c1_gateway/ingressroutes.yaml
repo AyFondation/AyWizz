@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ingressroutes.yaml
-# Version: 7
+# Version: 8
 # Path: infra/k8s/base/c1_gateway/ingressroutes.yaml
 # Description: Traefik IngressRoute CRDs — K8s mirror of
 #              `infra/c1_gateway/dynamic/routers.yml` (v10). Same path
@@ -61,7 +61,6 @@ apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: aywizz-public
-  namespace: aywizz
   labels:
     app.kubernetes.io/name: c1-gateway
     app.kubernetes.io/component: c1
