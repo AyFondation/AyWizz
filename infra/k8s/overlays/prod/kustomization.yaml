@@ -35,15 +35,24 @@ kind: Kustomization
 
 namespace: aywizz
 
-# v3 (Q-100-023): `../../base` is now dispatcher-agnostic — `c4_workers` was
-# moved OUT of the base resource list (it owns a separate `c4-workers`
-# Namespace that the `namespace: aywizz` transformer above would rename,
-# causing an ID conflict). Referencing the base wholesale is therefore safe
-# again. `c13_extractor` is opt-in (R-100-125) and added explicitly, mirroring
-# overlays/dev. To enable the K8s sub-agent dispatcher, apply the opt-in worker
-# layer SEPARATELY (it must NOT go through the `namespace: aywizz` transformer):
-#   kubectl apply -k infra/k8s/base/c4_workers
-# and set C4_DISPATCHER=k8s in .env.config.
+# v3 (Q-100-023): `../../base` is dispatcher-agnostic — `c4_workers` is NOT in
+# the base resource list. It is an OPT-IN layer whose `Role` is a live Pod
+# create/delete permission, so it should exist only where sandboxes are
+# actually dispatched. `c13_extractor` is opt-in too (R-100-125) and added
+# explicitly, mirroring overlays/dev.
+#
+# To enable the K8s sub-agent dispatcher:
+#   infra/k8s/run.sh prod --workers
+# and set C4_DISPATCHER_BACKEND=k8s in .env.config.
+#
+# PROD SHOULD USE A DEDICATED SANDBOX NAMESPACE. Since 2026-09-08 the layer
+# defaults to the platform namespace, a concession to a dev cluster that
+# grants only one. In that layout `create pods` is equivalent to READ on
+# every Secret of the namespace (a Pod may mount any Secret of its own
+# namespace, kubelet-side, with no RBAC on `secrets`), which hands the
+# orchestrator an indirect path to `aywizz-secrets`. For prod, create a
+# separate namespace, point `C4_K8S_NAMESPACE` at it, and set the
+# `namespace:` of `base/c4_workers/kustomization.yaml` accordingly.
 resources:
   - ../../base
   - ../../base/c13_extractor

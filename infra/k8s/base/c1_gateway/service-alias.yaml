@@ -1,0 +1,42 @@
+# =============================================================================
+# File: service-alias.yaml
+# Version: 1
+# Path: infra/k8s/base/c1_gateway/service-alias.yaml
+# Description: Short-name alias Service `c2` for C2 Auth. Same pattern and
+#              rationale as `c7_memory/service-alias.yaml` and
+#              `c12_workflow/service-alias.yaml`: make a compose service name
+#              resolve in-cluster.
+#
+#              WHY IT IS NEEDED HERE: `infra/c1_gateway/dynamic/middlewares.yml`
+#              is SHARED verbatim between compose and K8s, and its forwardAuth
+#              address is a raw URL (`http://c2:8000/auth/verify`) — it cannot
+#              go through the per-environment `services.yml` indirection the
+#              way routers do. Without this alias the shared middleware would
+#              NXDOMAIN in-cluster and every forward-auth'd route would fail,
+#              i.e. every authenticated endpoint of the platform.
+#
+#              This is the ONLY alias C1 needs: all 28 routers resolve their
+#              backends through `dynamic-k8s/services.yml`, which uses the
+#              canonical K8s Service names.
+#
+#              `c2-auth` remains the canonical name; this second Service
+#              selects the same pods.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: c2
+  labels:
+    app.kubernetes.io/name: c2
+    app.kubernetes.io/component: c2
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: c2-auth
+    app.kubernetes.io/component: c2
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

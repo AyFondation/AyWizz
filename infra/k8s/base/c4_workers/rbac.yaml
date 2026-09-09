@@ -1,19 +1,37 @@
 # =============================================================================
 # File: rbac.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c4_workers/rbac.yaml
-# Description: Cross-namespace RBAC for the C4 sub-agent dispatcher
-#              (R-200-030). Grants the orchestrator SA (`c4-orchestrator`
-#              in `aywizz`) the rights it needs against Pods in the
-#              `c4-workers` namespace : create, get, list, watch, delete.
+# Description: RBAC for the C4 sub-agent dispatcher (R-200-030). Grants the
+#              orchestrator SA (`c4-orchestrator`) the rights it needs
+#              against sandbox Pods: create, get, list, watch, delete.
 #              Nothing else — no pod/exec, no logs, no port-forward.
 #
-#              Narrow Role scope intentional : the orchestrator drives
-#              the Pod lifecycle (R-200-030/032) but DOES NOT read pod
-#              stdout (the sub-agent writes its completion to MinIO per
-#              R-200-033). If a future debug surface needs pod/log, it
-#              SHALL be a separate Role attached to a separate operator
-#              SA — not the orchestrator's.
+#              Namespaced `Role`, never a ClusterRole: Pod management is a
+#              namespaced operation, so the sandbox capability costs ZERO
+#              cluster-scoped permission. That is the whole point.
+#
+#              v2 (2026-09-08) — single-namespace deployment. Both the Role
+#              and its binding now live in `aywizz` (set by the bundle's
+#              namespace transformer) instead of a dedicated `c4-workers`
+#              namespace, because the target cluster grants only one.
+#
+#              READ THIS BEFORE REUSING: `create pods` in a namespace is
+#              equivalent to READ on every Secret of that namespace — a Pod
+#              can mount any Secret of its own namespace and the kubelet
+#              honours it without the creator holding RBAC on `secrets`. In
+#              the two-namespace layout this granted nothing (the sandbox
+#              namespace held no Secret); here it is an indirect path from
+#              the orchestrator to `aywizz-secrets`. Accepted deliberately
+#              under the single-namespace constraint; it is the reason to
+#              split the namespaces back as soon as the environment allows.
+#
+#              Narrow verb scope intentional: the orchestrator drives the
+#              Pod lifecycle (R-200-030/032) but DOES NOT read pod stdout
+#              (the sub-agent writes its completion to MinIO per R-200-033).
+#              If a future debug surface needs pod/log, it SHALL be a
+#              separate Role attached to a separate operator SA — not the
+#              orchestrator's.
 #
 # @relation implements:R-200-030
 # @relation implements:R-200-032
@@ -22,7 +40,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: c4-sub-agent-manager
-  namespace: c4-workers
   labels:
     app.kubernetes.io/name: c4-sub-agent-manager
     app.kubernetes.io/part-of: aywizz-platform
@@ -35,7 +52,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: c4-orchestrator-can-manage-sub-agents
-  namespace: c4-workers
   labels:
     app.kubernetes.io/name: c4-orchestrator-can-manage-sub-agents
     app.kubernetes.io/part-of: aywizz-platform
@@ -46,4 +62,3 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: c4-orchestrator
-    namespace: aywizz

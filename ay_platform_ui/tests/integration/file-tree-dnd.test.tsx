@@ -1,13 +1,19 @@
 // =============================================================================
 // File: file-tree-dnd.test.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/tests/integration/file-tree-dnd.test.tsx
 // Description: Drag-and-drop relocation tests for <FileTree> (file-tree.tsx
-//              v3). Validates that dropping a node onto a folder fires
-//              `onMove(sourcePath, destDir)`, that the implicit root drop
-//              zone moves to "", and that invalid moves (no-op into the
+//              v5). Validates that dropping a node onto a folder fires
+//              `onMove(sourcePath, destDir)`, that the root drop targets
+//              move to "", and that invalid moves (no-op into the
 //              current parent, into the dragged folder's own subtree) are
 //              filtered out before `onMove` runs.
+//
+//              v2 (2026-09-08) covers the explicit `/` root row: it is the
+//              reachable root target once a directory occupies the tree
+//              (the v3 container zone was only reachable through 4 px of
+//              padding), it exists on an empty tree, and dropping on a
+//              FILE row no longer relocates to the root by bubbling.
 //
 //              jsdom does not implement the HTML5 DnD data store, so a
 //              minimal DataTransfer stub is shared across dragStart/drop
@@ -113,6 +119,51 @@ describe("FileTree drag-and-drop", () => {
     const dt = makeDataTransfer();
     fireEvent.dragStart(folder, { dataTransfer: dt });
     fireEvent.drop(ownChild, { dataTransfer: dt });
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("moves to the repository root via the explicit root row when a directory exists", () => {
+    const onMove = vi.fn();
+    render(
+      <FileTree
+        nodes={[node("docs/intro.md"), node("docs/notes/n.md")]}
+        selectedPath={null}
+        onSelect={() => {}}
+        onMove={onMove}
+      />,
+    );
+    const file = screen.getByTestId("file-tree-file-docs/intro.md");
+    const rootRow = screen.getByTestId("file-tree-root");
+    const dt = makeDataTransfer();
+    fireEvent.dragStart(file, { dataTransfer: dt });
+    fireEvent.dragOver(rootRow, { dataTransfer: dt });
+    fireEvent.drop(rootRow, { dataTransfer: dt });
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(onMove).toHaveBeenCalledWith("docs/intro.md", "");
+  });
+
+  it("renders the root row even when the run has no files", () => {
+    render(<FileTree nodes={[]} selectedPath={null} onSelect={() => {}} onMove={vi.fn()} />);
+    expect(screen.getByTestId("file-tree-root")).toBeInTheDocument();
+    expect(screen.getByText("No files in this run.")).toBeInTheDocument();
+  });
+
+  it("does not relocate to the root when a node is dropped on a file row", () => {
+    const onMove = vi.fn();
+    render(
+      <FileTree
+        nodes={[node("overview.md"), node("docs/intro.md")]}
+        selectedPath={null}
+        onSelect={() => {}}
+        onMove={onMove}
+      />,
+    );
+    const dragged = screen.getByTestId("file-tree-file-docs/intro.md");
+    const otherFile = screen.getByTestId("file-tree-file-overview.md");
+    const dt = makeDataTransfer();
+    fireEvent.dragStart(dragged, { dataTransfer: dt });
+    fireEvent.dragOver(otherFile, { dataTransfer: dt });
+    fireEvent.drop(otherFile, { dataTransfer: dt });
     expect(onMove).not.toHaveBeenCalled();
   });
 

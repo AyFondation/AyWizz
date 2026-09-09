@@ -1,6 +1,6 @@
 // =============================================================================
 // File: file-tree.tsx
-// Version: 4
+// Version: 5
 // Path: ay_platform_ui/components/file-tree.tsx
 // Description: VSCode-like file tree component used by the Code source /
 //              Documents section. Takes the flat `ArtifactNode[]` list
@@ -41,6 +41,30 @@
 //              suffix `name (vN)` when the `ArtifactNode.version` field
 //              is present (live-docs, batched per AI response). Folders
 //              and version-less nodes render the bare name.
+//
+//              v5 (2026-09-08) : EXPLICIT root row `/`. v3's root drop
+//              zone was the scroll container, reachable only by event
+//              bubbling through its empty space — and that container is
+//              as tall as its content, so the only uncovered surface was
+//              the 4 px of `py-1`. As soon as a directory existed there
+//              was no reachable root target: moving a file back to the
+//              repository root was impossible. The root is now a real
+//              row, always rendered (empty tree included), so it exists
+//              for every project without being stored anywhere.
+//
+//              It is deliberately NOT a persisted artifact. The backend
+//              surfaces files only (`_blob_to_node`, kind="file") and
+//              directories are inferred client-side from path segments —
+//              so a stored root node would have nothing to attach to and
+//              would be dropped by `buildTree`. Being synthetic is what
+//              makes the root impossible to delete: no delete path can
+//              reach it.
+//
+//              Same release closes the accidental affordance that made
+//              the old zone usable at all: a drop on a FILE row bubbled
+//              to the container and silently moved the node to the root.
+//              File rows now absorb the drop (no-op) — the root row and
+//              the container's empty space are the only root targets.
 // =============================================================================
 
 "use client";
@@ -97,9 +121,12 @@ interface FileTreeProps {
    *  R-500-014 (keyboard a11y). */
   onContextMenu?: (target: FileTreeContextMenuTarget) => void;
   /** Optional drag-and-drop move handler. When set, rows become
-   *  `draggable` and folders (plus the implicit root) accept drops ;
-   *  dropping a node onto a folder fires `onMove(sourcePath, destDir)`
-   *  (destDir "" = repository root). Invalid drops are filtered out. */
+   *  `draggable` and folders — plus the explicit `/` root row and the
+   *  container's empty space — accept drops ; dropping a node onto a
+   *  folder fires `onMove(sourcePath, destDir)` (destDir "" =
+   *  repository root). Invalid drops are filtered out. File rows are
+   *  NOT drop targets: they absorb the drop rather than let it bubble
+   *  to the container, which would silently mean "move to root". */
   onMove?: (sourcePath: string, destDir: string) => void;
 }
 
@@ -188,21 +215,14 @@ export function FileTree({ nodes, selectedPath, onSelect, onContextMenu, onMove 
     onMove(source, destDir);
   }
 
-  if (tree.length === 0) {
-    return <p className="px-3 py-3 text-sm text-neutral-500">No files in this run.</p>;
-  }
-
-  // The root container doubles as the repository-root drop zone (a drop
-  // in empty space moves the node to the root). Folder rows
-  // `stopPropagation` on their own drop so the deepest target wins.
+  // The container keeps accepting drops so the empty space below the
+  // last row still means "root" ; the explicit `/` row below is the
+  // discoverable target and carries the highlight for both cases.
   const rootActive = !!onMove && dragOverPath === "";
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the container doubles as the root drop target for drag-and-drop file moves — a mouse-only enhancement, not a keyboard control (the inner <ul>/rows carry the semantics).
     <div
-      className={[
-        "max-h-[60vh] overflow-y-auto py-1",
-        rootActive ? "rounded ring-2 ring-inset ring-blue-400" : "",
-      ].join(" ")}
+      className="max-h-[60vh] overflow-y-auto py-1"
       data-testid="file-tree"
       onDragOver={
         onMove
@@ -216,6 +236,39 @@ export function FileTree({ nodes, selectedPath, onSelect, onContextMenu, onMove 
       onDrop={onMove ? (e) => handleDrop("", e) : undefined}
     >
       <ul aria-label="Files in this run">
+        <li>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: drop target only — the root row has no click action, so a <button> would be a focusable no-op. Keyboard relocation goes through the context menu (R-500-014). */}
+          <div
+            className={[
+              "flex w-full items-center gap-1 py-1 pr-3 pl-2 text-left text-xs text-neutral-700 dark:text-neutral-200",
+              rootActive ? "bg-blue-50 ring-1 ring-inset ring-blue-300 dark:bg-blue-950" : "",
+            ].join(" ")}
+            data-testid="file-tree-root"
+            onDragOver={
+              onMove
+                ? (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = "move";
+                    setDragOverPath("");
+                  }
+                : undefined
+            }
+            onDragLeave={
+              onMove
+                ? (e) => {
+                    e.stopPropagation();
+                    setDragOverPath((prev) => (prev === "" ? null : prev));
+                  }
+                : undefined
+            }
+            onDrop={onMove ? (e) => handleDrop("", e) : undefined}
+          >
+            <span className="inline-block w-3 text-neutral-400">▾</span>
+            <span aria-hidden="true">📁</span>
+            <span className="font-medium">/</span>
+          </div>
+        </li>
         {tree.map((node) => (
           <TreeRow
             key={node.path}
@@ -233,6 +286,9 @@ export function FileTree({ nodes, selectedPath, onSelect, onContextMenu, onMove 
           />
         ))}
       </ul>
+      {tree.length === 0 && (
+        <p className="px-3 py-3 text-sm text-neutral-500">No files in this run.</p>
+      )}
     </div>
   );
 }
@@ -404,6 +460,29 @@ function TreeRow({
             : undefined
         }
         {...dragSource}
+        // A file is not a directory, so it is not a drop target. It must
+        // still ABSORB the drop: letting it bubble reaches the container,
+        // whose handler means "move to root" — which is how dropping a
+        // file onto an unrelated file used to silently relocate it (v5).
+        onDragOver={
+          onMove
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "none";
+                setDragOverPath(() => null);
+              }
+            : undefined
+        }
+        onDrop={
+          onMove
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverPath(() => null);
+              }
+            : undefined
+        }
         style={{ paddingLeft: `${indentPx + 8 + 12}px` /* align with folder text */ }}
         className={[
           "flex w-full items-center gap-1 py-1 pr-3 text-left font-mono text-xs transition-colors",

@@ -1,18 +1,40 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c4_workers/kustomization.yaml
-# Description: Kustomization bundle for the C4 sub-agent dispatch
-#              infrastructure (R-200-030..033). Listed under the
-#              top-level `infra/k8s/base/kustomization.yaml` so a
-#              single `kubectl apply -k infra/k8s/base` provisions
-#              the c4-workers namespace, SAs, RBAC, NetworkPolicy.
+# Description: Opt-in bundle for the C4 sub-agent sandbox layer
+#              (R-200-030..033). Applied on its own, NOT from an overlay:
+#                infra/k8s/run.sh dev --workers
+#
+#              v2 (2026-09-08) — SINGLE-NAMESPACE deployment. The dedicated
+#              `c4-workers` Namespace is gone: sandbox pods now run in
+#              `aywizz` alongside the platform. Driven by a hard environment
+#              constraint (the target cluster grants exactly ONE namespace),
+#              not by preference.
+#
+#              SECURITY CONSEQUENCE, stated explicitly because no `can-i`
+#              check will reveal it: granting `create pods` in a namespace is
+#              equivalent to granting READ on every Secret of that namespace.
+#              A Pod may reference any Secret of its own namespace as a
+#              volume or via envFrom, and the kubelet performs that mount
+#              WITHOUT the creator holding any RBAC on `secrets`. The
+#              orchestrator SA therefore now has an indirect path to
+#              `aywizz-secrets` (provider API keys, AY_SECRET_MASTER_KEY).
+#              RBAC cannot close it: `resourceNames` does not apply to pod
+#              creation, and constraining the submitted podSpec would need a
+#              ValidatingAdmissionPolicy — a cluster-scoped object, which
+#              would defeat the namespace-only model this layer exists for.
+#              Restoring a second namespace removes the path entirely; see
+#              git history for the two-namespace variant.
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Applied as a standalone target, so it carries its own namespace transformer
+# (the overlays' `namespace: aywizz` does not reach this bundle).
+namespace: aywizz
+
 resources:
-  - namespace.yaml
   - serviceaccount.yaml
   - rbac.yaml
   - networkpolicy.yaml

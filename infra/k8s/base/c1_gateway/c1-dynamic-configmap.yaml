@@ -1,0 +1,589 @@
+# =============================================================================
+# File: c1-dynamic-configmap.yaml
+# Path: infra/k8s/base/c1_gateway/c1-dynamic-configmap.yaml
+# Description: GENERATED — do not edit by hand. Traefik file-provider
+#              dynamic configuration, mounted at /etc/traefik/dynamic.
+#              Sources (routers + middlewares are SHARED with compose):
+#                infra/c1_gateway/dynamic/routers.yml
+#                infra/c1_gateway/dynamic/middlewares.yml
+#                infra/c1_gateway/dynamic-k8s/services.yml
+#              Regenerate with:
+#                python3 infra/c1_gateway/scripts/gen_k8s_c1_configmap.py
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c1-traefik-dynamic
+  labels:
+    app.kubernetes.io/name: c1-traefik-dynamic
+    app.kubernetes.io/component: c1
+    app.kubernetes.io/part-of: aywizz-platform
+data:
+  routers.yml: |-
+    # =============================================================================
+    # File: routers.yml
+    # Version: 13
+    # Path: infra/c1_gateway/dynamic/routers.yml
+    # Description: Traefik HTTP router definitions. v11 adds `c8-admin-storage`
+    #              (`/admin/v1/storage`, priority 100) — the storage metering +
+    #              snapshot API that was missing (fell through to c2 → 404).
+    #              v10 adds `ui-admin-embedding`
+    #              (priority 60) so the UI governance PAGE paths `/admin/embedding-*`
+    #              reach the Next.js UI instead of C2 — the exact same fix v9 made
+    #              for `/admin/llm-*`, which had been forgotten for the (newer)
+    #              embedding registry pages (they returned "Not authenticated").
+    #              v9 adds `ui-admin-llm`
+    #              (priority 60) so the UI governance PAGE paths `/admin/llm-*`
+    #              reach the Next.js UI instead of C2 (they collided with the
+    #              c2-admin `/admin` prefix). The API prefix `/admin/v1/llm`
+    #              is unaffected (distinct string, still c8-admin-registry@100).
+    #              v8 adds the C8 admin LLM
+    #              governance surfaces (`/admin/v1/llm` priority 100 to win over
+    #              c2-admin ; `/api/v1/llm` priority 50), both forward-auth gated.
+    #              v3 adds the UI catch-all
+    #              (priority 1) so the Next.js standalone server receives
+    #              everything not claimed by an explicit backend route
+    #              (`/`, `/login`, `/dashboard`, `/_next/*`, etc.).
+    #              v2 aligns with real router paths and adds C7 / C9 public surfaces.
+    #
+    #   Route table (matches actual FastAPI routers as of session of 2026-04-23):
+    #     /auth/login     POST → C2 [rate-limit-auth]                          public
+    #     /auth/token     POST → C2 [rate-limit-auth]                          public
+    #     /auth/*              → C2  []                                        public
+    #     /ux/*                → C2  []                                        public
+    #     /api/v1/conversations/*          → C3 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/orchestrator/*           → C4 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/projects/*/requirements/* → C5 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/validation/*             → C6 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/memory/*                 → C7 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/mcp, /api/v1/mcp/*       → C9 [forward-auth-c2, secure-hdrs]
+    #     /uploads/*                       → C12 [forward-auth-c2, secure-hdrs]
+    #     <everything else>                → UI (priority 1)                   public
+    #
+    # @relation R-100-039 R-100-042 R-100-015 A-C1-1
+    # =============================================================================
+
+    http:
+      routers:
+
+        # -------------------------------------------------------------------------
+        # C2 — Auth Service (public endpoints, rate-limited login/token)
+        # -------------------------------------------------------------------------
+
+        c2-auth-login:
+          rule: "Path(`/auth/login`) && Method(`POST`)"
+          service: c2
+          entryPoints:
+            - web
+          middlewares:
+            - rate-limit-auth
+          priority: 100
+
+        c2-auth-token:
+          rule: "Path(`/auth/token`) && Method(`POST`)"
+          service: c2
+          entryPoints:
+            - web
+          middlewares:
+            - rate-limit-auth
+          priority: 100
+
+        c2-auth:
+          rule: "PathPrefix(`/auth`)"
+          service: c2
+          entryPoints:
+            - web
+          priority: 10
+
+        # UX bootstrap config — public, no forward-auth.
+        c2-ux-config:
+          rule: "PathPrefix(`/ux`)"
+          service: c2
+          entryPoints:
+            - web
+          priority: 10
+
+        # -------------------------------------------------------------------------
+        # C3 — Conversation Service
+        # -------------------------------------------------------------------------
+
+        c3-conversations:
+          rule: "PathPrefix(`/api/v1/conversations`)"
+          service: c3
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C4 — Orchestrator
+        # -------------------------------------------------------------------------
+
+        c4-orchestrator:
+          rule: "PathPrefix(`/api/v1/orchestrator`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # C4 — Project artifacts (transparent MinIO surface). Pinned with
+        # priority 100 so it WINS over `c2-projects` (also under
+        # `/api/v1/projects/*`, priority 50) for the artifacts subpath.
+        # R-200-131. Per-tenant member ; platform_manager rejected in-app.
+        c4-artifacts:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/artifacts(/.*)?$`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # C4 — Project versioning proxy (R-200-147). Pinned with priority
+        # 100 same as the artifacts surface for the same precedence
+        # reason against c2-projects.
+        c4-git:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/git(/.*)?$`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # C4 — Chat-direct DocGen document CRUD (D-015 / R-200-153..156).
+        # Same precedence (100) as c4-artifacts so it wins over the
+        # generic c2-projects route. Regexp matches
+        # `/api/v1/projects/<pid>/documents` and any sub-path.
+        c4-documents:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/documents(/.*)?$`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # C4 — Admin seed endpoint (dev-only). Different path prefix
+        # `/api/v1/admin/projects/*` so it doesn't collide with
+        # c4-artifacts above. Gated to admin/tenant_admin in-app.
+        c4-artifacts-admin:
+          rule: "PathPrefix(`/api/v1/admin/projects`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # -------------------------------------------------------------------------
+        # C2 — Admin (tenants lifecycle, platform_manager only)
+        # -------------------------------------------------------------------------
+
+        c2-admin:
+          rule: "PathPrefix(`/admin`)"
+          service: c2
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # UI governance pages live at `/admin/llm-registry` + `/admin/llm-catalogue`
+        # (Next.js routes). They collide with the C2 admin PathPrefix(`/admin`)
+        # above, so this higher-priority (60 > 50) router sends the `/admin/llm-*`
+        # PAGE paths to the UI WITHOUT forward-auth (the browser fetches the page;
+        # the UI's own apiClient carries the JWT on the API calls). It does NOT
+        # match the API prefix `/admin/v1/llm` (distinct string), which keeps
+        # winning via c8-admin-registry (priority 100).
+        ui-admin-llm:
+          rule: "PathPrefix(`/admin/llm`)"
+          service: ui
+          entryPoints:
+            - web
+          priority: 60
+
+        # UI governance pages for the EMBEDDING registry live at
+        # `/admin/embedding-registry` + `/admin/embedding-providers` +
+        # `/admin/embedding-catalogue` (Next.js routes). Same collision as
+        # `/admin/llm-*` with the C2 `/admin` prefix — this priority-60 router
+        # sends the PAGE document to the UI. NO forward-auth (browser page nav).
+        # The embedding ADMIN API stays on `/admin/v1/llm/embedding-*` (priority
+        # 100, distinct string) so it is unaffected.
+        ui-admin-embedding:
+          rule: "PathPrefix(`/admin/embedding`)"
+          service: ui
+          entryPoints:
+            - web
+          priority: 60
+
+        # -------------------------------------------------------------------------
+        # C2 — Projects (lifecycle + membership grants)
+        # -------------------------------------------------------------------------
+
+        c2-projects:
+          rule: "PathPrefix(`/api/v1/projects`)"
+          service: c2
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C2 — Self-service per-user preferences (trigram, LLM user prompt,
+        # bubble colour). Any authenticated tenant member ; gated server-side.
+        # -------------------------------------------------------------------------
+
+        c2-preferences:
+          rule: "PathPrefix(`/api/v1/users/me/preferences`)"
+          service: c2
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C5 — Requirements Service
+        # (routes ONLY under /api/v1/projects/<pid>/requirements/*).
+        # PathRegexp + priority 100 wins over c2-projects (priority 50)
+        # for the `/requirements/...` subpath, leaving C2 to handle bare
+        # /api/v1/projects, /api/v1/projects/<pid>, and members endpoints.
+        # -------------------------------------------------------------------------
+
+        c5-requirements:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/requirements(/.*)?$`)"
+          service: c5
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # C16 Backup/Restore — the `/backups` subpath, priority 100 (beats the
+        # generic /api/v1/projects → c2 at 50). Forward-auth so C2 resolves the
+        # caller's role ON {project_id} (R-900-011 / D-022).
+        c16-backup:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/backups(/.*)?$`)"
+          service: c16-backup
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        c16-backup-tenant:
+          rule: "PathRegexp(`^/api/v1/tenants/[^/]+/backups(/.*)?$`)"
+          service: c16-backup
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # -------------------------------------------------------------------------
+        # C6 — Validation Pipeline Registry
+        # -------------------------------------------------------------------------
+
+        c6-validation:
+          rule: "PathPrefix(`/api/v1/validation`)"
+          service: c6
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C7 — Memory Service
+        # -------------------------------------------------------------------------
+
+        c7-memory:
+          rule: "PathPrefix(`/api/v1/memory`)"
+          service: c7
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C8 admin — platform LLM registry + tenant catalogue + quality resolver
+        # (LLM-governance HMI). The registry sub-path `/admin/v1/llm` MUST win
+        # over `c2-admin` (`PathPrefix(/admin)`, priority 50) → priority 100.
+        # The catalogue/resolve sub-path `/api/v1/llm` has no collision (distinct
+        # from `/api/v1/projects` etc.) → priority 50. Both forward-auth gated ;
+        # per-role authorization is enforced in-app (platform_manager for registry,
+        # admin/tenant_admin for catalogue).
+        # -------------------------------------------------------------------------
+
+        c8-admin-registry:
+          rule: "PathPrefix(`/admin/v1/llm`)"
+          service: c8-admin
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        c8-admin-catalog:
+          rule: "PathPrefix(`/api/v1/llm`)"
+          service: c8-admin
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # Global LLM quota policy (Lot 3). Admin surface `/admin/v1/quota` MUST win
+        # over c2-admin (`PathPrefix(/admin)`, priority 50) → priority 100. The
+        # user-facing self-status `/api/v1/quota` has no collision (distinct string).
+        c8-admin-quota:
+          rule: "PathPrefix(`/admin/v1/quota`)"
+          service: c8-admin
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        c8-admin-quota-self:
+          rule: "PathPrefix(`/api/v1/quota`)"
+          service: c8-admin
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # C8 admin storage metering (E-100-002 v7): per-project/tenant disk usage +
+        # the snapshot trigger. Same c8-admin backend; priority 100 beats
+        # c2-admin (`/admin`). Without it, /admin/v1/storage/* → c2 → 404.
+        c8-admin-storage:
+          rule: "PathPrefix(`/admin/v1/storage`)"
+          service: c8-admin
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # -------------------------------------------------------------------------
+        # C9 — MCP Server (public MCP surface for external LLM agents)
+        # -------------------------------------------------------------------------
+
+        c9-mcp:
+          rule: "PathPrefix(`/api/v1/mcp`)"
+          service: c9
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # C12 — n8n Ingestion Workflow (upload reception)
+        # -------------------------------------------------------------------------
+
+        c12-uploads:
+          rule: "PathPrefix(`/uploads`)"
+          service: c12
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
+        # -------------------------------------------------------------------------
+        # UI catch-all (priority 1). Routes EVERYTHING not claimed above to
+        # the Next.js standalone server. Priority 1 = lowest, so any backend
+        # route wins. In `e2e_stack.sh up` (without dev override) the `ui`
+        # service doesn't exist ; Traefik returns 502 only if `/` is hit,
+        # which the pytest e2e tier never does.
+        # -------------------------------------------------------------------------
+        ui-catchall:
+          rule: "PathPrefix(`/`)"
+          service: ui
+          entryPoints:
+            - web
+          priority: 1
+  middlewares.yml: |-
+    # =============================================================================
+    # File: middlewares.yml
+    # Version: 1
+    # Path: infra/c1_gateway/dynamic/middlewares.yml
+    # Description: Traefik middleware definitions.
+    #   - rate-limit-auth   : brute-force protection on /auth/login + /auth/token
+    #   - forward-auth-c2   : JWT validation via C2 /auth/verify
+    #   - secure-headers    : HTTP security headers for all responses
+    #   - auth-mode-header  : propagates X-Platform-Auth-Mode from C2 verify (R-100-033 stub)
+    # @relation R-100-039 R-100-042 R-100-033
+    # =============================================================================
+
+    http:
+      middlewares:
+
+        # -------------------------------------------------------------------------
+        # R-100-039: 10 req/min per source IP on authentication endpoints.
+        # burst=5 allows short legitimate spikes without triggering the limit.
+        # -------------------------------------------------------------------------
+        rate-limit-auth:
+          rateLimit:
+            average: 10
+            burst: 5
+            period: 1m
+            sourceCriterion:
+              ipStrategy:
+                depth: 1
+
+        # -------------------------------------------------------------------------
+        # JWT validation delegated to C2 /auth/verify.
+        # On 200: Traefik forwards authResponseHeaders downstream.
+        # On non-200: Traefik returns 401 to the client without calling the backend.
+        # C2 MUST set X-User-Id, X-User-Roles, X-Platform-Auth-Mode as response
+        # headers in /auth/verify for downstream components to consume them.
+        # -------------------------------------------------------------------------
+        forward-auth-c2:
+          forwardAuth:
+            address: "http://c2:8000/auth/verify"
+            # Traefik forwards ONLY headers listed here from C2's response into
+            # the request that reaches backend services. Backends that route on
+            # tenant_id (C7 quota, C5 per-project routes) require X-Tenant-Id.
+            authResponseHeaders:
+              - "X-User-Id"
+              - "X-User-Roles"
+              - "X-Platform-Auth-Mode"
+              - "X-Tenant-Id"
+            trustForwardHeader: false
+
+        # -------------------------------------------------------------------------
+        # Defensive HTTP headers applied to all authenticated routes.
+        # -------------------------------------------------------------------------
+        secure-headers:
+          headers:
+            frameDeny: true
+            contentTypeNosniff: true
+            browserXssFilter: true
+            referrerPolicy: "strict-origin-when-cross-origin"
+            customResponseHeaders:
+              X-Content-Type-Options: "nosniff"
+              X-Frame-Options: "DENY"
+              Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+  services.yml: |-
+    # =============================================================================
+    # File: services.yml
+    # Version: 1
+    # Path: infra/c1_gateway/dynamic-k8s/services.yml
+    # Description: Traefik backend service definitions — KUBERNETES binding.
+    #              The K8s counterpart of `../dynamic/services.yml`. Only the
+    #              BINDING differs between environments: `routers.yml` and
+    #              `middlewares.yml` are shared verbatim by both (28 rules, 3
+    #              middlewares), and this file resolves the service names they
+    #              reference to the actual backends of the `aywizz` namespace.
+    #
+    #              WHY A SEPARATE FILE rather than one shared services.yml:
+    #              compose and K8s do not host the same backends. `c16-backup`
+    #              and `c8-admin` exist only in K8s; `ui` is instantiated only by
+    #              the compose dev override. Forcing a single file would mean
+    #              inventing fictitious backends on one side or the other.
+    #
+    #              NAMES: canonical K8s Service names are used here (`c2-auth`,
+    #              not `c2`) — no alias is needed for routing, because this file
+    #              IS the indirection. The single `c2` alias that does exist
+    #              (`../../k8s/base/c1_gateway/service-alias.yaml`) serves the
+    #              SHARED `middlewares.yml`, whose forwardAuth address is a raw
+    #              URL and therefore cannot go through this table.
+    #
+    #              Ports mirror the Services in `infra/k8s/base/<component>/`.
+    # =============================================================================
+
+    http:
+      services:
+
+        c2:
+          loadBalancer:
+            servers:
+              - url: "http://c2-auth:8000"
+
+        c3:
+          loadBalancer:
+            servers:
+              - url: "http://c3-conversation:8000"
+
+        c4:
+          loadBalancer:
+            servers:
+              - url: "http://c4-orchestrator:8000"
+
+        c5:
+          loadBalancer:
+            servers:
+              - url: "http://c5-requirements:8000"
+
+        c6:
+          loadBalancer:
+            servers:
+              - url: "http://c6-validation:8000"
+
+        c7:
+          loadBalancer:
+            servers:
+              - url: "http://c7-memory:8000"
+
+        c9:
+          loadBalancer:
+            servers:
+              - url: "http://c9-mcp:8000"
+
+        # C8 admin — LLM/embedding governance HMI. Distinct from the internal
+        # LiteLLM proxy (`litellm:4000`, never Traefik-routed) and from the
+        # cost receiver.
+        c8-admin:
+          loadBalancer:
+            servers:
+              - url: "http://c8-admin:8000"
+
+        # n8n. K8s Service `c12-workflow`; the short alias `c12` also exists for
+        # the n8n→C7 callbacks, but the canonical name is used here.
+        c12:
+          loadBalancer:
+            servers:
+              - url: "http://c12-workflow:5678"
+
+        c16-backup:
+          loadBalancer:
+            servers:
+              - url: "http://c16-backup:8000"
+
+        # Next.js UI — catch-all target (router priority 1): everything not
+        # claimed by an explicit backend route lands here.
+        ui:
+          loadBalancer:
+            servers:
+              - url: "http://ay-platform-ui:3000"

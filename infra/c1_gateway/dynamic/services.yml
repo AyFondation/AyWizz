@@ -1,8 +1,16 @@
 # =============================================================================
 # File: services.yml
-# Version: 4
+# Version: 5
 # Path: infra/c1_gateway/dynamic/services.yml
-# Description: Traefik backend service definitions (local dev URLs).
+# Description: Traefik backend service definitions — COMPOSE binding.
+#              This file is the environment-specific half of the dynamic
+#              config: `routers.yml` and `middlewares.yml` are SHARED with
+#              Kubernetes (mounted there from a generated ConfigMap), while
+#              the backend URLs live here for compose and in
+#              `../dynamic-k8s/services.yml` for K8s. The two environments
+#              genuinely do not host the same set of backends, so binding is
+#              the only part that legitimately differs.
+#              v5: added the missing `c16-backup` definition (see below).
 #              v4: added `c8-admin` (LLM governance HMI surface).
 #              Service names match Docker Compose service names.
 #              v3: added `ui` (Next.js standalone, port 3000). Only
@@ -64,6 +72,19 @@ http:
       loadBalancer:
         servers:
           - url: "http://c12:5678"
+
+    # C16 backup. `routers.yml` declares two routers against this service
+    # (`/api/v1/projects/*/backups`, `/api/v1/tenants/*/backups`) but the
+    # definition was missing here — Traefik does not publish a router whose
+    # service is unknown, so BOTH backup routes were silently absent from the
+    # compose stack. C16 has no compose service yet (K8s only), so the URL
+    # below does not resolve under `up` ; the routes now fail visibly (502)
+    # instead of vanishing, and the binding is already correct for the day
+    # C16 joins the compose stack.
+    c16-backup:
+      loadBalancer:
+        servers:
+          - url: "http://c16-backup:8000"
 
     # Next.js UI — instantiated by docker-compose.dev.override.yml
     # (manual-test stack). Unreachable in plain `up` / CI runs ; the

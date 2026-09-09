@@ -1,25 +1,34 @@
 # =============================================================================
 # File: networkpolicy.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c4_workers/networkpolicy.yaml
-# Description: Default-deny baseline for sub-agent pods (R-200-031).
-#              Sub-agents SHALL egress to ONLY :
-#                - DNS (kube-dns / coredns in `kube-system`) for name
-#                  resolution.
-#                - The C8 LLM gateway pod (label
-#                  `app.kubernetes.io/name=c8-llm` in `aywizz`).
-#                - The C10 MinIO pod (label
-#                  `app.kubernetes.io/name=c10-minio` in `aywizz`).
+# Description: Network containment for C4 sandbox pods (R-200-031). Two
+#              policies, because in a single namespace both directions must
+#              be stated:
+#                1. EGRESS — a sandbox may leave only towards DNS, the C8
+#                   LLM gateway and MinIO. No general internet egress; the
+#                   provider sits BEHIND C8, never directly addressable
+#                   (single-egress invariant, D-011).
+#                2. INGRESS — MinIO and litellm must accept those calls.
+#                   `default-deny-ingress` denies everything by default and
+#                   `allow-intra-platform` only admits pods carrying
+#                   `part-of: aywizz-platform`, which sandbox pods
+#                   deliberately DO NOT carry: taking that label would open
+#                   them to every platform pod, since that policy's
+#                   podSelector is `{}`. Hence this narrow, explicit pair.
 #
-#              No general internet egress. The orchestrator's LLM
-#              provider sits BEHIND C8, never directly addressable
-#              from a sub-agent (single-egress invariant per D-011).
+#              v2 (2026-09-08) — single-namespace deployment. Sandboxes now
+#              run in `aywizz`, so the egress rules select pods in the same
+#              namespace and a companion ingress policy is required (in the
+#              two-namespace layout `allow-intra-platform` was never in the
+#              way). Namespaces are applied by the bundle transformer.
 #
-#              Caveat : Docker Desktop K8s ships without a CNI that
-#              enforces NetworkPolicies (kubenet baseline) — the
-#              policy is a NO-OP in dev. In prod with Calico/Cilium
-#              the rules are enforced. The policy is shipped here so
-#              the contract is in the manifest regardless.
+#              CAVEAT, unchanged and important: Docker Desktop's K8s ships a
+#              CNI that does NOT enforce NetworkPolicies, so ALL of this is a
+#              NO-OP in local dev — a sandbox there can reach ArangoDB, MinIO
+#              and the API server freely. It is enforced on a cluster running
+#              Calico/Cilium. The contract lives in the manifest either way;
+#              do not mistake it for an active control in dev.
 #
 # @relation implements:R-200-031
 # =============================================================================
@@ -27,20 +36,19 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: c4-sub-agent-egress
-  namespace: c4-workers
   labels:
     app.kubernetes.io/name: c4-sub-agent-egress
     app.kubernetes.io/part-of: aywizz-platform
 spec:
-  # Apply to every sub-agent pod ; their `metadata.labels` set by the
-  # K8sDispatcher includes `app.kubernetes.io/name=c4-sub-agent`.
+  # The K8sDispatcher stamps `app.kubernetes.io/name=c4-sub-agent` on every
+  # sandbox pod it creates.
   podSelector:
     matchLabels:
       app.kubernetes.io/name: c4-sub-agent
   policyTypes:
     - Egress
   egress:
-    # 1) DNS — kube-system :53/UDP+TCP.
+    # 1) DNS — kube-system :53 UDP+TCP.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -50,30 +58,48 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    # 2) C8 LLM gateway pod in `aywizz` :8000. The label
-    # `app.kubernetes.io/name=litellm` matches the LiteLLM proxy
-    # Deployment once it lands (P1.1 — currently dev compose only).
-    # The policy is forward-compatible : zero matches = deny by default,
-    # which is the safe behaviour until the proxy Deployment ships.
+    # 2) C8 LLM gateway (LiteLLM proxy) :4000.
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: aywizz
-          podSelector:
+        - podSelector:
             matchLabels:
               app.kubernetes.io/name: litellm
       ports:
         - protocol: TCP
           port: 4000
-    # 3) MinIO pod in `aywizz` :9000. Label matches the existing
-    # statefulset (`infra/k8s/base/c10_minio/statefulset.yaml`).
+    # 3) MinIO :9000 — where the sub-agent reads its bundle and writes
+    #    completion.json (R-200-033).
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: aywizz
-          podSelector:
+        - podSelector:
             matchLabels:
               app.kubernetes.io/name: minio
       ports:
+        - protocol: TCP
+          port: 9000
+---
+# Companion ingress: without it the two egress targets above would still
+# refuse the connection, because sandbox pods are not `part-of` the platform.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-sub-agent-to-llm-and-storage
+  labels:
+    app.kubernetes.io/name: allow-sub-agent-to-llm-and-storage
+    app.kubernetes.io/part-of: aywizz-platform
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["litellm", "minio"]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: c4-sub-agent
+      ports:
+        - protocol: TCP
+          port: 4000
         - protocol: TCP
           port: 9000

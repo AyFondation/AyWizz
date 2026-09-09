@@ -1,12 +1,23 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/c1_gateway/kustomization.yaml
-# Description: Kustomize entry for C1 Traefik gateway. Includes RBAC,
-#              Deployment, Services (public + dashboard), Middlewares,
-#              and IngressRoutes. Traefik CRDs (IngressRoute / Middleware)
-#              MUST be installed in the cluster prior to applying — see
-#              the cluster bootstrap notes in `infra/k8s/README` (TBD).
+# Description: Kustomize entry for C1 Traefik gateway.
+#
+#              v2 — migration to the Traefik FILE provider, so the gateway
+#              needs NO Kubernetes API access at all (no ServiceAccount
+#              rights, no Role, no ClusterRole, no CRD to install). Adds:
+#                - c1-dynamic-configmap.yaml : GENERATED routing config
+#                  (routers + middlewares SHARED with compose, K8s service
+#                  binding) — regenerate with
+#                  `python3 infra/c1_gateway/scripts/gen_k8s_c1_configmap.py`
+#                - service-alias.yaml : the single `c2` alias required by the
+#                  shared middlewares' forwardAuth URL.
+#              The IngressRoute / Middleware CRD manifests are GONE: they
+#              were a hand-maintained mirror of the same 28 rules, and the
+#              CRD provider was what forced a ClusterRole. Nothing here is
+#              cluster-scoped any more, and no CRD needs installing — so
+#              `run.sh --crds` is no longer a prerequisite.
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -15,5 +26,5 @@ resources:
   - serviceaccount.yaml
   - deployment.yaml
   - service.yaml
-  - middlewares.yaml
-  - ingressroutes.yaml
+  - service-alias.yaml
+  - c1-dynamic-configmap.yaml

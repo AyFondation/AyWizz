@@ -26,9 +26,12 @@ spec:
         app.kubernetes.io/component: c4
         app.kubernetes.io/part-of: aywizz-platform
     spec:
-      # Bind to the SA the K8sDispatcher needs (cross-namespace RBAC
-      # on Pods in c4-workers per `c4_workers/rbac.yaml`). Provisioned
-      # by the c4_workers kustomization.
+      # The identity the K8sDispatcher acts as. It carries NO rights on its
+      # own; the opt-in `c4_workers` layer binds it to a namespaced Role
+      # granting Pod create/get/list/watch/delete where sandboxes run
+      # (`c4_workers/rbac.yaml`). Declared here, not there, so the SA always
+      # exists alongside the Deployment that references it — including with
+      # the default in-process dispatcher, where it holds nothing.
       serviceAccountName: c4-orchestrator
       containers:
         - name: api

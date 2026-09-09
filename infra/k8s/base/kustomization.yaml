@@ -11,12 +11,17 @@
 #              resources in dependency-aware order; we list dependencies
 #              first for human readability.
 #
-#              v2 (Q-100-023): `c4_workers` is NO LONGER listed here. It
-#              declares its OWN `c4-workers` Namespace, which the overlays'
-#              `namespace: aywizz` transformer would rename → an ID conflict
-#              that breaks `kubectl kustomize`. It is a dispatcher-specific,
-#              opt-in layer: apply `infra/k8s/base/c4_workers/` SEPARATELY
-#              (no `namespace:` transformer) only when `C4_DISPATCHER=k8s`.
+#              v2 (Q-100-023): `c4_workers` is NO LONGER listed here. It is
+#              a dispatcher-specific, OPT-IN layer, applied separately with
+#              `infra/k8s/run.sh <env> --workers`, and only when
+#              `C4_DISPATCHER_BACKEND=k8s`. Its `Role` is a live permission
+#              (Pod create/delete) and has no business existing where no
+#              sandbox is ever dispatched.
+#              (Its original reason for being separate — it declared its own
+#              `c4-workers` Namespace, which the overlays' transformer would
+#              rename → ID conflict — no longer applies: since 2026-09-08 the
+#              sandboxes run IN the platform namespace. The layer stays
+#              separate for the opt-in reason above.)
 #              The default in-process dispatcher does not need it. This keeps
 #              the base dispatcher-agnostic so every overlay can reference it
 #              without dragging the extra namespace.
@@ -81,8 +86,8 @@ resources:
   - c2_auth
   - c3_conversation
   - c4_orchestrator
-  # c4_workers is intentionally NOT here (Q-100-023) — it owns a separate
-  # `c4-workers` Namespace and is applied opt-in when C4_DISPATCHER=k8s.
+  # c4_workers is intentionally NOT here — opt-in layer, installed with
+  # `run.sh <env> --workers` only when C4_DISPATCHER_BACKEND=k8s.
   - c5_requirements
   - c6_validation
   - c7_memory

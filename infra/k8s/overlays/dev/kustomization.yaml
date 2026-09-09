@@ -9,13 +9,13 @@
 #
 #              v2 (2026-05-26): reference each base/<component>/ EXPLICITLY
 #              (like overlays/system-test) instead of `../../base`, and OMIT
-#              c4_workers. Reason: the `namespace: aywizz` transformer renames
-#              the separate `c4-workers` Namespace to `aywizz` → ID conflict,
-#              breaking `kubectl kustomize`. c4_workers (the K8s sub-agent
-#              dispatch namespace) is only needed when C4_DISPATCHER=k8s ; the
-#              default in-process dispatcher does not use it, so dev excludes
-#              it. The separate-namespace isolation is preserved for prod
-#              (see Q-100-023).
+#              c4_workers — it is an OPT-IN layer installed separately with
+#              `infra/k8s/run.sh dev --workers`, carrying a live Pod
+#              create/delete Role that should not exist unless sandboxes are
+#              actually dispatched (C4_DISPATCHER_BACKEND=k8s).
+#              (The original reason — its own `c4-workers` Namespace clashing
+#              with the `namespace: aywizz` transformer — lapsed on
+#              2026-09-08: sandboxes now run IN this namespace.)
 #
 #              configMapGenerator + secretGenerator hash the source
 #              file contents into the ConfigMap / Secret name (e.g.
@@ -29,9 +29,10 @@ kind: Kustomization
 
 namespace: aywizz
 
-# Explicit component list (NOT `../../base`) so the `namespace: aywizz`
-# transformer never sweeps the separate `c4-workers` namespace. Mirrors the
-# overlays/system-test pattern. c4_workers + _mock_llm are intentionally absent.
+# Explicit component list (NOT `../../base`), mirroring the
+# overlays/system-test pattern. c4_workers + _mock_llm are intentionally
+# absent: the first is the opt-in sandbox layer (`run.sh dev --workers`),
+# the second is a CI-only helper.
 resources:
   - ../../base/_namespace
   - ../../base/networkpolicies

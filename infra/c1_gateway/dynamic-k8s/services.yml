@@ -1,0 +1,91 @@
+# =============================================================================
+# File: services.yml
+# Version: 1
+# Path: infra/c1_gateway/dynamic-k8s/services.yml
+# Description: Traefik backend service definitions — KUBERNETES binding.
+#              The K8s counterpart of `../dynamic/services.yml`. Only the
+#              BINDING differs between environments: `routers.yml` and
+#              `middlewares.yml` are shared verbatim by both (28 rules, 3
+#              middlewares), and this file resolves the service names they
+#              reference to the actual backends of the `aywizz` namespace.
+#
+#              WHY A SEPARATE FILE rather than one shared services.yml:
+#              compose and K8s do not host the same backends. `c16-backup`
+#              and `c8-admin` exist only in K8s; `ui` is instantiated only by
+#              the compose dev override. Forcing a single file would mean
+#              inventing fictitious backends on one side or the other.
+#
+#              NAMES: canonical K8s Service names are used here (`c2-auth`,
+#              not `c2`) — no alias is needed for routing, because this file
+#              IS the indirection. The single `c2` alias that does exist
+#              (`../../k8s/base/c1_gateway/service-alias.yaml`) serves the
+#              SHARED `middlewares.yml`, whose forwardAuth address is a raw
+#              URL and therefore cannot go through this table.
+#
+#              Ports mirror the Services in `infra/k8s/base/<component>/`.
+# =============================================================================
+
+http:
+  services:
+
+    c2:
+      loadBalancer:
+        servers:
+          - url: "http://c2-auth:8000"
+
+    c3:
+      loadBalancer:
+        servers:
+          - url: "http://c3-conversation:8000"
+
+    c4:
+      loadBalancer:
+        servers:
+          - url: "http://c4-orchestrator:8000"
+
+    c5:
+      loadBalancer:
+        servers:
+          - url: "http://c5-requirements:8000"
+
+    c6:
+      loadBalancer:
+        servers:
+          - url: "http://c6-validation:8000"
+
+    c7:
+      loadBalancer:
+        servers:
+          - url: "http://c7-memory:8000"
+
+    c9:
+      loadBalancer:
+        servers:
+          - url: "http://c9-mcp:8000"
+
+    # C8 admin — LLM/embedding governance HMI. Distinct from the internal
+    # LiteLLM proxy (`litellm:4000`, never Traefik-routed) and from the
+    # cost receiver.
+    c8-admin:
+      loadBalancer:
+        servers:
+          - url: "http://c8-admin:8000"
+
+    # n8n. K8s Service `c12-workflow`; the short alias `c12` also exists for
+    # the n8n→C7 callbacks, but the canonical name is used here.
+    c12:
+      loadBalancer:
+        servers:
+          - url: "http://c12-workflow:5678"
+
+    c16-backup:
+      loadBalancer:
+        servers:
+          - url: "http://c16-backup:8000"
+
+    # Next.js UI — catch-all target (router priority 1): everything not
+    # claimed by an explicit backend route lands here.
+    ui:
+      loadBalancer:
+        servers:
+          - url: "http://ay-platform-ui:3000"

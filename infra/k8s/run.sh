@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 6
+# Version: 7
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
 #              `.claude/settings.json`); the wrapper is the explicit,
 #              auditable entry point per CLAUDE.md §5.3.
+#
+#              v7 (2026-09-08): adds `--workers` — installs the C4 sandbox
+#              layer (a powerless SA for sandbox pods, a NAMESPACED Role
+#              granting the orchestrator Pod lifecycle, and the egress /
+#              ingress policies that contain a sandbox). Nothing
+#              cluster-scoped. Required when C4_DISPATCHER_BACKEND=k8s;
+#              kept a separate, opt-in target because that Role is a live
+#              permission and should not exist where no sandbox is
+#              dispatched.
+#              Same release marks `--crds` OBSOLETE: C1 moved to the Traefik
+#              file provider, so the platform installs no CRD and holds no
+#              cluster-scoped RBAC at all.
 #
 #              v2 (2026-05-27): adds `--crds` — installs the Traefik
 #              IngressRoute/Middleware CRDs (v3.3, matching the gateway
@@ -64,6 +76,15 @@ TRAEFIK_CRDS_URL="https://raw.githubusercontent.com/traefik/traefik/${TRAEFIK_VE
 # target because it declares its own namespace (see that file's header).
 INGRESS_NGINX_PATH="${SCRIPT_DIR}/base/ingress_nginx"
 
+# The C4 sub-agent sandbox layer (R-200-030..033): a powerless
+# ServiceAccount for the sandbox pods, a NAMESPACED Role granting the
+# orchestrator Pod lifecycle, and the egress/ingress policies that contain a
+# sandbox. Nothing cluster-scoped. Kept a SEPARATE, opt-in kustomize target
+# rather than folded into `base/`: the Role is a live permission and should
+# exist only where sandboxes are actually dispatched
+# (C4_DISPATCHER_BACKEND=k8s).
+C4_WORKERS_PATH="${SCRIPT_DIR}/base/c4_workers"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") <env> [options]
@@ -73,7 +94,14 @@ Environments:
   prod    apply overlays/prod (when present)
 
 Options:
-  --crds        install Traefik CRDs (v3.3) before applying — once per cluster
+  --workers     install the C4 sandbox layer into the platform namespace
+                (powerless SA for sandbox pods, namespaced Role granting
+                the orchestrator Pod lifecycle, egress+ingress policies).
+                Required when C4_DISPATCHER_BACKEND=k8s.
+  --crds        OBSOLETE since C1 moved to the Traefik file provider — the
+                platform no longer uses IngressRoute/Middleware CRDs and no
+                longer needs them installed. Kept for clusters still holding
+                old CRs; harmless, but not a prerequisite any more.
   --ingress     install the ingress-nginx controller before applying — once
                 per cluster. SKIP on a cluster that already has an ingress
                 controller (AKS app routing, AGIC, an existing nginx); set
@@ -106,6 +134,7 @@ WAIT=0
 SKIP_JOBS=0
 WANT_CRDS=0
 WANT_INGRESS=0
+WANT_WORKERS=0
 REINIT=0
 RESTART=0
 while [ "$#" -gt 0 ]; do
@@ -114,6 +143,7 @@ while [ "$#" -gt 0 ]; do
         --no-jobs) SKIP_JOBS=1 ;;
         --crds) WANT_CRDS=1 ;;
         --ingress) WANT_INGRESS=1 ;;
+        --workers) WANT_WORKERS=1 ;;
         --reinit) REINIT=1 ;;
         --restart) RESTART=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -195,6 +225,15 @@ sys.stdout.write(yaml.safe_dump_all(kept, sort_keys=False))' \
     kubectl apply -f "${BUILD_OUT}"
 else
     kubectl apply -k "${OVERLAY_PATH}"
+fi
+
+# AFTER the overlay, never before: the sandbox layer targets the PLATFORM
+# namespace (single-namespace deployment), so `aywizz` must already exist.
+# Applying it first fails outright on a from-scratch install, where the
+# overlay is what creates the namespace.
+if [ "${WANT_WORKERS}" -eq 1 ]; then
+    echo "==> Installing the C4 sandbox layer"
+    kubectl apply -k "${C4_WORKERS_PATH}"
 fi
 
 if [ "${RESTART}" -eq 1 ]; then

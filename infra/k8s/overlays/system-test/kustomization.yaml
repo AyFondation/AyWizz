@@ -246,7 +246,9 @@ configMapGenerator:
       - C4_K8S_IMAGE=aywizz-api:test
       - C4_K8S_IMAGE_PULL_POLICY=IfNotPresent
       - C4_K8S_KUBECONFIG_PATH=
-      - C4_K8S_NAMESPACE=c4-workers
+      # Matches where base/c4_workers now installs (the platform namespace).
+      # Inert here anyway: this overlay runs C4_DISPATCHER_BACKEND=in-process.
+      - C4_K8S_NAMESPACE=aywizz
       - C4_K8S_POD_VIEW_C8_DEFAULT_MODEL=
       - C4_K8S_POD_VIEW_C8_GATEWAY_URL=http://mock-llm:8000/v1
       - C4_K8S_POD_VIEW_MINIO_ENDPOINT=minio:9000
