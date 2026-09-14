@@ -73,6 +73,8 @@ done
 
 # shellcheck source=../../infra/scripts/_k8s_diagnostics.sh
 . "${MONOREPO_ROOT}/infra/scripts/_k8s_diagnostics.sh"
+# shellcheck source=../../infra/scripts/_kind_preload.sh
+. "${MONOREPO_ROOT}/infra/scripts/_kind_preload.sh"
 
 cleanup() {
     # Capture BEFORE deleting: the trap fires on failure too, and the cluster
@@ -117,6 +119,12 @@ if [ "${SKIP_BUILD}" -eq 0 ]; then
 else
     echo "==> --skip-build: assuming ${IMAGE_TAG_API} + ${IMAGE_TAG_UI} already loaded"
 fi
+
+# Third-party images ALWAYS, even under --skip-build: they are not what that
+# flag skips, and leaving them to the node's own containerd is what broke this
+# job on v0.1.0-beta.14 (see `_kind_preload.sh`).
+preload_third_party_images "${CLUSTER_NAME}" "${OVERLAY_PATH}" \
+    "${IMAGE_TAG_API}" "${IMAGE_TAG_UI}"
 
 # -----------------------------------------------------------------------------
 # 4. Apply the system-test overlay

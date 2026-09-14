@@ -72,6 +72,8 @@ fi
 
 # shellcheck source=_k8s_diagnostics.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_k8s_diagnostics.sh"
+# shellcheck source=_kind_preload.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_kind_preload.sh"
 
 cleanup() {
     # Capture BEFORE deleting: the trap fires on failure too, and the cluster
@@ -119,6 +121,11 @@ docker build -t "${IMAGE_TAG_UI}" -f "${DOCKERFILE_UI}" "${MONOREPO_ROOT}"
 echo "==> Loading images into kind"
 kind load docker-image "${IMAGE_TAG_API}" --name "${CLUSTER_NAME}"
 kind load docker-image "${IMAGE_TAG_UI}" --name "${CLUSTER_NAME}"
+
+# The third-party images too — see `_kind_preload.sh`. Leaving them to the
+# node's own containerd is what broke both kind jobs on v0.1.0-beta.14.
+preload_third_party_images "${CLUSTER_NAME}" "${OVERLAY_PATH}" \
+    "${IMAGE_TAG_API}" "${IMAGE_TAG_UI}"
 
 echo "==> Applying overlay ${OVERLAY_PATH}"
 kubectl apply -k "${OVERLAY_PATH}"
