@@ -216,5 +216,13 @@ litellm_settings:
   # (`COST_RECEIVER_URL`). The proxy image is unmodified (§4.5) — the
   # callback file is mounted + put on PYTHONPATH ; only `litellm` +
   # `httpx` (already in the image) are imported.
-  callbacks: ["cost_forwarder.cost_forwarder_instance"]
+  # `credential_injector` runs as a PRE-call hook, `cost_forwarder` as a
+  # post-call logger — they never contend. The injector resolves the provider
+  # call target for callers that reach this proxy DIRECTLY (the OpenHands
+  # generate engine ; C13) and therefore never passed through
+  # `C8LLMClient._inject_upstream_key`. It leaves any request that already
+  # carries an `api_key` strictly untouched, so the app-tier path is unaffected.
+  callbacks:
+    - "cost_forwarder.cost_forwarder_instance"
+    - "credential_injector.credential_injector_instance"
   drop_params: true

@@ -43,9 +43,9 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 54 | 16 | 13 | 1 | 0 | 24 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 14 | 0 | 0 | 0 | 8 | 6 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 3 | 21 | 0 | 0 | 0 |
-| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 60 | 7 | 13 | 1 | 0 | 39 |
+| [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 62 | 9 | 13 | 1 | 0 | 39 |
 | [900](./900.md) | 13 | 10 | 1 | 1 | 0 | 1 |
-| **Total** | **373** | **71** | **131** | **12** | **8** | **151** |
+| **Total** | **375** | **73** | **131** | **12** | **8** | **151** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -143,13 +143,13 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-200-002` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/models.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/router.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | — |
 | `R-200-003` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/state.py` | — |
 | `R-200-010` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | — |
-| `R-200-011` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/code/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/documentation/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | `ay_platform_core/tests/unit/c4_orchestrator/test_documentation_domain_plugin.py` |
-| `R-200-012` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/code/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/documentation/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | `ay_platform_core/tests/unit/c4_orchestrator/test_documentation_domain_plugin.py` |
+| `R-200-011` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/in_process.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/code/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/documentation/plugin.py` (+2 more) | `ay_platform_core/tests/unit/c4_orchestrator/test_dispatcher.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_documentation_domain_plugin.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_generate_engine.py` |
+| `R-200-012` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/code/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/domains/documentation/plugin.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/service.py` | `ay_platform_core/tests/unit/c4_orchestrator/test_dispatcher.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_documentation_domain_plugin.py` |
 | `R-200-013` | v1 | draft | **not-yet** | — | — |
 | `R-200-020` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/models.py` | — |
 | `R-200-021` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/in_process.py` | — |
 | `R-200-022` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c4_orchestrator/models.py` | — |
-| `R-200-030` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/_sub_agent/__init__.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/__main__.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py` (+6 more) | `ay_platform_core/tests/integration/c4_orchestrator/test_k8s_dispatcher_e2e.py`, `ay_platform_core/tests/unit/_sub_agent/test_runtime.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_k8s_dispatcher.py` |
+| `R-200-030` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/_sub_agent/__init__.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/__main__.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py` (+5 more) | `ay_platform_core/tests/integration/c4_orchestrator/test_k8s_dispatcher_e2e.py`, `ay_platform_core/tests/unit/_sub_agent/test_runtime.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_k8s_dispatcher.py` |
 | `R-200-031` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/k8s.py`, `infra/k8s/base/c4_orchestrator/serviceaccount.yaml` (+1 more) | `ay_platform_core/tests/unit/c4_orchestrator/test_k8s_dispatcher.py` |
 | `R-200-032` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py`, `ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/k8s.py`, `infra/k8s/base/c4_workers/rbac.yaml` | `ay_platform_core/tests/integration/c4_orchestrator/test_k8s_dispatcher_e2e.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_k8s_dispatcher.py` |
 | `R-200-033` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/_sub_agent/__init__.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/models.py`, `ay_platform_core/src/ay_platform_core/_sub_agent/runtime.py` (+3 more) | `ay_platform_core/tests/integration/c4_orchestrator/test_k8s_dispatcher_e2e.py`, `ay_platform_core/tests/unit/_sub_agent/test_runtime.py`, `ay_platform_core/tests/unit/c4_orchestrator/test_dispatch_storage.py` (+1 more) |
@@ -337,7 +337,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-500-002` | v1 | approved | **divergent** | — | — |
 | `R-500-003` | v1 | approved | **divergent** | — | — |
 | `R-500-004` | v1 | approved | **divergent** | — | — |
-| `R-500-005` | v1 | approved | **divergent** | — | — |
+| `R-500-005` | v3 | approved | **divergent** | — | — |
 | `R-500-006` | v1 | approved | **divergent** | — | — |
 | `R-500-007` | v1 | approved | **divergent** | — | — |
 | `R-500-008` | v1 | approved | **divergent** | — | — |
@@ -441,6 +441,8 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-800-145` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/unit/c8_llm/test_quota.py`, `ay_platform_core/tests/unit/c8_llm/test_quota_repository.py` |
 | `R-800-146` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/quota/router.py`, `ay_platform_core/src/ay_platform_core/c8_llm/quota/service.py` | `ay_platform_core/tests/integration/c8_admin/test_project_consumption_e2e.py`, `ay_platform_core/tests/integration/c8_llm/test_litellm_clientside_auth.py`, `ay_platform_core/tests/unit/c8_llm/test_model_resolver.py` (+2 more) |
 | `R-800-147` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/client.py` | `ay_platform_core/tests/unit/c8_llm/test_prompt_cache.py` |
+| `R-800-148` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/key_provider.py` | `ay_platform_core/tests/unit/c8_llm/test_key_provider.py` |
+| `R-800-149` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c8_llm/registry/call_target_router.py`, `infra/k8s/base/c8_gateway/c8-configmaps.yaml` | `ay_platform_core/tests/unit/c8_llm/test_call_target_router.py` |
 
 ## R-900-* — [900](./900.md)
 

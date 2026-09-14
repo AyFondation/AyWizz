@@ -6,6 +6,15 @@
 #              (`wire_format/upstream`), the provider's mandatory api_base, and
 #              the decrypted provider key. Graceful on unknown alias / dangling
 #              provider. Best-effort by construction.
+#
+#              These cases ARE the R-800-148 contract: the three-part rewrite
+#              (model / api_base / decrypted key) and the best-effort clause
+#              that leaves a request untouched rather than failing a call. The
+#              marker was absent until 800-SPEC v13 for the plain reason that
+#              the requirement did not exist — the contract lived in a version
+#              note (§8.1 gap, closed 2026-09-11).
+#
+# @relation validates:R-800-148
 # =============================================================================
 
 from __future__ import annotations

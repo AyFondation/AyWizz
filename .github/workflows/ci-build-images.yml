@@ -158,3 +158,140 @@ jobs:
           cache-from: type=gha,scope=ui
           cache-to: type=gha,mode=max,scope=ui
           provenance: false
+
+  # Added 2026-09-14 after an AKS deployment failed to pull this image.
+  # `VERSIONING.md` §10 had listed aywizz-c13-extractor among the published
+  # images since it was written, but no job ever built it: the name
+  # `ghcr.io/…/aywizz-c13-extractor` was only ever a NAMING CONVENTION for an
+  # image built locally by `k8s_build_images.sh --c13`, which docker-desktop
+  # serves from its shared store under `imagePullPolicy: IfNotPresent`. That
+  # works on a local cluster and cannot work on a managed one — AKS has no
+  # such store, so the pull went to GHCR and found nothing.
+  build-c13:
+    name: build & push c13-extractor (GHCR)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (sha that triggered ci-tests)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Lowercase repository owner
+        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute c13 image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER_LC }}/aywizz-c13-extractor
+          tags: |
+            type=raw,value=latest
+            type=raw,value=main
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=AyWizz C13 Extractor
+            org.opencontainers.image.description=Document extraction + enrichment service (D-020, AyExtractor vendored). Internal-only, no gateway route (R-100-125 v2); consumed by C12 ingestion workflows and opted into per overlay.
+            org.opencontainers.image.vendor=AyWizz
+            org.opencontainers.image.licenses=Proprietary
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md
+
+      - name: Build and push c13 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/c13_extractor/docker/Dockerfile
+          # The image stamps the source revision it vendored (D-020 §3); the
+          # local builder passes the same arg.
+          build-args: |
+            MONOREPO_GIT_SHA=${{ github.event.workflow_run.head_sha }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=c13
+          cache-to: type=gha,mode=max,scope=c13
+          provenance: false
+
+  # Added 2026-09-14 alongside build-c13, for the same reason found the same
+  # way: `infra/k8s/base/c4_openhands` rewrites the C4 image to
+  # `ghcr.io/…/aywizz-c15-runner`, so that opt-in layer simply CANNOT run on a
+  # cluster without a local image store until this image is published. The gap
+  # was invisible on docker-desktop, where `k8s_build_images.sh --c15` fills the
+  # shared store and no pull ever happens.
+  #
+  # It is the api image PLUS the `openhands` extra (libtmux, tree-sitter,
+  # browser-use, litellm) — by far the heaviest of the four, and the reason the
+  # shared `ay-api` image deliberately does not carry that tree (R-100-114).
+  # Its own build cache scope keeps it from evicting the others'.
+  build-c15:
+    name: build & push c15-runner (GHCR)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (sha that triggered ci-tests)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Lowercase repository owner
+        run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute c15 image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER_LC }}/aywizz-c15-runner
+          tags: |
+            type=raw,value=latest
+            type=raw,value=main
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=AyWizz C15 Runner
+            org.opencontainers.image.description=The ay-api image plus ay_platform_core[openhands] (openhands-sdk + openhands-tools) and its runtime tools (tmux, git). Runs the C4 Orchestrator with C4_GENERATE_ENGINE=openhands; the shared api image stays free of this dependency tree.
+            org.opencontainers.image.vendor=AyWizz
+            org.opencontainers.image.licenses=Proprietary
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/requirements/050-ARCHITECTURE-OVERVIEW.md
+
+      - name: Build and push c15 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile.c15-runner
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=c15
+          cache-to: type=gha,mode=max,scope=c15
+          provenance: false

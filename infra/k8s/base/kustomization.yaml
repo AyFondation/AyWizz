@@ -68,8 +68,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  # Namespace first.
-  - _namespace
+  # NO `_namespace` HERE since 2026-09-14 — deliberately, and it is the one
+  # change that takes the platform from "almost no cluster rights" to none.
+  #
+  # Creating a Namespace is a CLUSTER-SCOPED write. With it in `base/`, the
+  # application declared zero cluster-scoped RBAC (verified: no ClusterRole,
+  # no ClusterRoleBinding, no CRD, no webhook) yet still could not be installed
+  # by an operator holding only namespace-admin on a namespace their platform
+  # team pre-created — the single most common enterprise arrangement.
+  #
+  # `base/_namespace` is now its own target, applied with `run.sh <env>
+  # --namespace` (same opt-in shape as `--ingress` and `--workers`). Deploying
+  # into an existing namespace means simply NOT passing the flag.
   # Security boundary — enforces the public/private split (see
   # networkpolicies/networkpolicies.yaml). INERT on a CNI that does not
   # implement NetworkPolicy (Docker Desktop's default).

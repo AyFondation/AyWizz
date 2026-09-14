@@ -1,0 +1,58 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/base/c4_openhands/kustomization.yaml
+# Description: OPT-IN layer that switches the C4 Orchestrator onto the
+#              OpenHands generate engine (V2 #2 / Q13 POC ; R-200-029 is still
+#              PROPOSED, not ratified).
+#
+#              APPLIED SEPARATELY, never from an overlay — same pattern and
+#              rationale as `base/c4_workers` and `base/ingress_nginx`:
+#                kubectl apply -k infra/k8s/base/c4_openhands
+#                # or, the wrapper:
+#                infra/k8s/run.sh dev --openhands
+#
+#              WHY A SEPARATE TARGET, not a flag in `.env.config`. Two reasons,
+#              and the second is the one that matters.
+#
+#              1. The engine needs a DIFFERENT IMAGE. `Dockerfile.c15-runner`
+#                 is the api image plus `ay_platform_core[openhands]` (a heavy
+#                 dependency tree: libtmux, tree-sitter, browser-use, litellm)
+#                 and its runtime tools (tmux, git). Per R-100-114 the shared
+#                 `ay-api` image stays free of it, so this cannot be a mere
+#                 env toggle on the standard Deployment.
+#
+#              2. Enabling it BILLS A REAL PROVIDER on every agent turn, and
+#                 an agent loop takes many turns per run. Putting the switch in
+#                 `.env.config` would make it a shared-config edit that anyone
+#                 re-applying the overlay inherits silently. As its own target
+#                 it is opted into deliberately and reverted by re-applying the
+#                 overlay — `kubectl apply -k overlays/dev` restores the stock
+#                 image and the `in_process` default in one command.
+#
+#              The engine reuses the SAME C8 endpoint + bearer the dispatcher
+#              uses (`C8_GATEWAY_URL` / `aywizz-secrets`, wired in main.py from
+#              `llm_settings`), so nothing about egress changes: all LLM traffic
+#              still goes through C8/LiteLLM, never a provider directly.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+resources:
+  - ../c4_orchestrator
+
+patches:
+  - path: patch-engine.yaml
+    target:
+      kind: Deployment
+      name: c4-orchestrator
+
+# The C15 runner, built by `infra/scripts/k8s_build_images.sh --c15`. Same
+# `:latest` + `IfNotPresent` convention as every other dev image: docker-desktop
+# shares its image store with the cluster, so no registry and no pull.
+images:
+  - name: ghcr.io/ayfondation/aywizz-api
+    newName: ghcr.io/ayfondation/aywizz-c15-runner
+    newTag: latest

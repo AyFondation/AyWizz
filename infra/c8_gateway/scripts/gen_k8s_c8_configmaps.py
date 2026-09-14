@@ -27,6 +27,9 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG = _REPO_ROOT / "infra" / "c8_gateway" / "config" / "litellm-config.yaml"
 _FORWARDER = _REPO_ROOT / "infra" / "c8_gateway" / "callbacks" / "cost_forwarder.py"
+_INJECTOR = (
+    _REPO_ROOT / "infra" / "c8_gateway" / "callbacks" / "credential_injector.py"
+)
 _OUT = _REPO_ROOT / "infra" / "k8s" / "base" / "c8_gateway" / "c8-configmaps.yaml"
 
 _HEADER = (
@@ -53,8 +56,17 @@ def _yaml_block(content: str, indent: str) -> str:
     )
 
 
-def _configmap(name: str, component: str, filename: str, body: str) -> list[str]:
-    return [
+def _configmap(
+    name: str, component: str, files: dict[str, str]
+) -> list[str]:
+    """One ConfigMap carrying one or more files.
+
+    Multi-file since 2026-09-10: the callbacks ConfigMap now holds BOTH proxy
+    hooks. LiteLLM resolves `callbacks: ["<module>.<instance>"]` as a file NEXT
+    TO the config (`/app/<module>.py`), so each key gets its own `subPath`
+    mount in the Deployment — one ConfigMap, two mounts.
+    """
+    parts = [
         "---",
         "apiVersion: v1",
         "kind: ConfigMap",
@@ -65,24 +77,29 @@ def _configmap(name: str, component: str, filename: str, body: str) -> list[str]
         f"    app.kubernetes.io/component: {component}",
         "    app.kubernetes.io/part-of: aywizz-platform",
         "data:",
-        f"  {filename}: |-",
-        _yaml_block(body.rstrip("\n"), "    "),
     ]
+    for filename, body in files.items():
+        parts.append(f"  {filename}: |-")
+        parts.append(_yaml_block(body.rstrip("\n"), "    "))
+    return parts
 
 
 def main() -> int:
-    if not _CONFIG.is_file() or not _FORWARDER.is_file():
-        print(f"missing source(s): {_CONFIG} / {_FORWARDER}", file=sys.stderr)
+    missing = [p for p in (_CONFIG, _FORWARDER, _INJECTOR) if not p.is_file()]
+    if missing:
+        print(f"missing source(s): {missing}", file=sys.stderr)
         return 1
     parts: list[str] = [_HEADER]
     parts += _configmap(
-        "c8-litellm-config", "c8", "config.yaml", _CONFIG.read_text(encoding="utf-8"),
+        "c8-litellm-config", "c8", {"config.yaml": _CONFIG.read_text(encoding="utf-8")},
     )
     parts += _configmap(
         "c8-litellm-forwarder",
         "c8",
-        "cost_forwarder.py",
-        _FORWARDER.read_text(encoding="utf-8"),
+        {
+            "cost_forwarder.py": _FORWARDER.read_text(encoding="utf-8"),
+            "credential_injector.py": _INJECTOR.read_text(encoding="utf-8"),
+        },
     )
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     _OUT.write_text("\n".join(parts) + "\n", encoding="utf-8")

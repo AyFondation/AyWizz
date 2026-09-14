@@ -1,0 +1,43 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/components/managed-cluster/kustomization.yaml
+# Description: Kustomize COMPONENT carrying everything that differs on a cluster
+#              with NO local Docker image store — AKS today, any managed or
+#              multi-node cluster tomorrow.
+#
+#              WHY A COMPONENT AND NOT A PATCH IN AN OVERLAY. The same
+#              `overlays/dev` is deployed to two very different targets: the
+#              local docker-desktop cluster AND AKS. Kustomize has no
+#              conditionals, so the difference cannot live inside `dev` itself —
+#              it has to be a slice that one target composes in and the other
+#              does not. A Component is exactly that: `overlays/dev-aks` is
+#              `overlays/dev` PLUS this, and `overlays/dev` stays byte-for-byte
+#              what it always was for local work.
+#
+#              WHAT GOES IN HERE. Anything that is true of a managed cluster and
+#              false locally. Today that is the image pull policy; the obvious
+#              future tenants are `imagePullSecrets` (needed the moment the GHCR
+#              packages are private — NOT declared anywhere yet, see
+#              VERSIONING.md §10), a cloud `ingressClassName`, and a cloud
+#              StorageClass. Add them here rather than forking the overlay.
+#
+#              WHAT MUST NOT GO IN HERE. Anything the local cluster also needs.
+#              A Component is invisible until composed, so a rule placed here
+#              silently does not apply to `overlays/dev` — which is the point,
+#              and also the trap.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - path: patch-image-pull-policy.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+  - path: patch-image-pull-policy.yaml
+    target:
+      group: apps
+      version: v1
+      kind: StatefulSet

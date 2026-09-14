@@ -1,6 +1,14 @@
 # =============================================================================
 # File: in_process.py
-# Version: 5
+# Version: 7
+#
+# @relation implements:R-200-011
+#
+# No `implements:R-200-012` marker: since v7 this module contributes NOTHING
+# to Gate C. Removing the fabrication is a conformance decision, not an
+# implementation of the requirement — Gate C is realised by the domain
+# plug-ins and the orchestrator. Claiming the marker would inflate the
+# traceability audit with a file that does not carry the behaviour.
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/in_process.py
 # Description: In-process agent dispatcher. Invokes the C8 LLM gateway
 #              client with the agent-appropriate headers, interprets the
@@ -8,6 +16,27 @@
 #              Replaces the real Kubernetes pod dispatcher until infra is
 #              ready (R-200-030 / Q-200-001 baseline).
 #
+#              v7 (2026-09-10) : Gate C derivation REMOVED. R-200-012 requires
+#              verification evidence dated after the last artifact write and
+#              "rejects cached or stale results, preventing the
+#              green-when-last-measured anti-pattern". `_derive_gate_c_evidence`
+#              synthesised `validation_runs_green: True` with a timestamp set
+#              one second ahead of a fabricated `last_artifact_write` — it
+#              manufactured that exact anti-pattern, and every review passed
+#              Gate C with nothing verified. The spec was already right; the
+#              code was not conformant. An absent block now leaves `runs_green`
+#              False and Gate C blocks, as R-200-012 intends.
+#              v6 (2026-09-09) : `_derive_gate_b_evidence` no longer claims
+#              `validation_runs_red`. This dispatcher executes nothing, so it
+#              cannot have observed a red run ; asserting one on the strength
+#              of a FILENAME made Gate B — whose purpose is enforcing TDD
+#              red-first — passable by naming a file `test_*.py`. It also
+#              inverted the incentive: the OpenHands engine, which has a real
+#              terminal and refused to fabricate, blocked, while this path
+#              passed. Derivation now reports only what the files list shows
+#              (`validation_artifact_exists`), and Gate B blocks honestly with
+#              "exists but does not run red". Red is evidenced where it is
+#              genuinely observed — `pipeline/generate_engine.py` v3.
 #              v4 (2026-05-14) : tolerant status inference. Adds a
 #              synonym map (`completed` → DONE, `error` → BLOCKED, ...)
 #              and a graceful fallback that assumes DONE when the
@@ -352,44 +381,55 @@ def _looks_like_test_path(path: str) -> bool:
 def _maybe_auto_derive_gate_evidence(
     request: DispatchRequest, output_dict: dict[str, Any],
 ) -> None:
-    """Bolt-on : when the LLM omits the gate evidence blocks but the
-    output otherwise looks complete, synthesise one. Keeps gates
-    passable on small open models (qwen2.5:3b et al.) while still
-    failing honestly when the agent genuinely missed (e.g. GENERATE
-    with no test file → no derivation → Gate B blocks). Mutates
-    `output_dict` in place. Extracted from `_parse_completion` to
-    keep that function's branch count under ruff PLR0912."""
+    """Report, from the agent's output, ONLY what that output actually shows.
+
+    GENERATE: a test-looking path evidences that the validation artifact
+    EXISTS (`_derive_gate_b_evidence`). Nothing here evidences that it RUNS
+    red — this dispatcher executes nothing — so Gate B blocks until a
+    component that can observe an execution supplies the proof.
+
+    REVIEW: nothing is derived at all. Gate C (R-200-012) demands verification
+    evidence dated after the last artifact write and explicitly rejects cached
+    or stale results, "to prevent the green-when-last-measured anti-pattern".
+    Until 2026-09-10 this function synthesised `validation_runs_green: True`
+    with an `evidence_timestamp` placed one second ahead of a fabricated
+    `last_artifact_write` — it MANUFACTURED the very anti-pattern the
+    requirement exists to forbid, and every review passed Gate C without any
+    verification having run. Removed: an absent block leaves `runs_green`
+    False and Gate C blocks, which is the conformant outcome.
+
+    Mutates `output_dict` in place. Extracted from `_parse_completion` to keep
+    that function's branch count under ruff PLR0912.
+    """
     if request.phase is Phase.GENERATE and "gate_b_evidence" not in output_dict:
         b_evidence = _derive_gate_b_evidence(output_dict.get("files"))
         if b_evidence is not None:
             output_dict["gate_b_evidence"] = b_evidence
-    elif request.phase is Phase.REVIEW and "gate_c_evidence" not in output_dict:
-        output_dict["gate_c_evidence"] = _derive_gate_c_evidence()
-
-
-def _derive_gate_c_evidence() -> dict[str, Any]:
-    """Synthesise a `gate_c_evidence` block that passes Gate C
-    timestamps (`evidence_timestamp > last_artifact_write`). Used by
-    the review phase when the reviewer LLM omits the strict shape ;
-    v1 has no in-pod sandbox so we trust the prior generate phase.
-    Real validation runs land with the C15 sub-agent (deferred)."""
-    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
-
-    now = datetime.now(UTC)
-    return {
-        "artifact_id": "auto-derived",
-        "validation_runs_green": True,
-        # 1 s margin keeps `evidence > last_artifact_write` even when
-        # the timestamps round to the same second.
-        "evidence_timestamp": now.isoformat(),
-        "last_artifact_write": (now - timedelta(seconds=1)).isoformat(),
-    }
 
 
 def _derive_gate_b_evidence(files: Any) -> dict[str, Any] | None:
-    """Synthesise a `gate_b_evidence` block from a generate-phase
-    files list. Returns None when no file looks like a test artifact —
-    in that case Gate B is left to fail honestly per R-200-011."""
+    """Synthesise a `gate_b_evidence` block from a generate-phase files list.
+
+    Reports ONLY what the files list actually shows: a test-looking artifact
+    exists. `validation_runs_red` stays False because this dispatcher has no
+    execution environment — it never ran anything, so it cannot claim a red
+    run. Gate B therefore blocks with "exists but does not run red", which is
+    the honest outcome.
+
+    Until 2026-09-09 this returned `validation_runs_red: True` on the strength
+    of `_looks_like_test_path` alone, i.e. a FILENAME. That made Gate B — whose
+    entire purpose is to enforce TDD red-first — passable by naming a file
+    `test_*.py`, and it inverted the incentive: the OpenHands engine, which has
+    a real terminal and refuses to fabricate proof, blocked, while this path
+    passed on a naming convention. Asserting an unobserved result is the
+    CLAUDE.md §10.2 anti-pattern, in production code rather than in a test.
+
+    A red run is now evidenced only where it is genuinely observed — see
+    `pipeline/generate_engine.py`, which reads the executed command and its
+    exit code off the agent's terminal observations.
+
+    Returns None when no file looks like a test artifact at all.
+    """
     from datetime import UTC, datetime  # noqa: PLC0415 — local import keeps cold-path scoped
 
     if not isinstance(files, list):
@@ -406,7 +446,8 @@ def _derive_gate_b_evidence(files: Any) -> dict[str, Any] | None:
             return {
                 "artifact_id": path,
                 "validation_artifact_exists": True,
-                "validation_runs_red": True,
+                # NOT observed: this dispatcher executes nothing.
+                "validation_runs_red": False,
                 "evidence_timestamp": datetime.now(UTC).isoformat(),
             }
     return None

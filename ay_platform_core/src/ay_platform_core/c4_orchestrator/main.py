@@ -234,7 +234,13 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + servi
     # V2 #2 : opt into the OpenHands `generate` engine via C4_GENERATE_ENGINE
     # (default `in_process` → None → the dispatcher path is unchanged). When
     # enabled, OpenHands routes through the SAME C8/LiteLLM endpoint + bearer
-    # the dispatcher uses (R-200-029) ; the model is a C8 model_list name.
+    # the dispatcher uses (R-200-029).
+    #
+    # The MODEL comes from the platform's own configuration, not from this
+    # component's environment: `build_registry_model_resolver` maps the agent to
+    # a quality tier and returns the model the operator enabled for the project
+    # in the HMI (D-011). `cfg.openhands_model` survives only as a fallback for
+    # a deployment whose registry is not populated yet.
     generate_engine = build_generate_engine(
         cfg.generate_engine,
         OpenHandsEngineConfig(
@@ -243,6 +249,7 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + servi
             model=cfg.openhands_model,
             max_iterations=cfg.openhands_max_iterations,
         ),
+        model_resolver=build_registry_model_resolver(db),
     )
 
     service = OrchestratorService(

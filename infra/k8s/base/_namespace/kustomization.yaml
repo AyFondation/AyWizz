@@ -1,8 +1,28 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_namespace/kustomization.yaml
 # Description: Kustomize entry for the namespace resource.
+#
+#              v2 (2026-09-14): APPLIED SEPARATELY, never from an overlay —
+#              same pattern as `base/ingress_nginx` and `base/c4_workers`:
+#                kubectl apply -k infra/k8s/base/_namespace
+#                # or, the wrapper:
+#                infra/k8s/run.sh dev --namespace
+#
+#              WHY IT LEFT `base/`. Creating a Namespace is a CLUSTER-SCOPED
+#              write, and it was the LAST one the application performed. With
+#              it in `base/`, an operator holding only namespace-admin on a
+#              pre-created namespace could not install the platform at all —
+#              every other cluster-scoped object had already been designed
+#              away (no ClusterRole, no ClusterRoleBinding, no CRD, no
+#              webhook ; the Traefik SA does not even mount a token).
+#
+#              Consequence, accepted: a from-scratch cluster now needs
+#              `--namespace` on the first apply, exactly as it needs
+#              `--ingress` once. Applied BEFORE the overlay, since the
+#              overlay's `namespace:` transformer targets a namespace that
+#              must already exist.
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

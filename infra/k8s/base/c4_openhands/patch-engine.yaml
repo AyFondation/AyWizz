@@ -1,0 +1,61 @@
+# =============================================================================
+# File: patch-engine.yaml
+# Version: 1
+# Path: infra/k8s/base/c4_openhands/patch-engine.yaml
+# Description: Turns the generate engine on, and gives the container the room
+#              an agent loop needs.
+#
+#              These `env:` entries WIN over the `envFrom: configMapRef` block
+#              they sit beside — Kubernetes resolves explicit `env` after
+#              `envFrom` — so `C4_GENERATE_ENGINE` here overrides whatever
+#              `aywizz-config` carries, without editing that shared ConfigMap.
+#
+#              `C4_OPENHANDS_MODEL` is a C8 `model_list` name prefixed
+#              `litellm_proxy/`, NOT a provider model id: the OpenHands LiteLLM
+#              client must route THROUGH the C8 proxy (R-200-029), and the
+#              in-app registry resolves the neutral tier to a provider endpoint
+#              + decrypted key per call (D-011). `balanced` is the mid tier —
+#              the sensible POC target, since every turn bills. **It must be
+#              registered in the tenant catalogue**, or every call fails at the
+#              proxy; that is the first thing to check if the run errors.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c4-orchestrator
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: COMPONENT_MODULE
+              value: c4_orchestrator
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: C4_GENERATE_ENGINE
+              value: openhands
+            # NO `C4_OPENHANDS_MODEL` HERE, deliberately. The model comes from
+            # the platform's own LLM configuration: the engine resolves the
+            # agent's quality tier against the operator's registry catalogue and
+            # uses the model enabled for THAT project in the HMI (D-011). A
+            # value here would make the generate engine the one component that
+            # pins a model in a manifest while every other LLM caller honours
+            # the application's configuration.
+            #
+            # The env var still exists as a FALLBACK in `C4OrchestratorConfig`,
+            # for a deployment whose registry is not populated yet. Set it there
+            # if you need it; do not reintroduce it here.
+            - name: C4_OPENHANDS_MAX_ITERATIONS
+              value: "50"
+          # An agent loop drives a real terminal, a file editor and a task
+          # tracker in-process; the stock 0.4 CPU / 512 MB envelope sized for a
+          # request-response API container starves it. Mirrors the ceiling the
+          # compose service already uses for the same image.
+          resources:
+            limits:
+              cpu: "2.0"
+              memory: "2048Mi"
+            requests:
+              cpu: "250m"
+              memory: "512Mi"

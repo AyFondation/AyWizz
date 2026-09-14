@@ -34,7 +34,11 @@ namespace: aywizz
 # absent: the first is the opt-in sandbox layer (`run.sh dev --workers`),
 # the second is a CI-only helper.
 resources:
-  - ../../base/_namespace
+  # NO `_namespace` — it is its own opt-in target since 2026-09-14
+  # (`run.sh dev --namespace`), because creating a Namespace is a
+  # cluster-scoped write and it was the last one the application performed.
+  # `overlays/system-test` DOES keep it: that one provisions a disposable kind
+  # cluster where creating the namespace is legitimately its own job.
   - ../../base/networkpolicies
   - ../../base/c11_arangodb
   - ../../base/c10_minio

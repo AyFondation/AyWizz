@@ -207,9 +207,28 @@ to SemVer.
 
 ## 10. CI / image-tag mapping
 
-The `ci-build-images` workflow publishes container images to GHCR
-(`ghcr.io/ayfondation/aywizz-api`, `…/aywizz-ui`,
-`…/aywizz-c13-extractor`) with tags derived from the git event.
+The `ci-build-images` workflow publishes **all four** platform images to GHCR —
+`ghcr.io/ayfondation/aywizz-api`, `…/aywizz-ui`, `…/aywizz-c13-extractor`,
+`…/aywizz-c15-runner` — with tags derived from the git event. One publish job
+per image; `infra/scripts/k8s_build_images.sh` builds exactly the same four
+locally, and the two lists SHALL stay in step.
+
+**Why that invariant needs stating.** The local-cluster images carry
+registry-shaped names purely as a NAMING CONVENTION: `imagePullPolicy:
+IfNotPresent` plus docker-desktop's shared image store means no pull ever
+happens there. A missing publish job is therefore invisible locally and stays
+invisible until someone deploys to a cluster with no such store. That is
+exactly how it surfaced — an AKS deployment on 2026-09-14 failed to pull
+`aywizz-c13-extractor`, which had been listed here as published since this
+section was written while no job ever built it. `aywizz-c15-runner` had the
+same defect and no mention at all. Both jobs were added that day.
+
+Adding a fifth image means adding a fifth publish job in the same change.
+
+The packages are **public** (verified 2026-09-14), so no cluster needs pull
+credentials and no manifest declares `imagePullSecrets`. If that visibility
+ever changes, the secret belongs in the `managed-cluster` kustomize component,
+which is where every "true on a managed cluster, false locally" rule lives.
 
 | Git event | Image tags pushed |
 |---|---|

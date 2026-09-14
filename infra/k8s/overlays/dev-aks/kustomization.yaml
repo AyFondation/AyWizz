@@ -1,0 +1,52 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/overlays/dev-aks/kustomization.yaml
+# Description: The DEV configuration, deployed to AKS.
+#
+#              It is `overlays/dev` plus the `managed-cluster` component, and
+#              nothing else. That is deliberate: the two targets must not drift
+#              into two separately-maintained descriptions of the same
+#              environment. Everything about dev — components, env sources,
+#              ingress host, resource sizing — is inherited; only what is
+#              genuinely untrue on a managed cluster is overridden.
+#
+#              WHAT THE COMPONENT CHANGES TODAY: `imagePullPolicy: Always` on
+#              every long-running workload. Locally, `IfNotPresent` is what
+#              makes the dev loop work — docker-desktop shares its image store
+#              with the cluster, so the kubelet finds the image
+#              `k8s_build_images.sh` just built and never contacts a registry.
+#              AKS has no such store: there, `IfNotPresent` means "keep whatever
+#              this node happens to have", which is the managed-cluster form of
+#              the phantom deploy already hit in dev on 2026-09-02.
+#
+#              WHAT THE PULL POLICY DOES NOT SOLVE. Every referenced image must
+#              EXIST on GHCR, and a pull policy cannot conjure one. On
+#              2026-09-14 `aywizz-c13-extractor` and `aywizz-c15-runner` had no
+#              CI publish job at all — both were added that day — so neither had
+#              ever been pushed. `aywizz-api` / `aywizz-ui` were current
+#              (`sha-7be1f53`, HEAD).
+#
+#              The corollary is the thing to remember: what lands here is the
+#              last COMMIT PUSHED, never the working tree. Deploying uncommitted
+#              work to AKS is not a thing this overlay can do, by construction.
+#
+#              Credentials are NOT needed: the GHCR packages are PUBLIC
+#              (verified 2026-09-14), so no `imagePullSecrets` is declared
+#              anywhere. Should that visibility ever change, the secret belongs
+#              in the `managed-cluster` component, not here.
+#
+#              Usage:  infra/k8s/run.sh dev-aks --wait
+#              `--namespace` / `--ingress` follow the same once-per-cluster
+#              rules as anywhere else; on AKS the ingress controller is usually
+#              provided by the platform, so set `ingressClassName` in
+#              `overlays/dev/ingress.yaml` rather than installing one.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../dev
+
+components:
+  - ../../components/managed-cluster

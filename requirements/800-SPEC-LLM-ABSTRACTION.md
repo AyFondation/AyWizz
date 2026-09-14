@@ -1,6 +1,6 @@
 ---
 document: 800-SPEC-LLM-ABSTRACTION
-version: 12
+version: 13
 path: requirements/800-SPEC-LLM-ABSTRACTION.md
 language: en
 status: draft
@@ -21,9 +21,9 @@ derives-from: [D-002, D-011, D-012, D-020, D-021]
 >
 > **Version 8 changes.** **Cost/quality optimisation — increment 1: provider-aware prompt caching.** **R-800-042 v1→v2** makes the `X-Cache-Hint: static` translation **provider-aware** and applied AFTER upstream resolution: the cache marker is keyed on the resolved model's `wire_format` — `anthropic` gets the `cache_control: {type: ephemeral}` breakpoint, automatic-caching providers (`openai`, `gemini`) get NONE (an Anthropic-shaped block sent there is rejected — a defect, not best-effort), and an unresolved alias/mock gets none. This fixes a latent bug (the marker was emitted unconditionally) and establishes the **per-`wire_format` translation seam** at C8 that increments 2 (extended thinking on generate/judge) and 3 (token counting + budget-aware routing) reuse. C3 chat (`c3-rag` stream + `c3-docgen`) now opts in (`cache_hint="static"`) — its system + RAG prefix recurs every turn. C13 sliding-window caching (R-800-131/132) remains the next sub-step (ay_extractor prompt restructuring).
 
+> **Version 13 changes.** **The per-call credential injection is now a REQUIREMENT, not prose.** `R-800-148` states the contract the C8 client and `key_provider` have implemented all along — proxy holds no credential at rest, the alias resolves to `<wire>/<upstream>` + `api_base` + decrypted key per call, best-effort, never logged. It existed only in the "Version 6 changes" note below, which is why the implementing module carried no `@relation` marker: there was nothing to point at (found 2026-09-11 while auditing a marker of my own that claimed R-800-011 — access mode — for credential behaviour). `R-800-149` adds the direct-caller path: a component embedding its own LiteLLM client never performs that rewrite, so the proxy resolves for it via a pre-call hook, under five NORMATIVE containments (never overrides an app-resolved request ; hosted by a component that already holds the master key ; not reachable through C1 ; constant-time shared-credential check failing CLOSED ; failure leaves the request untouched). The accepted residual risk — an enumerable endpoint — is stated in the requirement itself rather than left to a commit message. Also removes a duplicated "Version 6 changes" paragraph.
+>
 > **Version 7 changes.** **Per-project model lists + tenant defaults (scoped resolution).** A tenant catalogue entry gains `default_for_new_projects` (the tenant-admin browses the catalogue and flags the models new projects should start with). A NEW per-project association (`project_llm_models/<tenant>:<project>`, a list of `model_id`s) records which models a project may use. The `model_quality` resolution is now SCOPED: `resolve(tenant, quality, project_id?)` selects the cheapest qualifying model AMONG the project's EFFECTIVE set — the explicit list if configured, ELSE the tenant's `default_for_new_projects` set (LAZY: no project-creation hook; an unconfigured project inherits the defaults until its list is set), ELSE the whole catalogue (backward-compatible). C7's resolver client forwards the project via `X-Project-Id`. Admin surface (admin / tenant_admin): `GET`/`PUT /api/v1/llm/projects/{project_id}/models` ; catalogue PUT carries the `default_for_new_projects` flag. HMI: catalogue "default for new projects" checkbox + a project-Settings "Models" section. Catalogued in `065-TEST-MATRIX.md` (135 endpoints).
-
-> **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (platform_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
 
 > **Version 6 changes.** **Provider normalisation + stable model ids + pass-through routing.** The platform LLM registry is split into TWO entities: (a) an **`LLMProvider`** (`llm_providers/<provider_id>`) = an endpoint (`base_url`, **MANDATORY** — no built-in default, the platform is provider-agnostic) + a `wire_format` (litellm provider family) + the **write-only encrypted API key** (the key moved here, one credential per endpoint) ; (b) an **`LLMModel`** (`llm_registry/<model_id>`) that references a provider by id and carries the mutable `alias`, `upstream_model`, cost, capabilities, default quality. Both are keyed by a **stable technical id** (UUID) — renaming the alias / editing any attribute / re-pointing the provider NEVER breaks tenant/project references (the tenant catalogue + `model_quality` resolution now key on `model_id`). The C8 per-call injector resolves alias → model → provider and **REWRITES** the request `model` to `<wire_format>/<upstream_model>`, injecting the provider's `api_base` + decrypted key (litellm `configurable_clientside_auth_params`) ; the proxy gains a **wildcard `"*"` pass-through** model so routing depends on the provider's explicit endpoint, never a default. Admin surface (platform_manager): providers `GET/POST /admin/v1/llm/providers`, `PUT /admin/v1/llm/providers/{id}` (+ `/api-key`, `DELETE`) ; models `GET/POST /admin/v1/llm/registry`, `PUT/DELETE /admin/v1/llm/registry/{model_id}`. Catalogue + resolve now address models by `model_id`. Seeding maps the canonical litellm config to one provider per family + models-by-id. Catalogued in `065-TEST-MATRIX.md` (133 endpoints).
 
@@ -1276,6 +1276,74 @@ it appears in the per-request breakdown (R-800-146).
 **Rationale.** Exposing the model's reasoning is the other half of a
 Claude-Code-like view; gating it on the verbosity toggle keeps the token cost
 opt-in and attributable.
+
+#### R-800-148
+
+```yaml
+id: R-800-148
+version: 1
+status: draft
+category: functional
+derives-from: [D-011]
+impacts: [E-800-001]
+```
+
+**Per-call credential injection.** The LiteLLM proxy SHALL hold no provider
+credential and no upstream model binding: every `model_list` entry is a
+pass-through (`model: "*"` with `configurable_clientside_auth_params`). For
+each call, the requested **alias** SHALL be resolved against the platform
+registry to a **call target** and the request body rewritten with all three of:
+`model` → `<provider.wire_format>/<model.upstream_model>`, the provider's
+MANDATORY `api_base`, and the provider's **decrypted** `api_key` when one is
+stored. Resolution SHALL be **best-effort**: an unknown alias, a dangling
+provider, or a decryption failure SHALL leave the request untouched rather than
+fail the call. The decrypted credential SHALL NEVER be logged, at any level.
+
+**Rationale.** This is the mechanism that makes D-011 real. Keeping every
+credential out of the proxy at rest means a compromise of that off-the-shelf
+image exposes only the calls that actually flow through it, never the stored
+key material. Until v7 this contract existed only as prose in this document's
+version notes, which is why `key_provider.py` carried no traceability marker:
+there was nothing to point at.
+
+#### R-800-149
+
+```yaml
+id: R-800-149
+version: 1
+status: draft
+category: functional
+derives-from: [D-011]
+impacts: [E-800-001]
+```
+
+**Direct proxy callers.** A component that reaches the proxy WITHOUT going
+through the platform's C8 client (an embedded agent SDK with its own LiteLLM
+client, for example) never performs the R-800-148 rewrite, and would therefore
+land on a pass-through entry with nothing to route to and nothing to
+authenticate with. For those callers the proxy SHALL resolve the call target
+itself, via a pre-call hook calling an INTERNAL platform endpoint, subject to
+all of the following:
+
+- The hook SHALL NOT alter a request that already carries an `api_key`, so the
+  R-800-148 path is unaffected.
+- The resolving endpoint SHALL be hosted by a component that ALREADY holds the
+  secret master key, so no additional component gains the ability to decrypt
+  provider credentials. Decryption SHALL remain platform-side; the proxy image
+  SHALL receive only one already-resolved credential per alias.
+- The endpoint SHALL NOT be reachable through the C1 edge.
+- The endpoint SHALL authenticate its caller with the shared gateway
+  credential, using a constant-time comparison, and SHALL **fail closed** when
+  that credential is unset.
+- Failure of the hook — unreachable endpoint, unresolved alias, malformed
+  response — SHALL leave the request untouched.
+
+**Rationale.** Generalises the fix to the class of direct callers rather than
+patching one adapter at a time. The accepted residual risk is explicit: unlike
+R-800-148, where a credential only ever travels attached to a call the platform
+decided to make, this endpoint can be ENUMERATED by anything holding the
+gateway credential in-cluster. The containments above are what bound that risk;
+weakening any one of them re-opens it.
 
 #### E-800-003: Agent-to-feature catalog reference
 

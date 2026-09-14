@@ -14,6 +14,8 @@
 #              GRACEFUL: an unknown alias (e.g. the test `_mock_llm` model) or a
 #              dangling provider returns None → the client leaves the body as-is
 #              (the proxy/mock handles it). The key is NEVER logged.
+#
+# @relation implements:R-800-148
 # =============================================================================
 
 from __future__ import annotations

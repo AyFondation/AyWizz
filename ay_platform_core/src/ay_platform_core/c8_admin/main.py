@@ -29,6 +29,9 @@ from ay_platform_core.c8_llm.config import LiteLLMConfig
 from ay_platform_core.c8_llm.quota.repository import QuotaRepository
 from ay_platform_core.c8_llm.quota.router import router as quota_router
 from ay_platform_core.c8_llm.quota.service import QuotaService
+from ay_platform_core.c8_llm.registry.call_target_router import (
+    router as call_target_router,
+)
 from ay_platform_core.c8_llm.registry.catalog_repository import TenantCatalogRepository
 from ay_platform_core.c8_llm.registry.catalog_router import router as catalog_router
 from ay_platform_core.c8_llm.registry.catalog_service import TenantCatalogService
@@ -53,6 +56,7 @@ from ay_platform_core.c8_llm.registry.embedding_service import (
     EmbeddingModelService,
     EmbeddingProviderService,
 )
+from ay_platform_core.c8_llm.registry.key_provider import build_registry_key_provider
 from ay_platform_core.c8_llm.registry.provider_repository import LLMProviderRepository
 from ay_platform_core.c8_llm.registry.provider_router import router as provider_router
 from ay_platform_core.c8_llm.registry.provider_service import LLMProviderService
@@ -201,7 +205,12 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
     app.add_middleware(
         AuthGuardMiddleware,
         component="c8_admin",
-        exempt_prefixes=["/health"],
+        # `/internal` is exempt from the USER forward-auth contract because its
+        # only caller — the LiteLLM proxy's credential hook — has no user
+        # identity to forward. It is NOT unguarded: `call_target_router`
+        # enforces the shared C8 gateway bearer itself, and no C1 router maps
+        # `/internal`, so the prefix is unreachable from the edge.
+        exempt_prefixes=["/health", "/internal"],
     )
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
     app.include_router(registry_router)
@@ -211,6 +220,13 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
     app.include_router(storage_router)
     app.include_router(embedding_router)
     app.include_router(embedding_catalog_router)
+    app.include_router(call_target_router)
+    # The resolver the proxy's credential hook calls. Reuses the SAME builder
+    # the app-tier client uses, so both paths resolve an alias identically —
+    # one resolution rule, not two implementations that can drift apart.
+    # `build_registry_key_provider` degrades on its own when the master key is
+    # absent (model + api_base still resolved, no key), so no guard here.
+    app.state.call_target_provider = build_registry_key_provider(db)
     app.state.registry_service = service
     app.state.provider_service = provider_service
     app.state.embedding_provider_service = embedding_provider_service

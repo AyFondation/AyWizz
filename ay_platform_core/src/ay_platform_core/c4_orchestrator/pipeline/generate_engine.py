@@ -1,6 +1,6 @@
 # =============================================================================
 # File: generate_engine.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/pipeline/generate_engine.py
 # Description: Pluggable engine for the `generate` phase (synthesis-v4, V2 #2,
 #              R-200-029). The OpenHands agentic harness is encapsulated BEHIND
@@ -24,20 +24,43 @@
 #              `BLOCKED` completion — a gated experimental engine SHALL NOT
 #              crash the orchestrator.
 #
-#              POC scope (Q1 unresolved) : the engine returns the produced
-#              files in `output.files` but emits NO `gate_b_evidence` — it
-#              does not fabricate TDD red-first proof it has not verified.
-#              Gate B will therefore BLOCK such a completion ; that is a
-#              documented finding feeding the Q1 decision (single-shot vs
-#              gated sub-steps), NOT a defect. `openhands-ai` is an OPTIONAL
-#              extra installed only in the C15 runner image.
+#              v3 (2026-09-09) — the engine now EMITS `gate_b_evidence`,
+#              because it can OBSERVE it. `TerminalObservation` carries
+#              `command` / `exit_code` / output `text`, and the conversation's
+#              append-only log is readable at `conversation.state.events`. The
+#              runner records every executed command into
+#              `_RunOutcome.terminal_runs` ; `_gate_b_evidence` then emits the
+#              block ONLY when a validation command actually ran and actually
+#              FAILED — the TDD red-first proof — carrying the observed
+#              command, exit code and output tail so a reviewer can check the
+#              claim instead of trusting it.
+#
+#              It still never fabricates: no failing validation run means no
+#              evidence and Gate B blocks (R-200-011). What changed is that
+#              honesty no longer costs the engine the gate.
+#
+#              v2 POC scope (Q1) emitted NO evidence at all, which was the
+#              documented finding that motivated this: the engine that could
+#              genuinely prove red-first blocked, while the in-process
+#              dispatcher passed Gate B by deriving `validation_runs_red` from
+#              a FILENAME. That derivation was corrected in the same release
+#              (see `dispatcher/in_process.py::_derive_gate_b_evidence`).
+#              `openhands-ai` is an OPTIONAL extra installed only in the C15
+#              runner image.
 #
 #              NOTE : R-200-029 (the OpenHands-as-engine contract) is a
 #              PROPOSED requirement in the synthesis (§9, gated behind the
 #              Q13 POC per "POC before spec amendment"). It is NOT yet
 #              declared in the spec corpus, so no `@relation implements:`
-#              marker is claimed here — the marker is added once the POC
-#              passes and the requirement is ratified.
+#              marker is claimed FOR IT here — that marker is added once the
+#              POC passes and the requirement is ratified.
+#
+#              R-200-011 is a different matter: it IS in the corpus, and since
+#              v3 this module produces the Gate B evidence it governs ("the
+#              validation artifact has been written AND demonstrated to fail
+#              as expected"). The marker below claims that, and only that.
+#
+# @relation implements:R-200-011
 # =============================================================================
 
 from __future__ import annotations
@@ -47,9 +70,9 @@ import logging
 import shutil
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ay_platform_core.c4_orchestrator.dispatcher.base import DispatchRequest
 from ay_platform_core.c4_orchestrator.models import (
@@ -57,6 +80,7 @@ from ay_platform_core.c4_orchestrator.models import (
     AgentCompletion,
     EscalationStatus,
 )
+from ay_platform_core.c8_llm.registry.key_provider import ModelResolver
 
 _log = logging.getLogger("c4_orchestrator.generate_engine")
 
@@ -79,9 +103,46 @@ class OpenHandsEngineConfig:
 
     gateway_url: str
     api_key: str | None
-    model: str
+    # FALLBACK ONLY, and normally EMPTY. The model is resolved per call from the
+    # operator's registry catalogue — the agent's quality tier → the project's
+    # enabled model (D-011: registering + associating a model in the HMI is
+    # enough, no model or provider name in config). This field is used only when
+    # that resolution yields nothing, so a deployment that has not yet been
+    # configured through the HMI can still be pinned by hand. Leave it empty in
+    # any environment where the registry is populated.
+    model: str = ""
     max_iterations: int = 50
     workspace_root: str | None = None
+
+
+# Output kept per observed command, so a `gate_b_evidence` block carries the
+# real proof without dragging a whole pytest log into the completion.
+_MAX_OBSERVED_OUTPUT_CHARS = 4000
+
+# Command tokens that mark a validation run. Deliberately narrow: a command we
+# do not recognise yields NO evidence, which blocks honestly. Widening this set
+# is a decision about what counts as proof — never a convenience.
+_TEST_COMMAND_TOKENS = (
+    "pytest",
+    "unittest",
+    "npm test",
+    "npm run test",
+    "vitest",
+    "jest",
+    "go test",
+    "cargo test",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalRun:
+    """One command the agent ACTUALLY executed, read off a terminal
+    observation (`command` / `exit_code` / output `text`). SDK-free by
+    construction so the evidence mapping is unit-testable with fakes."""
+
+    command: str
+    exit_code: int | None
+    output: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +154,9 @@ class _RunOutcome:
     workspace: Path
     execution_status: str  # ConversationExecutionStatus member name
     detail: str | None = None
+    # Every command the agent ran, in order. This is what turns Gate B
+    # evidence from an assertion into a RECORD (see `_gate_b_evidence`).
+    terminal_runs: tuple[TerminalRun, ...] = ()
 
 
 class OpenHandsUnavailableError(RuntimeError):
@@ -170,7 +234,106 @@ def _default_runner(
     return _RunOutcome(
         workspace=workspace,
         execution_status=conversation.state.execution_status.name,
+        terminal_runs=_terminal_runs_from_events(
+            getattr(conversation.state, "events", ()) or ()
+        ),
     )
+
+
+def _terminal_runs_from_events(events: Any) -> tuple[TerminalRun, ...]:
+    """Extract the executed commands from a conversation event log.
+
+    DUCK-TYPED on purpose — no `openhands.*` import, so this is unit-testable
+    with plain fakes and survives the SDK moving its class names. A terminal
+    OBSERVATION is recognised by carrying both a `command` and an `exit_code`
+    attribute ; the matching ACTION carries `command` but no `exit_code`, and
+    is therefore skipped (it records intent, not result). The observation is
+    taken from the event itself or from a nested `observation` attribute,
+    since the SDK wraps observations in events.
+
+    Output text lives in the observation's inherited `text` field — there is
+    no separate `stdout`/`output` field on `TerminalObservation`.
+    """
+    runs: list[TerminalRun] = []
+    for event in events:
+        for carrier in (getattr(event, "observation", None), event):
+            if carrier is None or not hasattr(carrier, "exit_code"):
+                continue
+            command = getattr(carrier, "command", None)
+            if not isinstance(command, str) or not command.strip():
+                continue
+            exit_code = getattr(carrier, "exit_code", None)
+            text = getattr(carrier, "text", "") or ""
+            runs.append(
+                TerminalRun(
+                    command=command.strip(),
+                    exit_code=exit_code if isinstance(exit_code, int) else None,
+                    output=str(text)[-_MAX_OBSERVED_OUTPUT_CHARS:],
+                )
+            )
+            break
+    return tuple(runs)
+
+
+def _is_test_command(command: str) -> bool:
+    """Whether a command reads as a validation run. Narrow by design."""
+    lowered = command.lower()
+    return any(token in lowered for token in _TEST_COMMAND_TOKENS)
+
+
+def _gate_b_evidence(
+    runs: tuple[TerminalRun, ...], files: list[dict[str, str]]
+) -> dict[str, Any] | None:
+    """Build `gate_b_evidence` from what the agent OBSERVABLY did.
+
+    Gate B asserts TDD red-first, so the proof is a validation command that
+    actually ran and actually FAILED (non-zero exit). Anything else — no test
+    command, or one that only ever ran green — yields None, and Gate B blocks.
+    That is the honest outcome, not a defect: R-200-011.
+
+    The `observed_*` fields carry the proof itself (command, exit code, output
+    tail) so a reviewer can check the claim rather than trust it. Gate B reads
+    its own keys via `.get()` and ignores the extras.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415 — cold path
+
+    red = next(
+        (
+            run
+            for run in runs
+            if _is_test_command(run.command)
+            and run.exit_code is not None
+            and run.exit_code != 0
+        ),
+        None,
+    )
+    if red is None:
+        return None
+    return {
+        "artifact_id": _test_artifact_path(files) or red.command,
+        "validation_artifact_exists": True,
+        "validation_runs_red": True,
+        "evidence_timestamp": datetime.now(UTC).isoformat(),
+        "observed_command": red.command,
+        "observed_exit_code": red.exit_code,
+        "observed_output_tail": red.output,
+    }
+
+
+def _test_artifact_path(files: list[dict[str, str]]) -> str | None:
+    """First produced file that reads as a test artifact, for `artifact_id`.
+    Reuses the dispatcher's heuristic rather than re-declaring one (§8.4 /
+    `check_no_parallel_definitions`). Imported locally to keep the module
+    import graph acyclic."""
+    from ay_platform_core.c4_orchestrator.dispatcher.in_process import (  # noqa: PLC0415
+        _looks_like_test_path,
+    )
+
+    for entry in files:
+        path = entry.get("path")
+        if isinstance(path, str) and _looks_like_test_path(path):
+            return path
+    return None
 
 
 class OpenHandsGenerateEngine:
@@ -183,14 +346,63 @@ class OpenHandsGenerateEngine:
     a run because a gated, experimental engine raised."""
 
     def __init__(
-        self, config: OpenHandsEngineConfig, *, runner: Runner = _default_runner
+        self,
+        config: OpenHandsEngineConfig,
+        *,
+        runner: Runner = _default_runner,
+        model_resolver: ModelResolver | None = None,
     ) -> None:
         self._config = config
         self._runner = runner
+        # Resolves the agent's call to a model alias from the OPERATOR'S
+        # registry catalogue — the same path every other LLM caller uses. See
+        # `_config_for`. None → the configured fallback only.
+        self._model_resolver = model_resolver
+
+    async def _config_for(self, request: DispatchRequest) -> OpenHandsEngineConfig:
+        """Per-call config whose `model` comes from the platform's own LLM
+        configuration rather than from this component's environment.
+
+        The registry resolver maps the agent to a quality tier and returns the
+        model the operator enabled FOR THIS PROJECT in the HMI (D-011). That is
+        the whole point: the engine must not be the one component that pins a
+        model in a manifest while every other caller honours the application's
+        configuration.
+
+        `require_tool_calling=True` is not optional here — an agent loop that
+        cannot call tools cannot edit a file or run a test, so a model without
+        that capability is not a degraded choice, it is a broken one.
+
+        Best-effort by design: no resolver, no configured project model, or a
+        registry error all fall back to `config.model`, and an empty fallback
+        leaves the SDK to fail loudly rather than silently calling something
+        nobody chose.
+        """
+        if self._model_resolver is None:
+            return self._config
+        try:
+            alias = await self._model_resolver(
+                request.agent.value,
+                request.tenant_id,
+                request.project_id,
+                require_tool_calling=True,
+            )
+        except Exception as exc:  # broad by design: never break a run on this
+            _log.warning("model resolution failed for run %s: %s", request.run_id, exc)
+            return self._config
+        if not alias:
+            _log.info(
+                "no project model configured for run %s — falling back to %r",
+                request.run_id,
+                self._config.model,
+            )
+            return self._config
+        return replace(self._config, model=f"litellm_proxy/{alias}")
 
     async def invoke(self, request: DispatchRequest) -> AgentCompletion:
+        config = await self._config_for(request)
         try:
-            outcome = await asyncio.to_thread(self._runner, self._config, request)
+            outcome = await asyncio.to_thread(self._runner, config, request)
         except OpenHandsUnavailableError as exc:
             return self._blocked(
                 request,
@@ -246,18 +458,26 @@ class OpenHandsGenerateEngine:
     ) -> AgentCompletion:
         """Map the OpenHands terminal status onto an `AgentCompletion`.
 
-        FINISHED → DONE with `output.files`. NOTE (Q1, POC) : no
-        `gate_b_evidence` is emitted — the engine does not fabricate
-        red-first proof, so Gate B will block downstream. That is a
-        documented finding, not a defect. ERROR / STUCK / any non-FINISHED
-        terminal state → BLOCKED."""
+        FINISHED → DONE with `output.files`, plus `gate_b_evidence` WHEN the
+        agent was observed running a validation command that failed — the
+        red-first proof (see `_gate_b_evidence`). Since 2026-09-09 this engine
+        emits that evidence because it can OBSERVE it: the terminal
+        observations carry the command and its exit code. It still never
+        fabricates — no failing validation run means no evidence block and
+        Gate B blocks, exactly as before.
+
+        ERROR / STUCK / any non-FINISHED terminal state → BLOCKED."""
         if outcome.execution_status == "FINISHED":
+            output: dict[str, Any] = {"engine": "openhands", "files": files}
+            evidence = _gate_b_evidence(outcome.terminal_runs, files)
+            if evidence is not None:
+                output["gate_b_evidence"] = evidence
             return AgentCompletion(
                 agent=request.agent,
                 run_id=request.run_id,
                 phase=request.phase,
                 status=EscalationStatus.DONE,
-                output={"engine": "openhands", "files": files},
+                output=output,
             )
         detail = f" ({outcome.detail})" if outcome.detail else ""
         return self._blocked(
@@ -281,12 +501,19 @@ class OpenHandsGenerateEngine:
 
 
 def build_generate_engine(
-    name: str, config: OpenHandsEngineConfig | None = None
+    name: str,
+    config: OpenHandsEngineConfig | None = None,
+    *,
+    model_resolver: ModelResolver | None = None,
 ) -> GenerateEngine | None:
     """Resolve the `C4_GENERATE_ENGINE` flag to an engine, or None to keep
     the default dispatcher path (`in_process`). Unknown values fall back to
-    None (dispatcher) — fail-safe, never crashes pod boot."""
+    None (dispatcher) — fail-safe, never crashes pod boot.
+
+    `model_resolver` is what makes the engine honour the platform's own LLM
+    configuration instead of a pinned env value; omit it only where no registry
+    is available (unit tests)."""
     if name == "openhands":
-        cfg = config or OpenHandsEngineConfig(gateway_url="", api_key=None, model="")
-        return OpenHandsGenerateEngine(cfg)
+        cfg = config or OpenHandsEngineConfig(gateway_url="", api_key=None)
+        return OpenHandsGenerateEngine(cfg, model_resolver=model_resolver)
     return None

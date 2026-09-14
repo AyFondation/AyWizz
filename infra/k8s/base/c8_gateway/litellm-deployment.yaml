@@ -53,6 +53,14 @@ spec:
             # Point the mounted cost forwarder at the AyWizz cost receiver.
             - name: COST_RECEIVER_URL
               value: http://c8-cost-receiver:8000
+            # Point the credential hook at c8_admin's INTERNAL resolver. That
+            # host is chosen because c8_admin already holds the master key (it
+            # encrypts provider keys on upsert), so decryption stays where it
+            # already lives and no new component learns the key. The endpoint is
+            # bearer-guarded with C8_GATEWAY_API_KEY (supplied by the secretRef
+            # below) and is NOT routed by C1 — unreachable from the edge.
+            - name: CALL_TARGET_RESOLVER_URL
+              value: http://c8-admin:8000
           envFrom:
             # Provides C8_GATEWAY_API_KEY (master_key) + ANTHROPIC_API_KEY.
             - secretRef:
@@ -69,6 +77,12 @@ spec:
             - name: litellm-forwarder
               mountPath: /app/cost_forwarder.py
               subPath: cost_forwarder.py
+              readOnly: true
+            # Same ConfigMap, second key, same reason: the pre-call credential
+            # hook is resolved as `/app/credential_injector.py`.
+            - name: litellm-forwarder
+              mountPath: /app/credential_injector.py
+              subPath: credential_injector.py
               readOnly: true
           readinessProbe:
             httpGet:

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: provider_models.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/provider_models.py
 # Description: Pydantic contracts for the LLM PROVIDER registry (the endpoint +
 #              credential layer). A provider is referenced by registry models
@@ -12,13 +12,22 @@
 #              the platform is provider-agnostic and never relies on a built-in
 #              default. `wire_format` is the litellm provider family (openai /
 #              anthropic / azure …) that fixes the request shape + auth header.
+#
+#              v2 (2026-09-09): `base_url` is NORMALISED and VALIDATED. It was
+#              `Field(min_length=1)` — any non-empty string passed. A trailing
+#              slash, the single most ordinary way a human pastes a base URL,
+#              produced `https://api.anthropic.com//v1/messages` once litellm
+#              appended its path: HTTP 404 with an EMPTY body, surfacing to the
+#              end user as `AnthropicException - .`. A TOTAL outage (no LLM call
+#              works) that is trivial to cause and undiagnosable without reading
+#              the proxy pod's logs. Observed in production on this date.
 # =============================================================================
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _ProviderFields(BaseModel):
@@ -32,7 +41,34 @@ class _ProviderFields(BaseModel):
     base_url: str = Field(min_length=1)
     """MANDATORY upstream endpoint URL. e.g. https://api.anthropic.com,
     https://api.openai.com/v1, http://vllm.internal/v1. Injected per call; never
-    defaulted."""
+    defaulted. Normalised on input: surrounding whitespace and TRAILING SLASHES
+    are stripped, and an http(s) scheme is required."""
+
+    @field_validator("base_url")
+    @classmethod
+    def _normalise_base_url(cls, value: str) -> str:
+        """Strip trailing slashes and require an http(s) scheme.
+
+        The clients that consume this value append their own path (litellm
+        appends `/v1/messages` for the anthropic wire format), so a stored
+        trailing slash yields a double slash and a 404 whose body is empty —
+        see the v2 note in this file's header. Stripping here fixes it at the
+        ONE point every writer passes through: the HMI upsert, the stored
+        document and the bootstrap seed all build on `_ProviderFields`.
+
+        `rstrip("/")` is safe across the whole domain: `https://api.openai.com/v1/`
+        → `…/v1`, `http://ollama:11434/` → `…:11434`. Only a path-less root
+        would degenerate, and `https://` alone is rejected by the scheme check.
+        """
+        cleaned = value.strip().rstrip("/")
+        if not cleaned:
+            raise ValueError("base_url must not be empty")
+        if not cleaned.startswith(("http://", "https://")):
+            raise ValueError(
+                "base_url must start with http:// or https:// "
+                f"(got {value!r})"
+            )
+        return cleaned
     wire_format: str = Field(min_length=1)
     """LiteLLM provider family that fixes the request format + auth header.
     e.g. anthropic, openai, azure, mistral, gemini. For an OpenAI-compatible

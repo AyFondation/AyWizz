@@ -1,12 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 7
+# Version: 9
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
 #              `.claude/settings.json`); the wrapper is the explicit,
 #              auditable entry point per CLAUDE.md §5.3.
+#
+#              v9 (2026-09-14): adds `--namespace`, and REMOVES `_namespace`
+#              from `base/`. Creating a Namespace is a cluster-scoped write and
+#              it was the LAST one the application performed — every other
+#              cluster-scoped object had already been designed away. With it in
+#              `base/`, an operator holding only namespace-admin on a
+#              pre-created namespace could not install the platform at all.
+#              Applied BEFORE the overlay (the `namespace:` transformer needs
+#              the namespace to exist). A from-scratch cluster now needs it on
+#              the first apply, exactly as it needs `--ingress` once.
+#
+#              v8 (2026-09-10): adds `--openhands` — switches C4 onto the
+#              OpenHands generate engine (base/c4_openhands: the C15 runner
+#              image + C4_GENERATE_ENGINE=openhands + an agent-sized resource
+#              envelope). Applied AFTER the overlay because it patches the
+#              Deployment the overlay creates; reverted by re-applying the
+#              overlay without the flag. Kept opt-in for the same reason as
+#              `--workers`: it is a live capability with a real cost, here a
+#              provider bill on every agent turn.
+#              Also fixes a usage-text defect: unescaped backticks inside the
+#              unquoted `usage()` heredoc ran `ingressClassName` as a command,
+#              so `--help` printed "command not found" and dropped the word.
 #
 #              v7 (2026-09-08): adds `--workers` — installs the C4 sandbox
 #              layer (a powerless SA for sandbox pods, a NAMESPACED Role
@@ -85,19 +107,46 @@ INGRESS_NGINX_PATH="${SCRIPT_DIR}/base/ingress_nginx"
 # (C4_DISPATCHER_BACKEND=k8s).
 C4_WORKERS_PATH="${SCRIPT_DIR}/base/c4_workers"
 
+# The OpenHands generate engine (V2 #2 / Q13 POC). A SEPARATE, opt-in target
+# because it swaps C4 onto a different image (the C15 runner: api + the heavy
+# `openhands` extra) AND because every agent turn bills a real provider.
+# Reverted by re-applying the overlay, which restores the stock image and the
+# `in_process` default.
+C4_OPENHANDS_PATH="${SCRIPT_DIR}/base/c4_openhands"
+
+# The platform Namespace. Its OWN target since 2026-09-14: creating a Namespace
+# is a cluster-scoped write, and it was the last one the application performed.
+# Keeping it opt-in is what lets an operator with namespace-admin only install
+# into a namespace their platform team pre-created.
+NAMESPACE_PATH="${SCRIPT_DIR}/base/_namespace"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") <env> [options]
 
 Environments:
-  dev     apply overlays/dev
-  prod    apply overlays/prod (when present)
+  dev      apply overlays/dev — the LOCAL docker-desktop cluster, where the
+           shared image store means images are never pulled
+  dev-aks  the SAME dev configuration deployed to AKS: overlays/dev plus the
+           managed-cluster component (imagePullPolicy: Always, since a managed
+           cluster has no local image store). Use this, not \`dev\`, on AKS.
+  prod     apply overlays/prod (when present)
 
 Options:
+  --namespace   create the platform Namespace — once per cluster, BEFORE the
+                first apply. SKIP it when deploying into a namespace your
+                platform team pre-created: that is the whole point, since
+                creating a Namespace is the only cluster-scoped write the
+                application would otherwise still perform.
   --workers     install the C4 sandbox layer into the platform namespace
                 (powerless SA for sandbox pods, namespaced Role granting
                 the orchestrator Pod lifecycle, egress+ingress policies).
                 Required when C4_DISPATCHER_BACKEND=k8s.
+  --openhands   switch C4 onto the OpenHands generate engine (C15 runner
+                image + C4_GENERATE_ENGINE=openhands). BILLS A REAL PROVIDER
+                on every agent turn. Build the image first with
+                \`infra/scripts/k8s_build_images.sh --c15\`. Revert by
+                re-applying the overlay without this flag.
   --crds        OBSOLETE since C1 moved to the Traefik file provider — the
                 platform no longer uses IngressRoute/Middleware CRDs and no
                 longer needs them installed. Kept for clusters still holding
@@ -105,7 +154,7 @@ Options:
   --ingress     install the ingress-nginx controller before applying — once
                 per cluster. SKIP on a cluster that already has an ingress
                 controller (AKS app routing, AGIC, an existing nginx); set
-                `ingressClassName` in overlays/<env>/ingress.yaml instead.
+                \`ingressClassName\` in overlays/<env>/ingress.yaml instead.
   --wait        wait for every Deployment to become Available (5 min cap)
   --no-jobs     skip bootstrap Jobs (use when re-applying without re-init)
   --reinit      delete + recreate bootstrap Jobs (needed when a Job spec
@@ -135,6 +184,8 @@ SKIP_JOBS=0
 WANT_CRDS=0
 WANT_INGRESS=0
 WANT_WORKERS=0
+WANT_OPENHANDS=0
+WANT_NAMESPACE=0
 REINIT=0
 RESTART=0
 while [ "$#" -gt 0 ]; do
@@ -144,6 +195,8 @@ while [ "$#" -gt 0 ]; do
         --crds) WANT_CRDS=1 ;;
         --ingress) WANT_INGRESS=1 ;;
         --workers) WANT_WORKERS=1 ;;
+        --openhands) WANT_OPENHANDS=1 ;;
+        --namespace) WANT_NAMESPACE=1 ;;
         --reinit) REINIT=1 ;;
         --restart) RESTART=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -158,8 +211,8 @@ if [ "${SKIP_JOBS}" -eq 1 ] && [ "${REINIT}" -eq 1 ]; then
 fi
 
 case "${ENV}" in
-    dev|prod) ;;
-    *) echo "ERROR: unknown env: ${ENV} (expected dev|prod)" >&2; exit 2 ;;
+    dev|dev-aks|prod) ;;
+    *) echo "ERROR: unknown env: ${ENV} (expected dev|dev-aks|prod)" >&2; exit 2 ;;
 esac
 
 OVERLAY_PATH="${SCRIPT_DIR}/overlays/${ENV}"
@@ -174,6 +227,13 @@ if [ -z "${CONTEXT}" ]; then
     exit 1
 fi
 echo "==> kubectl context: ${CONTEXT}"
+
+# BEFORE everything else: the overlay's `namespace:` transformer targets a
+# namespace that must already exist, so creating it cannot come later.
+if [ "${WANT_NAMESPACE}" -eq 1 ]; then
+    echo "==> Creating the platform namespace"
+    kubectl apply -k "${NAMESPACE_PATH}"
+fi
 
 if [ "${WANT_CRDS}" -eq 1 ]; then
     echo "==> Installing Traefik ${TRAEFIK_VERSION} CRDs"
@@ -234,6 +294,16 @@ fi
 if [ "${WANT_WORKERS}" -eq 1 ]; then
     echo "==> Installing the C4 sandbox layer"
     kubectl apply -k "${C4_WORKERS_PATH}"
+fi
+
+# AFTER the overlay too, and for the same reason: this PATCHES the
+# c4-orchestrator Deployment the overlay just created. Applied before it, the
+# overlay would immediately overwrite the patch back to the stock image.
+if [ "${WANT_OPENHANDS}" -eq 1 ]; then
+    echo "==> Switching C4 onto the OpenHands generate engine"
+    echo "    WARNING: every agent turn now bills a real provider through C8."
+    echo "    Revert with: $(basename "$0") ${ENV}   (re-applies the overlay)"
+    kubectl apply -k "${C4_OPENHANDS_PATH}"
 fi
 
 if [ "${RESTART}" -eq 1 ]; then

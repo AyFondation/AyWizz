@@ -1,6 +1,25 @@
 # =============================================================================
 # File: test_dispatcher.py
-# Version: 4
+# Version: 6
+#
+# @relation validates:R-200-011
+# @relation validates:R-200-012
+#
+# Contract change v6 (2026-09-10, §10.4 case D) : the Gate C derivation is
+#              GONE. It synthesised `validation_runs_green: True` with a
+#              timestamp one second ahead of a fabricated `last_artifact_write`,
+#              manufacturing the "green-when-last-measured" anti-pattern that
+#              R-200-012 exists to forbid. `test_review_derives_gate_c_evidence`
+#              became `test_review_never_synthesises_gate_c_evidence` (was:
+#              asserts evidence is synthesised and `runs_green is True` ; now:
+#              asserts NO block is produced and Gate C blocks).
+# Contract change v5 (2026-09-09, §10.4 case D) : the Gate B auto-derivation
+#              no longer claims `validation_runs_red` from a filename.
+#              `test_generate_with_files_derives_gate_b_evidence` became
+#              `test_generate_derives_existence_but_never_claims_a_red_run`
+#              (was: asserts `runs_red is True` ; now: asserts it is False),
+#              and a second test asserts the CONSEQUENCE end-to-end — derived
+#              evidence must not open Gate B.
 # Path: ay_platform_core/tests/unit/c4_orchestrator/test_dispatcher.py
 # Description: Unit tests for the in-process agent dispatcher. Mocks the
 #              C8 gateway client (AsyncMock) to exercise response parsing
@@ -410,9 +429,19 @@ class TestAutoDerivedGateEvidence:
     """Auto-derivation of Gate B / Gate C evidence when small open
     models emit files but skip the explicit evidence block."""
 
-    async def test_generate_with_files_derives_gate_b_evidence(self) -> None:
-        """One of the files has a test-looking path → gate_b_evidence
-        synthesised pointing at it."""
+    async def test_generate_derives_existence_but_never_claims_a_red_run(self) -> None:
+        """A test-looking path evidences that the ARTIFACT EXISTS — and
+        nothing more. This dispatcher has no execution environment, so it
+        cannot have observed a red run and SHALL NOT claim one.
+
+        Contract change 2026-09-09 (§10.4 case D). Was: a filename matching
+        `_looks_like_test_path` set `validation_runs_red: True`, so Gate B —
+        whose entire purpose is enforcing TDD red-first — passed on a NAMING
+        CONVENTION, with nothing executed. Now: `validation_runs_red` is False,
+        Gate B blocks with "exists but does not run red", and a red run is
+        evidenced only where genuinely observed (the OpenHands engine reads
+        the executed command and its exit code off the terminal observations).
+        """
         client = AsyncMock()
         client.chat_completion.return_value = _mock_response({
             "status": "DONE",
@@ -429,8 +458,29 @@ class TestAutoDerivedGateEvidence:
         evidence = completion.output.get("gate_b_evidence")
         assert isinstance(evidence, dict)
         assert evidence["validation_artifact_exists"] is True
-        assert evidence["validation_runs_red"] is True
+        assert evidence["validation_runs_red"] is False
         assert evidence["artifact_id"] == "tests/test_widget.py"
+
+    async def test_derived_evidence_does_not_pass_gate_b(self) -> None:
+        """The consequence, asserted end-to-end rather than assumed: evidence
+        derived from a filename alone must NOT open Gate B."""
+        from ay_platform_core.c4_orchestrator.dispatcher.in_process import (  # noqa: PLC0415
+            _derive_gate_b_evidence,
+        )
+        from ay_platform_core.c4_orchestrator.domains.code.plugin import (  # noqa: PLC0415
+            CodeDomainPlugin,
+        )
+
+        evidence = _derive_gate_b_evidence(
+            [{"path": "tests/test_widget.py", "content": "..."}]
+        )
+        assert evidence is not None
+        result = await CodeDomainPlugin().evaluate_gate_b(
+            "run-1", {"gate_b_evidence": evidence}
+        )
+        assert result.passed is False
+        assert result.reason is not None
+        assert "does not run red" in result.reason
 
     async def test_generate_with_no_test_files_leaves_evidence_unset(self) -> None:
         """When NO file looks like a test, gate_b_evidence is NOT
@@ -471,10 +521,17 @@ class TestAutoDerivedGateEvidence:
         assert completion.output["gate_b_evidence"]["artifact_id"] == "tests/test_other.py"
         assert completion.output["gate_b_evidence"]["validation_runs_red"] is False
 
-    async def test_review_derives_gate_c_evidence(self) -> None:
-        """Review phase without explicit evidence → gate_c_evidence
-        synthesised with `evidence_timestamp > last_artifact_write`
-        so the gate passes."""
+    async def test_review_never_synthesises_gate_c_evidence(self) -> None:
+        """A review that verified nothing SHALL NOT claim a green run.
+
+        Contract change 2026-09-10 (§10.4 case D). Was: the review phase
+        synthesised `validation_runs_green: True` with `evidence_timestamp`
+        set one second ahead of a fabricated `last_artifact_write`, so Gate C
+        passed on every review. R-200-012 requires verification evidence dated
+        after the last artifact write and "rejects cached or stale results, to
+        prevent the green-when-last-measured anti-pattern" — the derivation
+        manufactured that anti-pattern. Now: no block is produced.
+        """
         client = AsyncMock()
         client.chat_completion.return_value = _mock_response({
             "status": "DONE",
@@ -483,7 +540,36 @@ class TestAutoDerivedGateEvidence:
         completion = await InProcessDispatcher(client).dispatch(
             _request(Phase.REVIEW),
         )
-        evidence = completion.output.get("gate_c_evidence")
-        assert isinstance(evidence, dict)
-        assert evidence["validation_runs_green"] is True
-        assert evidence["evidence_timestamp"] > evidence["last_artifact_write"]
+        assert "gate_c_evidence" not in completion.output
+
+    async def test_a_review_without_evidence_does_not_pass_gate_c(self) -> None:
+        """The consequence, asserted end-to-end rather than assumed."""
+        from ay_platform_core.c4_orchestrator.domains.code.plugin import (  # noqa: PLC0415
+            CodeDomainPlugin,
+        )
+
+        result = await CodeDomainPlugin().evaluate_gate_c("run-1", {"findings": "ok"})
+        assert result.passed is False
+        assert result.reason is not None
+        assert "not passing" in result.reason
+
+    async def test_review_with_explicit_evidence_is_left_untouched(self) -> None:
+        """Removing the derivation SHALL NOT stop an agent that genuinely ran
+        the validation from supplying its own evidence."""
+        client = AsyncMock()
+        client.chat_completion.return_value = _mock_response({
+            "status": "DONE",
+            "output": {
+                "findings": "looks good",
+                "gate_c_evidence": {
+                    "artifact_id": "tests/test_widget.py",
+                    "validation_runs_green": True,
+                    "evidence_timestamp": "2026-09-10T10:00:01+00:00",
+                    "last_artifact_write": "2026-09-10T10:00:00+00:00",
+                },
+            },
+        })
+        completion = await InProcessDispatcher(client).dispatch(
+            _request(Phase.REVIEW),
+        )
+        assert completion.output["gate_c_evidence"]["artifact_id"] == "tests/test_widget.py"

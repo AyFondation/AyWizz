@@ -3,7 +3,9 @@
 # Path: ay_platform_core/tests/unit/c8_llm/test_registry_models.py
 # Description: Unit tests for the provider + model registry pydantic contracts
 #              (v2): stable ids, mutable alias, provider reference, write-only
-#              provider key projection, document round-trips.
+#              provider key projection, document round-trips, and `base_url`
+#              normalisation (trailing-slash strip + http(s) scheme check —
+#              provider_models v2, the production outage of 2026-09-09).
 # =============================================================================
 
 from __future__ import annotations
@@ -110,3 +112,67 @@ def test_provider_key_status_reflects_ciphertext() -> None:
 def test_provider_base_url_is_mandatory() -> None:
     with pytest.raises(ValidationError):
         LLMProviderUpsert.model_validate({"name": "X", "wire_format": "openai"})
+
+
+# ---- base_url normalisation (2026-09-09) -------------------------------------
+#
+# A trailing slash used to survive into storage, and litellm appends its own
+# path: `https://api.anthropic.com/` + `/v1/messages` = a double slash, HTTP 404
+# with an EMPTY body, surfaced to the end user as `AnthropicException - .`.
+# Total outage, trivially caused, undiagnosable without the proxy pod's logs.
+
+
+def _upsert(base_url: str) -> LLMProviderUpsert:
+    return LLMProviderUpsert.model_validate(
+        {"name": "X", "base_url": base_url, "wire_format": "anthropic"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The exact production defect.
+        ("https://api.anthropic.com/", "https://api.anthropic.com"),
+        # Several slashes, and whitespace from a paste.
+        ("https://api.anthropic.com///", "https://api.anthropic.com"),
+        ("  https://api.anthropic.com/  ", "https://api.anthropic.com"),
+        # A path-bearing base URL keeps its path, loses only the trailing slash.
+        ("https://api.openai.com/v1/", "https://api.openai.com/v1"),
+        # Plain http is legitimate for an in-cluster self-hosted endpoint.
+        ("http://ollama:11434/", "http://ollama:11434"),
+        # Already clean → untouched.
+        ("https://api.anthropic.com", "https://api.anthropic.com"),
+    ],
+)
+def test_base_url_trailing_slash_is_stripped(raw: str, expected: str) -> None:
+    assert _upsert(raw).base_url == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "api.anthropic.com",       # scheme missing — litellm cannot route it
+        "ftp://api.anthropic.com",  # wrong scheme
+        "/v1/messages",             # a path, not an endpoint
+        "https://",                 # degenerates to empty once stripped
+        "   ",                      # whitespace only
+    ],
+)
+def test_base_url_without_a_usable_http_scheme_is_rejected(raw: str) -> None:
+    with pytest.raises(ValidationError):
+        _upsert(raw)
+
+
+def test_normalisation_applies_to_the_stored_entry_not_just_the_upsert() -> None:
+    """Every writer builds on `_ProviderFields`, so the stored document is
+    normalised too — the HMI upsert, the seed and the entry share one rule."""
+    entry = LLMProviderEntry(
+        provider_id="p1",
+        name="Anthropic",
+        base_url="https://api.anthropic.com/",
+        wire_format="anthropic",
+        effective_from="2026-09-09T00:00:00+00:00",
+    )
+    assert entry.base_url == "https://api.anthropic.com"
+    assert entry.to_document()["base_url"] == "https://api.anthropic.com"
+    assert entry.to_public().base_url == "https://api.anthropic.com"

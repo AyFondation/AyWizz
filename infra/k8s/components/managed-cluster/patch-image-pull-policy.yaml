@@ -1,0 +1,47 @@
+# =============================================================================
+# File: patch-image-pull-policy.yaml
+# Version: 1
+# Path: infra/k8s/overlays/prod/patch-image-pull-policy.yaml
+# Description: Forces `imagePullPolicy: Always` on every long-running workload
+#              container, for MANAGED clusters only (AKS and anything else with
+#              no local image store).
+#
+#              WHY A PROD-OVERLAY PATCH AND NOT A `base/` CHANGE. Putting this
+#              in `base/` looks tidier and would break local development.
+#              The dev images are built locally, and c13/c15 are not published
+#              at all — `ghcr.io/ayfondation/…` is a NAMING CONVENTION there,
+#              not an address. docker-desktop shares its image store with the
+#              cluster and `IfNotPresent` is what makes that work: the kubelet
+#              finds the image you just built and never contacts a registry.
+#              `Always` in `base/` would force a pull on the dev cluster, where
+#              api/ui would be silently REPLACED by whatever GHCR holds — the
+#              last COMMIT PUSHED, which is never what a developer is testing.
+#              Uncommitted work would vanish from a deploy that reported
+#              success. (On 2026-09-14, GHCR's `aywizz-api:latest` was
+#              `sha-7be1f53` — HEAD — while six independent workstreams sat
+#              uncommitted in the tree. A pull would have discarded all of
+#              them.)
+#
+#              ON A PINNED TAG THIS IS A NO-OP, by design. `kustomization.yaml`
+#              pins every platform image to `sha-<commit>`, which is immutable:
+#              `Always` then costs one registry round-trip per pod start and
+#              changes nothing. It earns its place the moment a deployment uses
+#              a FLOATING tag (`:latest`, `:main`, `:beta`), where
+#              `IfNotPresent` means "keep whatever this node happens to have" —
+#              the managed-cluster form of the phantom deploy already hit in
+#              dev on 2026-09-02.
+#
+#              Getting the newest code onto a managed cluster is therefore TWO
+#              things, not one: this policy AND an updated sha pin. The policy
+#              alone guarantees nothing.
+#
+#              SCOPE: Deployments and StatefulSets — the workloads that keep
+#              running. Bootstrap Jobs are excluded on purpose: they execute
+#              once at install and then stay Completed, so a pull policy on
+#              them changes nothing a re-install would not already handle.
+#              `replace` (not `add`) is safe because every container in the
+#              tree declares `imagePullPolicy` explicitly.
+# =============================================================================
+- op: replace
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: Always

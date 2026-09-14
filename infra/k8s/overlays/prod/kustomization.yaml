@@ -86,11 +86,26 @@ images:
     newTag: sha-REPLACE_ME_AT_DEPLOY
   - name: ghcr.io/ayfondation/aywizz-ui
     newTag: sha-REPLACE_ME_AT_DEPLOY
+  # c13 was MISSING here until 2026-09-14, so it kept `:latest` from `base/`
+  # while api and ui were pinned by sha. On docker-desktop that is harmless
+  # (the local store answers every pull) ; on a managed cluster it is two
+  # faults at once — a floating tag under `imagePullPolicy: IfNotPresent`, and
+  # an image the CI did not publish at all. Surfaced by an AKS deployment.
+  - name: ghcr.io/ayfondation/aywizz-c13-extractor
+    newTag: sha-REPLACE_ME_AT_DEPLOY
 
 # Replica patches : stateless API tier scales to 2+ replicas for HA.
 # Data tier (ArangoDB / MinIO StatefulSets) stays at the base count —
 # horizontal scaling there is a separate operational decision (sharding,
 # replication factor) tracked as a deferred item above.
+# Prod is a managed cluster by definition, so it composes the same component
+# `overlays/dev-aks` does rather than keeping a second copy of the same rule.
+# NOTE it is a no-op while the image tags above stay pinned to `sha-<commit>`:
+# an immutable tag makes `Always` one extra registry round-trip per pod start
+# and nothing more. It earns its place only on a floating tag.
+components:
+  - ../../components/managed-cluster
+
 patches:
   - target:
       group: apps
