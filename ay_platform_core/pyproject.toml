@@ -207,6 +207,28 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:testcontainers.*",
     "ignore::DeprecationWarning:docker.*",
+    # anyio >= 4.15 deprecated the `anyio.abc.BlockingPortal` alias, and
+    # `starlette.testclient` still imports it. The warning fires at IMPORT
+    # time, so `error` turned it into a COLLECTION error — every module using
+    # `TestClient` failed to collect at once, which is how it presented in CI
+    # on v0.1.0-beta.14 (4 errors, 1 skipped, nothing else ran).
+    #
+    # It is ignored rather than fixed because neither side is ours: we do not
+    # import the alias anywhere, and `starlette` is capped `<1.2` ON PURPOSE
+    # (see the dependency comment) pending a deliberate httpx2 test-client
+    # migration. Lifting that cap is what removes this entry — not a code
+    # change here.
+    #
+    # Matched by MESSAGE, not by module: the warning is raised from anyio but
+    # attributed to whichever module triggers the import, so a `:module`
+    # filter would have to enumerate every TestClient user and would silently
+    # miss the next one. The message pattern stays narrow enough to keep
+    # every other anyio deprecation an error.
+    #
+    # NB it reproduces only where anyio >= 4.15 resolves — the devcontainer
+    # had 4.14.2 pinned in its image, CI installs fresh, which is why the
+    # local suite was green while CI was not.
+    "ignore:The anyio\\.abc\\.BlockingPortal alias is deprecated:DeprecationWarning",
 ]
 
 # -----------------------------------------------------------------------------

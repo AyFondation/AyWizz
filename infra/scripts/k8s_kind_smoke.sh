@@ -70,7 +70,17 @@ if [ "${1:-}" = "--keep-cluster" ]; then
     KEEP_CLUSTER=1
 fi
 
+# shellcheck source=_k8s_diagnostics.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_k8s_diagnostics.sh"
+
 cleanup() {
+    # Capture BEFORE deleting: the trap fires on failure too, and the cluster
+    # holds the only explanation. Guarded on a non-zero status so a passing
+    # run stays quiet.
+    local status=$?
+    if [ "${status}" -ne 0 ]; then
+        dump_k8s_diagnostics "${NAMESPACE}"
+    fi
     if [ "${KEEP_CLUSTER}" -eq 1 ]; then
         echo "==> --keep-cluster set; not deleting ${CLUSTER_NAME}"
         return

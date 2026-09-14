@@ -71,7 +71,17 @@ for tool in kind kubectl docker; do
     fi
 done
 
+# shellcheck source=../../infra/scripts/_k8s_diagnostics.sh
+. "${MONOREPO_ROOT}/infra/scripts/_k8s_diagnostics.sh"
+
 cleanup() {
+    # Capture BEFORE deleting: the trap fires on failure too, and the cluster
+    # holds the only explanation. Guarded on a non-zero status so a passing
+    # run stays quiet.
+    local status=$?
+    if [ "${status}" -ne 0 ]; then
+        dump_k8s_diagnostics "${NAMESPACE}"
+    fi
     if [ "${KEEP_CLUSTER}" -eq 1 ]; then
         echo "==> --keep-cluster set; cluster ${CLUSTER_NAME} preserved"
         return
