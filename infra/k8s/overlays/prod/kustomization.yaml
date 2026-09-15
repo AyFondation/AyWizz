@@ -104,6 +104,16 @@ images:
 # an immutable tag makes `Always` one extra registry round-trip per pod start
 # and nothing more. It earns its place only on a floating tag.
 components:
+  # ORDER MATTERS. `wait-for-deps` ADDS the initContainers; `managed-cluster`
+  # then rewrites their pull policy. Reverse the two and that rewrite runs
+  # before the containers exist, matches nothing, and leaves nine
+  # initContainers on `IfNotPresent` — on the one cluster kind that has no
+  # local image store.
+  #
+  # Startup ordering itself replaces the compose `depends_on: service_healthy`
+  # that had no Kubernetes equivalent; the race is universal, only the odds
+  # differ per cluster.
+  - ../../components/wait-for-deps
   - ../../components/managed-cluster
 
 patches:

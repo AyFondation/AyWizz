@@ -60,6 +60,14 @@ resources:
   # THE EDGE — the single object wiring the external URL to C1.
   - ingress.yaml
 
+# Startup ordering. Kubernetes has no `depends_on`; the compose topology this
+# was ported from relied on `condition: service_healthy`. Composed HERE rather
+# than in `base/` because this overlay lists base components individually and
+# never evaluates `base/kustomization.yaml` — a patch placed there would reach
+# `overlays/prod` only.
+components:
+  - ../../components/wait-for-deps
+
 configMapGenerator:
   - name: aywizz-config
     behavior: create

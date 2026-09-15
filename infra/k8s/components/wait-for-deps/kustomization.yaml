@@ -1,0 +1,42 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/components/wait-for-deps/kustomization.yaml
+# Description: Kustomize COMPONENT adding a `wait-for-deps` initContainer to
+#              every API-tier Deployment that reads ArangoDB or MinIO during
+#              startup.
+#
+#              WHAT IT REPLACES. Kubernetes has no `depends_on`. The compose
+#              topology this platform was ported from declares
+#              `depends_on: {arangodb: {condition: service_healthy}}` on each
+#              of these services and Compose BLOCKS until that holds; nothing
+#              took over that role on the K8s side, so every one of these
+#              components raced its database at startup and exited after ~18s
+#              when it lost. See patch-wait-for-deps.yaml for the full read.
+#
+#              UNLIKE `managed-cluster`, THIS IS NOT ENVIRONMENT-SPECIFIC. The
+#              race exists on every cluster; only the odds change. It is a
+#              Component for a mechanical reason, not a conditional one:
+#              `overlays/dev` and `overlays/system-test` compose
+#              `../../base/<component>` individually and never evaluate
+#              `base/kustomization.yaml`, so a patch placed in base reaches
+#              `overlays/prod` alone. Every overlay therefore composes this
+#              explicitly.
+#
+#              THE TARGET LIST IS THE CONTRACT. Nine Deployments, matched by
+#              name. `c9-mcp` is absent deliberately — it proxies C5/C6 and
+#              opens no storage connection, which is exactly why it was the
+#              single healthy pod out of ten when this surfaced on AKS. A new
+#              component that reads storage at startup MUST be added here;
+#              nothing detects the omission, and it will pass locally.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - path: patch-wait-for-deps.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "^(c2-auth|c3-conversation|c4-orchestrator|c5-requirements|c6-validation|c7-memory|c8-admin|c8-cost-receiver|c16-backup)$"

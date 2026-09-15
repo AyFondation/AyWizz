@@ -1,0 +1,146 @@
+# =============================================================================
+# File: patch-wait-for-deps.yaml
+# Version: 1
+# Path: infra/k8s/components/wait-for-deps/patch-wait-for-deps.yaml
+# Description: A `wait-for-deps` initContainer for every API-tier component
+#              whose startup lifespan touches ArangoDB or MinIO.
+#
+#              WHY THIS EXISTS — A COMPOSE GUARANTEE THAT DID NOT SURVIVE THE
+#              PORT TO KUBERNETES. `tests/docker-compose.yml` declares
+#              `depends_on: {arangodb: {condition: service_healthy}}` on every
+#              such service, and Compose BLOCKS the container until that holds.
+#              Kubernetes has no equivalent: all pods start at once. The port
+#              was made without replacing that guarantee, so each component
+#              simply raced its database — and lost silently.
+#
+#              HOW IT PRESENTED (AKS, 2026-09-15). Nine of the ten pods built
+#              from `aywizz-api` failed their readiness probe; the tenth,
+#              `c9-mcp`, was fine — it is a pure proxy and touches no storage.
+#              The logs showed `RemoteDisconnected('Remote end closed
+#              connection without response')` against
+#              `http://arangodb:8529/_db/platform/_api/collection`, then
+#              `Application startup failed. Exiting.` EIGHTEEN SECONDS after
+#              start: python-arango retries 3 times and gives up, the lifespan
+#              raises, uvicorn exits. A fresh ArangoDB on an Azure Disk is not
+#              serving by then.
+#
+#              Note what the error was NOT, because both readings were tried
+#              and both were wrong: a NetworkPolicy drop yields a TIMEOUT, not
+#              an established connection; bad credentials yield HTTP 401, which
+#              is a response. `RemoteDisconnected` means the socket opened and
+#              closed with nothing spoken — a server that is up but not yet
+#              serving.
+#
+#              WHY IT NEVER BIT LOCALLY. docker-desktop starts ArangoDB from a
+#              warm image on local disk in ~2s, inside the 18s budget. When it
+#              does not, one restart absorbs it — `c4-orchestrator` did exactly
+#              that on 2026-09-15 (1 restart, then stable) and the defect read
+#              as noise rather than as the same bug at smaller scale.
+#
+#              WHAT IT WAITS FOR — the actual precondition, not a port. A
+#              successful authenticated GET on `/_db/$ARANGO_DB/_api/collection`
+#              proves three things at once: arangod serves HTTP, the `platform`
+#              database exists (so the `arangodb-init` Job has run), and the
+#              application user can read it. Waiting for `:8529` to accept a
+#              socket would prove none of them — and accepting the socket is
+#              precisely what it was already doing while failing.
+#
+#              IMAGE: the api image itself. It is already being pulled for the
+#              main container, carries python3, and adds no new registry
+#              dependency — which matters after MinIO's Docker Hub
+#              repositories stopped serving public pulls (see
+#              infra/scripts/_kind_preload.sh).
+#
+#              SCOPE: the nine storage-touching Deployments, enumerated in
+#              `kustomization.yaml`. `c9-mcp` is deliberately absent. A NEW
+#              component that reads storage at startup MUST be added to that
+#              list — nothing detects the omission; it will simply race, and
+#              win locally.
+#
+#              WHY A COMPONENT AND NOT `base/kustomization.yaml`. It was put
+#              there first and applied to NOTHING that mattered: `overlays/dev`
+#              and `overlays/system-test` list `../../base/<component>`
+#              individually and never evaluate `base/kustomization.yaml` —
+#              only `overlays/prod` composes `../../base`. A cross-cutting
+#              patch therefore has to be a Component each overlay composes by
+#              name, which is also what makes its scope visible from the
+#              overlay rather than hidden two directories down.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PATCHED-BY-TARGET
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-for-deps
+          image: ghcr.io/ayfondation/aywizz-api:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: aywizz-config
+            - secretRef:
+                name: aywizz-secrets
+          command:
+            - python3
+            - -c
+            - |
+              import base64, os, time, urllib.request
+
+              timeout = float(os.environ.get("WAIT_FOR_DEPS_TIMEOUT", "600"))
+              deadline = time.monotonic() + timeout
+
+              def probe(name, request):
+                  while True:
+                      try:
+                          with urllib.request.urlopen(request, timeout=5) as resp:
+                              if resp.status == 200:
+                                  print(f"{name}: ready", flush=True)
+                                  return
+                              detail = f"HTTP {resp.status}"
+                      except Exception as exc:  # any failure is "not ready yet"
+                          detail = repr(exc)
+                      if time.monotonic() > deadline:
+                          raise SystemExit(
+                              f"{name}: still not ready after {timeout:.0f}s; "
+                              f"last attempt: {detail}"
+                          )
+                      print(f"{name}: waiting ({detail})", flush=True)
+                      time.sleep(3)
+
+              # ArangoDB: authenticated read of the application database. Proves
+              # arangod serves, the DB exists (arangodb-init ran) and the app
+              # user can reach it — the exact precondition each lifespan needs.
+              arango = os.environ["ARANGO_URL"].rstrip("/")
+              database = os.environ.get("ARANGO_DB", "platform")
+              token = base64.b64encode(
+                  f"{os.environ['ARANGO_USERNAME']}:{os.environ['ARANGO_PASSWORD']}".encode()
+              ).decode()
+              probe(
+                  "arangodb",
+                  urllib.request.Request(
+                      f"{arango}/_db/{database}/_api/collection",
+                      headers={"Authorization": f"Basic {token}"},
+                  ),
+              )
+
+              # MinIO: unauthenticated liveness. Buckets are created by the
+              # components themselves via ensure_bucket(), so serving is all
+              # this needs to establish.
+              secure = os.environ.get("MINIO_SECURE", "false").strip().lower() == "true"
+              scheme = "https" if secure else "http"
+              endpoint = os.environ["MINIO_ENDPOINT"]
+              probe(
+                  "minio",
+                  urllib.request.Request(f"{scheme}://{endpoint}/minio/health/live"),
+              )
+
+              print("all dependencies ready", flush=True)
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

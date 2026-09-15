@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 3
+# Version: 5
 # Path: infra/k8s/base/kustomization.yaml
 # Description: Root base for all platform components. Overlays
 #              (`overlays/dev/`, `overlays/prod/`) reference this base
@@ -109,3 +109,11 @@ resources:
   # Bootstrap Jobs — last, so the Services / StatefulSets are
   # already declared by the time the Jobs are created.
   - _init
+
+# NOTE — do NOT add `patches:` here expecting them to reach dev or the system
+# tests. THIS FILE IS ONLY EVALUATED BY `overlays/prod`: `overlays/dev` and
+# `overlays/system-test` list `../../base/<component>` individually and never
+# read this kustomization at all. A patch placed here applies to prod and
+# silently does nothing everywhere else. Cross-cutting changes belong in a
+# Component under `infra/k8s/components/`, which every overlay composes
+# explicitly — see `wait-for-deps` and `managed-cluster`.

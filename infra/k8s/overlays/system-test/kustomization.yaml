@@ -71,6 +71,14 @@ resources:
   - ../../base/_mock_llm
   - ../../base/_init
 
+# Startup ordering — the compose `depends_on: service_healthy` has no
+# Kubernetes equivalent. This tier needs it as much as any: the L4 diagnostics
+# on 2026-09-15 showed c2/c3/c4/c5/c6/c7/c8-admin each with 2 restarts and
+# `connect: connection refused` readiness failures, which is this same race
+# converging the slow way inside a kind cluster.
+components:
+  - ../../components/wait-for-deps
+
 # Excise the Ollama Deployment, Service, PVC + the ollama-seed Job.
 # Each $patch: delete strips the matching resource from the build.
 patches:

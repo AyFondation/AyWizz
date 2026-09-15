@@ -58,11 +58,17 @@ patches:
       group: batch
       version: v1
       kind: CronJob
-  # Named target: c12-workflow is the only workload with an initContainer, and
-  # an untargeted patch would fail the build on every Deployment without one.
+  # Named targets: an untargeted initContainer patch would fail the build on
+  # every Deployment that has none (JSON6902 `replace` errors on a missing
+  # path). c12-workflow carries the n8n workflow importer; the other nine
+  # carry `wait-for-deps` from the `wait-for-deps` COMPONENT — which is why
+  # THAT COMPONENT MUST BE COMPOSED BEFORE THIS ONE in an overlay's
+  # `components:` list. Compose it after, and these paths do not exist yet,
+  # the patch silently matches nothing, and nine initContainers keep
+  # `IfNotPresent` on a cluster with no image store.
   - path: patch-image-pull-policy-initcontainer.yaml
     target:
       group: apps
       version: v1
       kind: Deployment
-      name: c12-workflow
+      name: "^(c12-workflow|c2-auth|c3-conversation|c4-orchestrator|c5-requirements|c6-validation|c7-memory|c8-admin|c8-cost-receiver|c16-backup)$"
