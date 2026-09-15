@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c12-workflow-seed.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/_init/c12-workflow-seed.yaml
 # Description: One-shot Job importing every workflow JSON under the
 #              c12-workflow-files ConfigMap into the running n8n.
@@ -53,8 +53,19 @@ spec:
               done
               echo "Importing n8n workflows from /workflows"
               n8n import:workflow --separate --input=/workflows
-              echo "Activating imported workflows"
-              n8n update:workflow --all --active=true || true
+              # n8n 2.x removed `update:workflow --all --active=true`
+              # ("no longer supported"), and `import:workflow` DEACTIVATES
+              # what it imports. Publishing is now per workflow id. The
+              # `|| true` that used to trail the old command is gone on
+              # purpose: it swallowed the 2.x removal, so the seed reported
+              # success while both webhooks stayed unregistered — an
+              # ingestion chain that is down but green.
+              echo "Publishing imported workflows"
+              for wf in /workflows/*.json; do
+                wf_id="$(node -p "require('${wf}').id")"
+                echo "  publishing ${wf_id}"
+                n8n publish:workflow --id="${wf_id}"
+              done
               echo "Seeding done."
       volumes:
         - name: data

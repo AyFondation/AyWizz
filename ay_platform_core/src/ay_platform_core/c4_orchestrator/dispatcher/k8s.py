@@ -1,6 +1,6 @@
 # =============================================================================
 # File: k8s.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/dispatcher/k8s.py
 # Description: Kubernetes sub-agent dispatcher (R-200-030..033). For each
 #              `DispatchRequest` :
@@ -152,7 +152,11 @@ class K8sDispatcher:
             )
         else:
             try:
-                kube_config.load_incluster_config()
+                # kubernetes_asyncio 36 ships type information, and its
+                # `load_incluster_config` is annotation-free upstream — so
+                # `strict` flags the call, not our argument. Nothing to fix
+                # on this side; drop the ignore if the library annotates it.
+                kube_config.load_incluster_config()  # type: ignore[no-untyped-call]
             except Exception:
                 await kube_config.load_kube_config()
         self._kube_loaded = True
@@ -210,8 +214,17 @@ class K8sDispatcher:
         api = client.CoreV1Api()
         manifest = self._render_pod_manifest(envelope, pod_name)
         started = time.monotonic()
+        # `body` is typed `V1Pod` by kubernetes_asyncio 36's stubs, but the
+        # runtime signature is `(self, namespace, body, **kwargs)` with no
+        # enforcement: ApiClient.sanitize_for_serialization passes a plain
+        # dict through unchanged (verified against the installed 36.1.0).
+        # The stub is narrower than the contract it documents, so the dict
+        # manifest stays — building a V1Pod would mean re-expressing
+        # `_render_pod_manifest` in client objects for no runtime gain.
         await api.create_namespaced_pod(
-            namespace=self._cfg.namespace, body=manifest,
+            # The ignore sits on the ARGUMENT line, not the call line: mypy
+            # attributes arg-type errors to where the argument is written.
+            namespace=self._cfg.namespace, body=manifest,  # type: ignore[arg-type]
         )
         timeout = (
             self._cfg.sub_agent_timeout_seconds + self._cfg.watch_grace_seconds
