@@ -1,0 +1,77 @@
+# docker-compose.test.yml — v4
+# Unified test infrastructure: all services for unit, integration and E2E tests.
+#
+# Changelog:
+#     v4: Add port mappings — required for docker-outside-of-docker topology
+#         where dev container cannot reach internal Docker network IPs.
+#         Services are reachable via host.docker.internal:<port> from dev
+#         container, or via localhost:<port> from host machine.
+#     v3: Remove custom healthchecks (unreliable across image versions).
+#         Readiness is handled by the Makefile wait loop.
+#     v2: Fix healthchecks — use curl/wget instead of bash TCP trick.
+#     v1: Initial unified compose.
+#
+# Container names are fixed for auto-discovery via `docker inspect`.
+#
+# Lifecycle managed by Makefile:
+#   make test            → up + all tests + down
+#   make test-infra-up   → start services only
+#   make test-infra-down → stop + cleanup
+#
+# Configuration: edit .env (see .env.example for all options).
+
+services:
+
+  # ── ArangoDB ────────────────────────────────────────────────────
+  arangodb:
+    image: arangodb:3.12
+    container_name: ayextractor-test-arangodb
+    ports:
+      - "8529:8529"
+    environment:
+      ARANGO_ROOT_PASSWORD: ${ARANGODB_ROOT_PASSWORD:-testpassword}
+      ARANGO_NO_AUTH: "0"
+
+  # ── Qdrant ──────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-v1.16}
+    container_name: ayextractor-test-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  # ── ChromaDB ────────────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:${CHROMADB_IMAGE_TAG:-1.5.0}
+    container_name: ayextractor-test-chromadb
+    ports:
+      - "8000:8000"
+
+  # ── Ollama ──────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ayextractor-test-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_test_data:/root/.ollama
+
+  # ── Ollama model pull (runs once then exits) ────────────────────
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ayextractor-test-ollama-init
+    depends_on:
+      - ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "[test] Waiting for Ollama to start..."
+        until curl -sf http://ollama:11434/api/tags >/dev/null 2>&1; do sleep 2; done
+        echo "[test] Pulling LLM model ${OLLAMA_LLM_MODEL:-qwen2.5:0.5b} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_LLM_MODEL:-qwen2.5:0.5b}"}' | tail -1
+        echo "[test] Pulling embedding model ${OLLAMA_EMBED_MODEL:-nomic-embed-text} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_EMBED_MODEL:-nomic-embed-text}"}' | tail -1
+        echo "[test] All models ready."
+
+volumes:
+  ollama_test_data:

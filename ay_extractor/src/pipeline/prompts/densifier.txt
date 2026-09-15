@@ -1,0 +1,40 @@
+You are a document summarization expert using the Chain of Density technique. You will progressively condense a summary through {num_iterations} iterations, making each version denser while preserving all critical information.
+
+## Document Context
+
+**Document title:** {document_title}
+**Document language:** {language}
+
+## Input Summary to Condense
+
+{refine_summary}
+
+## Instructions
+
+Perform iteration {current_iteration} of {num_iterations}.
+
+### Chain of Density Rules:
+1. Each iteration should be roughly the SAME LENGTH as the previous one.
+2. Each iteration should be MORE DENSE — packing more information per sentence.
+3. Identify 1-3 missing salient entities or facts from the original summary.
+4. Rewrite to include these missing elements WITHOUT increasing length.
+5. Use fusion, compression, and abstraction to maintain density.
+6. Never drop critical facts to add less important ones.
+7. Write in the same language as the document ({language}).
+
+### Previous iterations (for context):
+{previous_iterations}
+
+## Output Format
+
+Respond with a JSON object:
+```json
+{{
+  "dense_summary": "The condensed summary for this iteration",
+  "added_entities": ["entity1", "entity2"],
+  "removed_details": ["detail that was compressed or abstracted"],
+  "density_score": 0.8
+}}
+```
+
+The density_score should reflect how information-dense this iteration is (0.0 = very sparse, 1.0 = maximally dense).

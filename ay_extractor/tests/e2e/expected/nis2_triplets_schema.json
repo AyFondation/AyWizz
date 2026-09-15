@@ -1,0 +1,35 @@
+{
+  "_comment": "Semantic assertions for triplet extraction. These are minimum expectations \u2014 the actual output depends on the LLM model and may exceed these.",
+  "min_triplet_count": 1,
+  "expected_entities": [
+    "European Union",
+    "NIS2",
+    "ENISA"
+  ],
+  "expected_relations": [
+    {
+      "subject_contains": "European Union",
+      "predicate_any_of": [
+        "adopted",
+        "enacted",
+        "introduced",
+        "established"
+      ],
+      "object_contains": "NIS2"
+    },
+    {
+      "subject_contains": "NIS2",
+      "predicate_any_of": [
+        "replaces",
+        "supersedes",
+        "replaced",
+        "succeeds"
+      ],
+      "object_contains": "NIS"
+    }
+  ],
+  "entity_must_appear_in_at_least_one_triplet": [
+    "ENISA",
+    "NIS2"
+  ]
+}

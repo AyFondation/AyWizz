@@ -1,0 +1,23 @@
+{
+  "min_text_length": 200,
+  "expected_language": "en",
+  "must_contain_text": [
+    "NIS2 Directive",
+    "European Union",
+    "cybersecurity",
+    "ENISA"
+  ],
+  "must_contain_sections": [
+    {"title_contains": "key objectives"},
+    {"title_contains": "enisa"}
+  ],
+  "min_tables": 1,
+  "table_must_contain": [
+    "Energy",
+    "Essential",
+    "October 2024",
+    "Healthcare"
+  ]
+}
+
+

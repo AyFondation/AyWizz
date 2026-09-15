@@ -1,0 +1,126 @@
+# docker-compose.integration.yml — v2
+# Integration test infrastructure: Ollama + ArangoDB + Qdrant
+#
+# Changelog:
+#     v2: All configurable values read from .env via ${VAR} substitution.
+#         Added ChromaDB service. Healthcheck uses 'ollama list' (no curl).
+#     v1: Initial compose with hardcoded values.
+#
+# Configuration: edit .env (see .env.example for all options).
+# Usage:
+#   docker compose -f docker-compose.integration.yml up -d
+#   make test-integration
+#   docker compose -f docker-compose.integration.yml down -v
+
+services:
+
+  # ── Ollama LLM ──────────────────────────────────────────────
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ayextractor-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ayextractor-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling LLM model ${OLLAMA_LLM_MODEL:-qwen2.5:0.5b} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_LLM_MODEL:-qwen2.5:0.5b}"}' | tail -1
+        echo "Pulling embedding model ${OLLAMA_EMBED_MODEL:-nomic-embed-text} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_EMBED_MODEL:-nomic-embed-text}"}' | tail -1
+        echo "All models ready."
+
+  # ── ArangoDB ────────────────────────────────────────────────
+
+  arangodb:
+    image: arangodb:3.12
+    container_name: ayextractor-arangodb
+    ports:
+      - "8529:8529"
+    environment:
+      ARANGO_ROOT_PASSWORD: "${ARANGODB_ROOT_PASSWORD:-testpassword}"
+      ARANGO_NO_AUTH: "0"
+    volumes:
+      - arangodb_data:/var/lib/arangodb3
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8529/_api/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  arangodb-init:
+    image: curlimages/curl:latest
+    container_name: ayextractor-arangodb-init
+    depends_on:
+      arangodb:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Creating test database ${ARANGODB_TEST_DATABASE:-ayextractor_test} ..."
+        curl -s -u root:${ARANGODB_ROOT_PASSWORD:-testpassword} \
+          http://arangodb:8529/_api/database \
+          -d '{"name":"${ARANGODB_TEST_DATABASE:-ayextractor_test}"}' || true
+        echo "Database ready."
+
+  # ── Qdrant ──────────────────────────────────────────────────
+
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-v1.13.2}
+    container_name: ayextractor-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ── ChromaDB ────────────────────────────────────────────────
+
+  chromadb:
+    image: chromadb/chroma:${CHROMADB_IMAGE_TAG:-1.5.0}
+    container_name: ayextractor-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  ollama_data:
+  arangodb_data:
+  qdrant_data:
+  chromadb_data:

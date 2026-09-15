@@ -1,9 +1,23 @@
 # =============================================================================
 # File: .gitignore
-# Version: 2
+# Version: 3
 # Path: .gitignore
 # Description: Monorepo-wide gitignore. Uses ** patterns to cover current
 #              and future sub-projects (ay_platform_core, ay_platform_ui).
+#
+#              v3 (2026-09-15): dropped `**/ay_extractor/**`. That pattern
+#              sat in the "Secrets" block beside *.pem / *.key, but
+#              ay_extractor is `ayextractor` 0.4.0, licensed Proprietary
+#              exactly like ay_platform_core — nothing secret about it.
+#              Its cost was concrete: C13 is a DEPLOYED component whose
+#              image `ghcr.io/…/aywizz-c13-extractor` is listed as published
+#              in VERSIONING.md §10, yet CI could never build it — the
+#              Dockerfile's `COPY ay_extractor/src` found nothing in a clean
+#              checkout, so the AKS pull failed against an image that had
+#              never been pushed. The platform could not be rebuilt from its
+#              own repository. Tracking the source fixes that at the root.
+#              `**/output/` below replaces the incidental coverage this
+#              pattern used to give ay_extractor/output.
 # =============================================================================
 
 # Python
@@ -33,6 +47,9 @@ htmlcov/
 **/reports/*
 !**/reports/.gitkeep
 
+# Generated run output / local caches (root `output/`, ay_extractor/output).
+**/output/
+
 # Node.js (anticipating ay_platform_ui)
 node_modules/
 .next/
@@ -59,4 +76,3 @@ Thumbs.db
 *.pem
 *.key
 **/research/**
-**/ay_extractor/**

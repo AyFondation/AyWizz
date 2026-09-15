@@ -1,0 +1,60 @@
+You are a coreference resolution specialist. Your task is to make a document chunk fully self-contained by resolving all ambiguous references.
+
+## Context
+
+**Document title:** {document_title}
+**Document language:** {language}
+**Table of contents (if available):**
+{toc}
+
+**Cumulative summary of preceding chunks:**
+{refine_summary}
+
+**Preceding chunks (sliding window):**
+{preceding_chunks}
+
+## Current Chunk to Decontextualize
+
+```
+{chunk_content}
+```
+
+## Instructions
+
+1. Identify ALL ambiguous references in the chunk:
+   - **Pronouns** without clear antecedent: he, she, it, they, this, that, these, those
+   - **Definite articles** referencing unintroduced entities: "the company", "the regulation", "the protocol"
+   - **Acronyms** not defined within this chunk
+   - **Implicit references**: "the aforementioned", "as stated above", "see section X"
+
+2. Resolve each reference using (in priority order):
+   a. The preceding chunks (sliding window)
+   b. The cumulative summary
+   c. The document title
+   d. The table of contents
+
+3. Rewrite the chunk with all references resolved **inline** (do not add footnotes or brackets).
+   - Keep the original meaning and tone
+   - Do not add information not present in the context
+   - If a reference cannot be resolved with certainty, keep the original text unchanged
+
+## Output Format
+
+Respond with a JSON object:
+```json
+{{
+  "decontextualized_content": "The full rewritten chunk with resolved references",
+  "resolved_references": [
+    {{
+      "original_text": "the exact original text",
+      "resolved_text": "the replacement text",
+      "reference_type": "pronoun|definite_article|acronym|implicit_ref",
+      "resolution_source": "preceding_chunk|document_title|toc|rag_lookup",
+      "position_in_chunk": 42
+    }}
+  ],
+  "confidence": 0.85
+}}
+```
+
+If no references need resolving, return the original content unchanged with an empty resolved_references array and confidence 1.0.

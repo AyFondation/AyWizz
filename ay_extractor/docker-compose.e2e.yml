@@ -1,0 +1,47 @@
+# docker-compose.e2e.yml — v3
+# E2E test infrastructure: Ollama with configurable models.
+#
+# Changelog:
+#     v3: All configurable values read from .env via ${VAR} substitution.
+#     v2: Fix healthcheck (ollama list instead of curl).
+#     v1: Initial compose.
+#
+# Configuration: edit .env (see .env.example for all options).
+# Lifecycle managed by Makefile:
+#   make test-e2e        → up + test + down
+#   make test-e2e-up     → start services only
+#   make test-e2e-down   → stop + cleanup
+
+services:
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ayextractor-e2e-ollama
+    ports:
+      - "11434"
+    volumes:
+      - ollama_e2e_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: ayextractor-e2e-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "[e2e] Pulling LLM model ${OLLAMA_LLM_MODEL:-qwen2.5:0.5b} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_LLM_MODEL:-qwen2.5:0.5b}"}' | tail -1
+        echo "[e2e] Pulling embedding model ${OLLAMA_EMBED_MODEL:-nomic-embed-text} ..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"${OLLAMA_EMBED_MODEL:-nomic-embed-text}"}' | tail -1
+        echo "[e2e] All models ready."
+
+volumes:
+  ollama_e2e_data:

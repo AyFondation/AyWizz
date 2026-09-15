@@ -1,0 +1,7 @@
+{
+  "_comment": "Assertions for image-as-document input (PNG screenshot)",
+  "must_return_extraction_result": true,
+  "must_contain_image_analysis": true,
+  "min_images": 1,
+  "raw_text_not_empty": true
+}
