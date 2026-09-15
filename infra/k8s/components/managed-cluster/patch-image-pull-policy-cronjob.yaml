@@ -1,0 +1,22 @@
+# =============================================================================
+# File: patch-image-pull-policy-cronjob.yaml
+# Version: 1
+# Path: infra/k8s/components/managed-cluster/patch-image-pull-policy-cronjob.yaml
+# Description: `imagePullPolicy: Always` on CronJob pod templates. The path runs
+#              through `jobTemplate`, which is why this cannot share the
+#              Deployment/StatefulSet patch.
+#
+#              WHY THIS IS THE ONE THAT ACTUALLY MATTERED. The original patch
+#              excluded every batch workload with the rationale that Jobs "run
+#              once at install and then stay Completed, so a pull policy on them
+#              changes nothing". That is true of a bootstrap Job. It is FALSE of
+#              a CronJob, which fires on a schedule forever. `c8-storage-metering`
+#              runs `aywizz-api:latest` — a FLOATING tag — so under
+#              `IfNotPresent` it kept executing whatever image its node happened
+#              to cache on the first run, indefinitely, while every Deployment
+#              around it refreshed. Storage metering feeds billing figures, so
+#              the divergence would have been silent and consequential.
+# =============================================================================
+- op: replace
+  path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy
+  value: Always

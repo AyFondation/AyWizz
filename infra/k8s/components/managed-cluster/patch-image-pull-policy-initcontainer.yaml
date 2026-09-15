@@ -1,0 +1,24 @@
+# =============================================================================
+# File: patch-image-pull-policy-initcontainer.yaml
+# Version: 1
+# Path: infra/k8s/components/managed-cluster/patch-image-pull-policy-initcontainer.yaml
+# Description: `imagePullPolicy: Always` on the one initContainer the platform
+#              declares — c12-workflow's n8n workflow importer.
+#
+#              WHY ITS OWN FILE, TARGETED BY NAME. A JSON6902 `replace` fails
+#              when the path does not exist, so this cannot ride along with the
+#              Deployment patch: every other Deployment has no `initContainers`
+#              array at all and the whole build would error. `c12_workflow` is
+#              currently the only workload with one (`grep -rn "initContainers:"
+#              infra/k8s/base/`). ADDING AN initContainer ANYWHERE ELSE MEANS
+#              ADDING A TARGET HERE — nothing detects the omission, it simply
+#              keeps `IfNotPresent` and pins that container to whatever the node
+#              cached.
+#
+#              It matters here more than the name suggests: the importer is what
+#              seeds and publishes the n8n workflows, so a stale one silently
+#              reinstates old workflow definitions on every pod start.
+# =============================================================================
+- op: replace
+  path: /spec/template/spec/initContainers/0/imagePullPolicy
+  value: Always

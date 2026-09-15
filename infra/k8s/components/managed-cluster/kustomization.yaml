@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/components/managed-cluster/kustomization.yaml
 # Description: Kustomize COMPONENT carrying everything that differs on a cluster
 #              with NO local Docker image store — AKS today, any managed or
@@ -30,6 +30,13 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
+# EVERY image the build declares, not just the convenient ones. Four targets
+# rather than one because JSON6902 `replace` fails on a path that does not
+# exist, and the four pod-template shapes sit at four different paths:
+# Deployment/StatefulSet `.spec.template`, CronJob `.spec.jobTemplate.spec
+# .template`, and initContainers in their own array. Verify coverage with
+#   kubectl kustomize infra/k8s/overlays/dev-aks | grep -c "imagePullPolicy: Always"
+# against the total count of `imagePullPolicy` — the two must match (24 today).
 patches:
   - path: patch-image-pull-policy.yaml
     target:
@@ -41,3 +48,21 @@ patches:
       group: apps
       version: v1
       kind: StatefulSet
+  - path: patch-image-pull-policy-job.yaml
+    target:
+      group: batch
+      version: v1
+      kind: Job
+  - path: patch-image-pull-policy-cronjob.yaml
+    target:
+      group: batch
+      version: v1
+      kind: CronJob
+  # Named target: c12-workflow is the only workload with an initContainer, and
+  # an untargeted patch would fail the build on every Deployment without one.
+  - path: patch-image-pull-policy-initcontainer.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c12-workflow

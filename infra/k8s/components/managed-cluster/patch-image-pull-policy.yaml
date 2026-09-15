@@ -1,7 +1,7 @@
 # =============================================================================
 # File: patch-image-pull-policy.yaml
-# Version: 1
-# Path: infra/k8s/overlays/prod/patch-image-pull-policy.yaml
+# Version: 2
+# Path: infra/k8s/components/managed-cluster/patch-image-pull-policy.yaml
 # Description: Forces `imagePullPolicy: Always` on every long-running workload
 #              container, for MANAGED clusters only (AKS and anything else with
 #              no local image store).
@@ -35,12 +35,24 @@
 #              things, not one: this policy AND an updated sha pin. The policy
 #              alone guarantees nothing.
 #
-#              SCOPE: Deployments and StatefulSets — the workloads that keep
-#              running. Bootstrap Jobs are excluded on purpose: they execute
-#              once at install and then stay Completed, so a pull policy on
-#              them changes nothing a re-install would not already handle.
+#              SCOPE (v2, 2026-09-15): this file covers the FIRST container of
+#              Deployments and StatefulSets. It is no longer the whole story —
+#              `kustomization.yaml` now composes three sibling patches so the
+#              policy reaches EVERY image: initContainers, Jobs and CronJobs.
+#
+#              v1 excluded all batch workloads, reasoning that they "execute
+#              once at install and then stay Completed". That held for a
+#              bootstrap Job and was simply wrong for a CronJob:
+#              `c8-storage-metering` recurs forever on a floating
+#              `aywizz-api:latest`, so `IfNotPresent` pinned it to whatever its
+#              node cached first. The exclusion was written from the shape of
+#              the resource (`kind: Job`-ish) instead of its lifecycle, which
+#              is the actual discriminator.
+#
 #              `replace` (not `add`) is safe because every container in the
-#              tree declares `imagePullPolicy` explicitly.
+#              tree declares `imagePullPolicy` explicitly — a NEW container
+#              that omits it will fail the build here rather than silently
+#              keep the default, which is the behaviour we want.
 # =============================================================================
 - op: replace
   path: /spec/template/spec/containers/0/imagePullPolicy

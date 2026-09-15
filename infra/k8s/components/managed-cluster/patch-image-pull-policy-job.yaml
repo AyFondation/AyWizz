@@ -1,0 +1,26 @@
+# =============================================================================
+# File: patch-image-pull-policy-job.yaml
+# Version: 1
+# Path: infra/k8s/components/managed-cluster/patch-image-pull-policy-job.yaml
+# Description: `imagePullPolicy: Always` on the bootstrap Jobs (arangodb-init,
+#              minio-init, c12-workflow-seed, ollama-seed).
+#
+#              THE EARLIER RATIONALE FOR EXCLUDING THESE WAS TOO COMFORTABLE.
+#              It read: they "execute once at install and then stay Completed,
+#              so a pull policy on them changes nothing a re-install would not
+#              already handle". The premise is wrong on a managed cluster.
+#              `--reinit` deletes and recreates these Jobs precisely so a
+#              changed spec takes effect, and `c12-workflow-seed` runs
+#              `n8nio/n8n` while `arangodb-init` / `minio-init` carry the
+#              client images that create collections and buckets. Under
+#              `IfNotPresent` a re-init would re-run the CACHED image, which
+#              makes the re-init report success while doing the old thing —
+#              the same class of silent staleness this component exists to
+#              prevent.
+#
+#              Cost is one registry round-trip per Job run, and these run at
+#              install and on `--reinit` only.
+# =============================================================================
+- op: replace
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: Always
