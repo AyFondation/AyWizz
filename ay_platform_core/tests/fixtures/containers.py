@@ -1,10 +1,17 @@
 # =============================================================================
 # File: containers.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/tests/fixtures/containers.py
 # Description: Testcontainers fixtures for ArangoDB, MinIO, and Ollama.
 #              Session-scoped by default; function-scoped variants available
 #              for tests requiring a pristine container state.
+#
+#              v6 (2026-09-14): image constants realigned with the deployed
+#              pins during the platform-wide refresh. These three literals
+#              are the reason the constants matter: they are a SECOND copy of
+#              what the k8s manifests and compose files pin, and a refresh
+#              that misses them leaves the test tier validating a different
+#              stack than the one that ships.
 #
 #              v4: "really complete" cleanup between tests.
 #                  - Session-start wipe of orphan test DBs/buckets (from a
@@ -46,9 +53,9 @@ try:
 except ImportError:  # pragma: no cover - version-dependent import
     from testcontainers.minio import MinioContainer
 
-ARANGO_IMAGE = "arangodb/arangodb:3.12"
-MINIO_IMAGE = "minio/minio:RELEASE.2025-01-20T14-49-07Z"
-OLLAMA_IMAGE = "ollama/ollama:0.5.4"
+ARANGO_IMAGE = "arangodb/arangodb:3.12.4.3"
+MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+OLLAMA_IMAGE = "ollama/ollama:0.34.0"
 OLLAMA_MODEL_ID = "qwen2.5:0.5b"
 # Small 384-dim embedding model (~46 MB). Chosen to keep the pull time
 # bounded; OllamaEmbedder consumers can override via fixture params if

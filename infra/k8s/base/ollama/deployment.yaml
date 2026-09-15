@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/ollama/deployment.yaml
 # Description: Ollama embeddings provider — production C7 default
 #              (`C7_EMBEDDING_ADAPTER=ollama`, `all-minilm` model). Single
@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
         - name: ollama
-          image: ollama/ollama:0.5.4
+          image: ollama/ollama:0.34.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: ollama

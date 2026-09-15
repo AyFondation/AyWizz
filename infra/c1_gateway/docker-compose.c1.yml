@@ -1,6 +1,6 @@
 # =============================================================================
 # File: docker-compose.c1.yml
-# Version: 1
+# Version: 2
 # Path: infra/c1_gateway/docker-compose.c1.yml
 # Description: Traefik v3 service definition for local development.
 #              Merge with the platform-level docker-compose.yml via:
@@ -10,7 +10,7 @@
 
 services:
   c1:
-    image: traefik:v3.3
+    image: traefik:v3.7.13
     container_name: c1_gateway
     restart: unless-stopped
     ports:

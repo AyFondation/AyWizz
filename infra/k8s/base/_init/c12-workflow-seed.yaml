@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c12-workflow-seed.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/_init/c12-workflow-seed.yaml
 # Description: One-shot Job importing every workflow JSON under the
 #              c12-workflow-files ConfigMap into the running n8n.
@@ -27,7 +27,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: n8n-import
-          image: n8nio/n8n:1.74.0
+          image: n8nio/n8n:2.38.7
           imagePullPolicy: IfNotPresent
           env:
             - name: DB_TYPE

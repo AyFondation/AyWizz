@@ -1,6 +1,6 @@
 # =============================================================================
 # File: docker-compose.yml
-# Version: 10
+# Version: 11
 # Path: ay_platform_core/tests/docker-compose.yml
 # Description: End-to-end local stack for system tests. Brings up:
 #              v10 (LLM governance): adds the `c8` service (C8 admin app,
@@ -188,7 +188,7 @@ services:
   # ---------------------------------------------------------------------------
 
   arangodb:
-    image: arangodb/arangodb:3.12
+    image: arangodb/arangodb:3.12.4.3
     container_name: ay-arangodb
     # Root password sourced from .env.test via Compose ${VAR} substitution
     # (e2e_stack.sh up passes --env-file). Single source of truth for every
@@ -232,7 +232,7 @@ services:
   # Reads the shared `ARANGO_DB`, `ARANGO_USERNAME`, `ARANGO_PASSWORD`
   # from .env.test so the secret stays in one place.
   arangodb_init:
-    image: arangodb/arangodb:3.12
+    image: arangodb/arangodb:3.12.4.3
     container_name: ay-arangodb-init
     depends_on:
       arangodb:
@@ -270,7 +270,7 @@ services:
   # is shipped in the official MinIO image. Idempotent: `mc admin user add`
   # is replaced by an `info`-then-`add` guard, same for the policy.
   minio_init:
-    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: ay-minio-init
     depends_on:
       minio:
@@ -325,9 +325,12 @@ services:
     restart: "no"
 
   minio:
-    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: ay-minio
-    command: server /data --console-address ":9001"
+    # No --console-address: MinIO removed the embedded web console in
+    # RELEASE.2025-05-24 (moved to `object-browser`). See
+    # infra/k8s/base/c10_minio/statefulset.yaml v5.
+    command: server /data
     # Root credentials sourced from .env.test via Compose ${VAR}
     # substitution (R-100-110 v2, R-100-118 v2).
     environment:
@@ -455,7 +458,7 @@ services:
   # ---------------------------------------------------------------------------
 
   ollama:
-    image: ollama/ollama:0.5.4
+    image: ollama/ollama:0.34.0
     container_name: ay-ollama
     volumes:
       - ollama_data:/root/.ollama
@@ -485,7 +488,7 @@ services:
   # One-shot: pull the embedding model once Ollama is healthy. Idempotent;
   # subsequent `compose up` cycles skip the download thanks to ollama_data.
   ollama_model_seed:
-    image: ollama/ollama:0.5.4
+    image: ollama/ollama:0.34.0
     container_name: ay-ollama-seed
     depends_on:
       ollama:
@@ -882,7 +885,7 @@ services:
   # ---------------------------------------------------------------------------
 
   c12:
-    image: n8nio/n8n:1.74.0
+    image: n8nio/n8n:2.38.7
     container_name: ay-c12-workflow
     environment:
       <<: *common-env
@@ -934,7 +937,7 @@ services:
   # updates it in place. Runs AFTER c12 reports healthy so the import RPC
   # is accepted.
   c12_workflow_seed:
-    image: n8nio/n8n:1.74.0
+    image: n8nio/n8n:2.38.7
     container_name: ay-c12-workflow-seed
     depends_on:
       c12:
@@ -969,7 +972,7 @@ services:
   # ---------------------------------------------------------------------------
 
   c1:
-    image: traefik:v3.3
+    image: traefik:v3.7.13
     container_name: ay-c1-gateway
     restart: unless-stopped
     ports:

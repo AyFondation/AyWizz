@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_reseed_c2.sh
-# Version: 2
+# Version: 3
 # Path: infra/scripts/k8s_reseed_c2.sh
 # Description: DEV-only re-seed of C2 identity. Truncates the C2 identity
 #              collections (`c2_users`, `c2_role_assignments`) in the running
@@ -58,7 +58,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: wipe
-          image: arangodb/arangodb:3.12
+          image: arangodb/arangodb:3.12.4.3
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

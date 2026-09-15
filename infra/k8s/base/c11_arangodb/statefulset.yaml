@@ -1,6 +1,6 @@
 # =============================================================================
 # File: statefulset.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/c11_arangodb/statefulset.yaml
 # Description: ArangoDB single-node StatefulSet (C11). Stateful workload
 #              with a persistent volume claim for /var/lib/arangodb3.
@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
         - name: arangodb
-          image: arangodb/arangodb:3.12
+          image: arangodb/arangodb:3.12.4.3
           imagePullPolicy: IfNotPresent
           ports:
             - name: arangodb

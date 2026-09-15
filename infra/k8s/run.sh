@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run.sh
-# Version: 9
+# Version: 10
 # Path: infra/k8s/run.sh
 # Description: Apply a K8s overlay to the active kubectl context.
 #              Wrapper around the denied `kubectl apply -k` (per
@@ -89,8 +89,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Traefik CRDs (IngressRoute / Middleware). Pinned tag mirrors the gateway
-# image (traefik:v3.3) and the kind smoke script.
-TRAEFIK_VERSION="v3.3"
+# image (traefik:v3.7.13) and the kind smoke script.
+TRAEFIK_VERSION="v3.7.13"
 TRAEFIK_CRDS_URL="https://raw.githubusercontent.com/traefik/traefik/${TRAEFIK_VERSION}/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml"
 
 # The ingress controller that serves the edge `Ingress` object. Pinned in

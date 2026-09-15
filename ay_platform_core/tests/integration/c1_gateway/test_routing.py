@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_routing.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/integration/c1_gateway/test_routing.py
 # Description: Integration tests — Traefik gateway routing and middleware.
 #              Spins up a real Traefik v3 container and injects config files
@@ -231,10 +231,10 @@ def traefik_url() -> Generator[str]:
 
     client = _docker.from_env()
     # Pull image explicitly so create() does not race on first run
-    client.images.pull("traefik:v3.3")
+    client.images.pull("traefik:v3.7.13")
 
     container = client.containers.create(
-        "traefik:v3.3",
+        "traefik:v3.7.13",
         ports={"80/tcp": None, "8080/tcp": None},
         extra_hosts={"host.docker.internal": "host-gateway"},
         detach=True,

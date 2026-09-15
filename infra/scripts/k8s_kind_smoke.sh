@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_kind_smoke.sh
-# Version: 3
+# Version: 4
 # Path: infra/scripts/k8s_kind_smoke.sh
 # Description: L2 + L3 — apply the system-test overlay to an ephemeral
 #              kind cluster and verify endpoints respond.
@@ -62,7 +62,7 @@ PORT_FWD_LOCAL=18000
 
 # CRDs required by the c1_gateway/middlewares.yaml + ingressroutes.yaml.
 # Pinned tag matches the Traefik image version in the gateway deployment.
-TRAEFIK_VERSION="v3.3"
+TRAEFIK_VERSION="v3.7.13"
 TRAEFIK_CRDS_URL="https://raw.githubusercontent.com/traefik/traefik/${TRAEFIK_VERSION}/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml"
 
 KEEP_CLUSTER=0

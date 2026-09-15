@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: _kind_preload.sh
-# Version: 1
+# Version: 2
 # Path: infra/scripts/_kind_preload.sh
 # Description: Pull the third-party images an overlay needs on the RUNNER, then
 #              `kind load` them into the cluster. Sourced, never executed
@@ -15,9 +15,17 @@
 #                authorization: server message: insufficient_scope:
 #                authorization failed
 #
-#              The message reads like a missing repository; it is the anonymous
-#              pull limit on a shared runner IP. The blast radius is what makes
-#              it worth a helper: on v0.1.0-beta.14 both kind jobs died with
+#              CORRECTION (2026-09-15): this header previously read that
+#              message as "the anonymous pull limit on a shared runner IP".
+#              That was wrong. The message meant what it said — the MinIO
+#              repositories are no longer publicly pullable from Docker Hub.
+#              Proof: the same `pull access denied for minio/minio` now
+#              reproduces on a developer workstation with no rate limit and
+#              on every tag, old and new, while arangodb / n8nio / ollama /
+#              traefik pull anonymously from the same host. The platform's
+#              MinIO images therefore moved to quay.io, where both are
+#              published. The helper itself is still worth having: on
+#              v0.1.0-beta.14 both kind jobs died with
 #              "timed out waiting for the condition on deployments/
 #              c4-orchestrator" because minio never started, its Service had no
 #              endpoints, `minio` stopped resolving, and every component whose
@@ -67,9 +75,19 @@ preload_third_party_images() {
         echo "    pulling ${img}"
         if ! docker pull "${img}"; then
             echo "ERROR: could not pull ${img} on the runner." >&2
-            echo "       Anonymous Docker Hub pulls are rate-limited on shared" >&2
-            echo "       CI IPs. Add a docker/login-action step with Docker Hub" >&2
-            echo "       credentials, or mirror this image into GHCR." >&2
+            echo "       Read the daemon's message ABOVE before assuming a" >&2
+            echo "       rate limit — the two failure modes look alike and" >&2
+            echo "       have opposite fixes:" >&2
+            echo "         'toomanyrequests' / 'rate limit'  -> anonymous pull" >&2
+            echo "            quota on a shared CI IP. Fix: docker/login-action." >&2
+            echo "         'pull access denied' / 'repository does not exist'" >&2
+            echo "            -> the repository is GONE or no longer public." >&2
+            echo "            Fix: another registry, or mirror into GHCR." >&2
+            echo "       This distinction is not academic: the MinIO images" >&2
+            echo "       hit the SECOND case (minio/* left public Docker Hub)," >&2
+            echo "       and this message previously asserted the first — which" >&2
+            echo "       sent the v0.1.0-beta.14 diagnosis after a credential" >&2
+            echo "       that would never have helped." >&2
             return 1
         fi
         kind load docker-image "${img}" --name "${cluster}"

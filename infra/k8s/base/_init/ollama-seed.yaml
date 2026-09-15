@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ollama-seed.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/_init/ollama-seed.yaml
 # Description: One-shot Job pulling an embedding model into Ollama's
 #              persistent cache so it is available to REGISTER as an in-app
@@ -31,7 +31,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: ollama-pull
-          image: ollama/ollama:0.5.4
+          image: ollama/ollama:0.34.0
           imagePullPolicy: IfNotPresent
           env:
             - name: OLLAMA_HOST

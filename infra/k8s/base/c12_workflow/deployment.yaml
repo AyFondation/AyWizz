@@ -1,9 +1,9 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 5
+# Version: 6
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
-#              `n8nio/n8n:1.74.0` image. SQLite DB on PVC.
+#              `n8nio/n8n:2.38.7` image. SQLite DB on PVC.
 #
 #              v2 (2026-08-24): workflows are imported + activated by an
 #              `import-workflows` initContainer that runs BEFORE the n8n
@@ -49,7 +49,7 @@ spec:
         # Idempotent; runs on every (re)start. `n8n import` runs the SQLite
         # migrations itself, so it works on a fresh PVC too.
         - name: import-workflows
-          image: n8nio/n8n:1.74.0
+          image: n8nio/n8n:2.38.7
           imagePullPolicy: IfNotPresent
           env:
             - name: DB_TYPE
@@ -90,7 +90,7 @@ spec:
               readOnly: true
       containers:
         - name: n8n
-          image: n8nio/n8n:1.74.0
+          image: n8nio/n8n:2.38.7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

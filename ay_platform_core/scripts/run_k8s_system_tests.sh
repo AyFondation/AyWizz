@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run_k8s_system_tests.sh
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/scripts/run_k8s_system_tests.sh
 # Description: Bring up a kind cluster, deploy the system-test overlay,
 #              run pytest against it, tear down. End-to-end self-contained.
@@ -39,7 +39,7 @@ CLUSTER_NAME="aywizz-systest"
 NAMESPACE="aywizz"
 IMAGE_TAG_API="aywizz-api:test"
 IMAGE_TAG_UI="aywizz-ui:test"
-TRAEFIK_VERSION="v3.3"
+TRAEFIK_VERSION="v3.7.13"
 TRAEFIK_CRDS_URL="https://raw.githubusercontent.com/traefik/traefik/${TRAEFIK_VERSION}/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml"
 
 KEEP_CLUSTER=0

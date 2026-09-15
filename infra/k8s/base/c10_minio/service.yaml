@@ -1,10 +1,13 @@
 # =============================================================================
 # File: service.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c10_minio/service.yaml
-# Description: Headless Service for the MinIO StatefulSet. Console port
-#              9001 exposed on the same Service (cluster-internal only,
-#              never published via Ingress).
+# Description: Headless Service for the MinIO StatefulSet. S3 port only.
+#
+#              v3 (2026-09-14): console port 9001 removed. MinIO deleted the
+#              embedded console in RELEASE.2025-05-24; the StatefulSet no
+#              longer opens that containerPort, so a Service port targeting
+#              it would resolve to nothing. See statefulset.yaml v5.
 # =============================================================================
 apiVersion: v1
 kind: Service
@@ -24,8 +27,4 @@ spec:
     - name: s3
       port: 9000
       targetPort: s3
-      protocol: TCP
-    - name: console
-      port: 9001
-      targetPort: console
       protocol: TCP

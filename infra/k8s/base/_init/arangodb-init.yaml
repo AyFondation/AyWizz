@@ -1,6 +1,6 @@
 # =============================================================================
 # File: arangodb-init.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/_init/arangodb-init.yaml
 # Description: One-shot Job creating the platform ArangoDB database +
 #              the dedicated app user (R-100-012 v3, R-100-118 v2).
@@ -32,7 +32,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: arangosh
-          image: arangodb/arangodb:3.12
+          image: arangodb/arangodb:3.12.4.3
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

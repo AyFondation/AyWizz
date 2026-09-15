@@ -1,10 +1,21 @@
 # =============================================================================
 # File: pyproject.toml
-# Version: 12
+# Version: 13
 # Path: ay_platform_core/pyproject.toml
 # Description: Python project configuration for the ay_platform_core
 #              sub-project of the monorepo. Targets Python 3.13.
-#              Dependency versions pinned to May 2026 latest stable releases.
+#              Dependency versions pinned to Sept 2026 latest stable releases.
+#              v13: platform-wide dependency refresh (2026-09-14), on explicit
+#                   operator request. Every `>=x,<x+1` cap that had fallen
+#                   behind its current major was opened to the current one:
+#                   cryptography 44->50, argon2-cffi 23->25,
+#                   kubernetes_asyncio 33->36, pypdf 5->6, tree-sitter
+#                   0.25->0.26, mypy 1->2, and the deliberate starlette<1.2
+#                   cap below was LIFTED by migrating the test client to
+#                   httpx2 (see v12 note — the migration it was waiting on).
+#                   Rationale: the caps were a written-once default, not a
+#                   reviewed decision, and they silently blocked security
+#                   updates rather than deferring them.
 #              v12: cap `starlette<1.2`. starlette 1.2.0 (2026-05-28) made
 #                   its TestClient prefer `httpx2` and emit a
 #                   StarletteDeprecationWarning when only `httpx` is present;
@@ -66,20 +77,29 @@ dependencies = [
     # with the [standard] extra includes `watchfiles` which enables the
     # --reload behaviour that the docker-compose bind-mount relies on.
     "fastapi>=0.115,<1.0",
-    # starlette is fastapi's ASGI engine (transitive). Capped <1.2 because
-    # 1.2.0 deprecated the httpx-based TestClient in favour of httpx2, which
-    # trips our `filterwarnings=["error"]` gate. fastapi needs only >=0.46.
-    "starlette>=1.1,<1.2",
+    # starlette is fastapi's ASGI engine (transitive). The <1.2 cap is gone:
+    # 1.2.0 moved TestClient to httpx2, and `httpx2` is now a declared test
+    # dependency so the deprecation no longer fires under
+    # `filterwarnings=["error"]`. fastapi needs only >=0.46.
+    "starlette>=1.6,<2.0",
     "uvicorn[standard]>=0.34,<1.0",
     "python-multipart>=0.0.20,<1.0",  # OAuth2 password grant + file uploads
+    # httpx (1.x line) stays: it is the RUNTIME client used by every
+    # component's outbound calls. httpx2 is test-tier only — see [test].
     "httpx>=0.28,<1.0",
 
     # Auth (C2) — JWT signing/verification + password hashing. Declared here
     # rather than in a `[server]` extra because C2 is always part of the
     # deployed topology; a deployment without C2 does not exist.
     "pyjwt[crypto]>=2.9,<3.0",
-    "argon2-cffi>=23,<24",
-    "cryptography>=44,<45",
+    "argon2-cffi>=25,<26",
+    # cryptography backs AESGCM (crypto/secret_cipher.py) and, under
+    # C2_JWT_ALGORITHM=RS256/EdDSA, the token signing key. 44->50 crosses
+    # four CVEs (2026-26007 binary curves, 2026-34073 name constraints,
+    # 2026-39892 non-contiguous buffers, 2026-69247 PKCS7 timing) — none of
+    # which touch those two surfaces. The bump is about restoring a path to
+    # future fixes, not patching a live exposure.
+    "cryptography>=50,<51",
 
     # Storage SDKs
     # NOTE: python-arango is SYNCHRONOUS. For async components (C5, C7),
@@ -92,7 +112,7 @@ dependencies = [
     # native dep (acceptable, install ships wheels for major platforms).
     # `beautifulsoup4` defaults to stdlib `html.parser` if lxml is absent;
     # since python-docx already brings lxml, BS4 will use it automatically.
-    "pypdf>=4.0,<6.0",
+    "pypdf>=6.0,<7.0",
     "beautifulsoup4>=4.12,<5.0",
     "python-docx>=1.1,<2.0",
 
@@ -118,7 +138,7 @@ dependencies = [
     # FastAPI-async style. Optional in spirit (orchestrator falls back
     # to InProcessDispatcher when not installed) but bundled in the main
     # `ay-api:local` image — same shared-image rule as `R-100-114`.
-    "kubernetes_asyncio>=33.0,<34.0",
+    "kubernetes_asyncio>=36.0,<37.0",
 
     # C7 schema-guided L1 structural extraction — code domain (V2 #3-A.a /
     # R-400-200, D-004, E-400-006). `tree-sitter` is the parsing engine for
@@ -128,7 +148,7 @@ dependencies = [
     # per-grammar build step is needed. Base deps — C7 ships in the shared
     # `ay-api` image (R-100-114) and the structural extractor is core, not a
     # gated experiment.
-    "tree-sitter>=0.25,<0.26",
+    "tree-sitter>=0.26,<0.27",
     "tree-sitter-language-pack>=1.8,<2.0",
 ]
 
@@ -140,12 +160,17 @@ test = [
     "pytest-xdist>=3.8,<4.0",
     "testcontainers[arangodb,minio]>=4.14,<5.0",
     "libcst>=1.8,<2.0",
-    "hypothesis>=6.155.2,<7.0"
+    "hypothesis>=6.155.2,<7.0",
+    # starlette >= 1.2 prefers httpx2 for its TestClient and emits a
+    # StarletteDeprecationWarning when only httpx 1.x is importable. Declared
+    # here (test tier) rather than as a base dep: it is the TEST client that
+    # moved, not the runtime client. Components keep calling out via httpx.
+    "httpx2>=2.13,<3.0",
 ]
 
 dev = [
     "ruff>=0.15,<1.0",
-    "mypy>=1.20,<2.0",
+    "mypy>=2.3,<3.0",
 ]
 
 # OpenHands `generate`-phase harness (V2 #2 / R-200-029). DELIBERATELY
