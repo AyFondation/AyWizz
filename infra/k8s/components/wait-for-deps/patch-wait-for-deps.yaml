@@ -91,6 +91,22 @@ spec:
               timeout = float(os.environ.get("WAIT_FOR_DEPS_TIMEOUT", "600"))
               deadline = time.monotonic() + timeout
 
+              def required(key):
+                  """Fail with the missing KEY NAME, not a bare KeyError.
+
+                  This container now gates pod startup, so a config gap here
+                  stops the pod instead of the app — worth one readable line
+                  saying which key and where it comes from."""
+                  value = os.environ.get(key)
+                  if not value:
+                      raise SystemExit(
+                          f"wait-for-deps: {key} is unset or empty. It comes "
+                          f"from the aywizz-config ConfigMap or the "
+                          f"aywizz-secrets Secret (overlays/<env>/.env.config "
+                          f"/ .env.secret)."
+                      )
+                  return value
+
               def probe(name, request):
                   while True:
                       try:

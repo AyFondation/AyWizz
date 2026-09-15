@@ -1,42 +1,62 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/components/managed-cluster/kustomization.yaml
 # Description: Kustomize COMPONENT carrying everything that differs on a cluster
 #              with NO local Docker image store — AKS today, any managed or
 #              multi-node cluster tomorrow.
 #
 #              WHY A COMPONENT AND NOT A PATCH IN AN OVERLAY. The same
-#              `overlays/dev` is deployed to two very different targets: the
-#              local docker-desktop cluster AND AKS. Kustomize has no
-#              conditionals, so the difference cannot live inside `dev` itself —
-#              it has to be a slice that one target composes in and the other
-#              does not. A Component is exactly that: `overlays/dev-aks` is
-#              `overlays/dev` PLUS this, and `overlays/dev` stays byte-for-byte
-#              what it always was for local work.
+#              `overlays/dev` describes two very different targets: the local
+#              docker-desktop cluster AND AKS. Kustomize has no conditionals,
+#              so the difference cannot live inside `dev` itself — it has to be
+#              a slice that one target composes in and the other does not.
+#              `overlays/dev-aks` is `overlays/dev` PLUS this; `overlays/dev`
+#              stays byte-for-byte what it always was for local work, where
+#              `IfNotPresent` is the whole point: docker-desktop shares its
+#              image store with the cluster, so the kubelet finds the image
+#              `k8s_build_images.sh` just built and never contacts a registry.
 #
-#              WHAT GOES IN HERE. Anything that is true of a managed cluster and
-#              false locally. Today that is the image pull policy; the obvious
-#              future tenants are `imagePullSecrets` (needed the moment the GHCR
-#              packages are private — NOT declared anywhere yet, see
-#              VERSIONING.md §10), a cloud `ingressClassName`, and a cloud
-#              StorageClass. Add them here rather than forking the overlay.
+#              THE DEPLOYMENT PATH MUST POINT AT `dev-aks`, NOT `dev`. This is
+#              the failure mode to know about: on 2026-09-15 the ArgoCD
+#              Application targeted `overlays/dev`, so this component reached
+#              NOTHING and every AKS image ran `IfNotPresent` on a cluster with
+#              no image store to fall back on. A component is invisible until
+#              composed — which is the point, and also the trap.
+#
+#              WHAT GOES IN HERE. Anything true of a managed cluster and false
+#              locally. Today that is the image pull policy; the obvious future
+#              tenants are `imagePullSecrets` (needed the moment the GHCR
+#              packages go private — see VERSIONING.md §10), a cloud
+#              `ingressClassName`, and a cloud StorageClass. Add them here
+#              rather than forking the overlay.
 #
 #              WHAT MUST NOT GO IN HERE. Anything the local cluster also needs.
-#              A Component is invisible until composed, so a rule placed here
-#              silently does not apply to `overlays/dev` — which is the point,
-#              and also the trap.
+#              `wait-for-deps` is the counter-example: that race exists on every
+#              cluster, so it is composed by every overlay instead.
+#
+#              ORDER MATTERS — compose `wait-for-deps` BEFORE this component.
+#              That one ADDS initContainers; this one rewrites their pull
+#              policy. Reversed, the rewrite runs before they exist, matches
+#              nothing, and leaves nine initContainers on `IfNotPresent`.
+#              `overlays/dev-aks` gets this for free: it composes `../dev`
+#              (which brings `wait-for-deps`) and adds this on top.
+#
+#              COVERAGE IS VERIFIABLE, and should be verified rather than
+#              assumed — the first version of this component silently missed
+#              six of twenty-four images:
+#                kubectl kustomize infra/k8s/overlays/dev-aks > /tmp/o.yaml
+#                grep -c "imagePullPolicy" /tmp/o.yaml
+#                grep -c "imagePullPolicy: Always" /tmp/o.yaml
+#              The two counts must be equal (33 today).
 # =============================================================================
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-# EVERY image the build declares, not just the convenient ones. Four targets
-# rather than one because JSON6902 `replace` fails on a path that does not
-# exist, and the four pod-template shapes sit at four different paths:
-# Deployment/StatefulSet `.spec.template`, CronJob `.spec.jobTemplate.spec
-# .template`, and initContainers in their own array. Verify coverage with
-#   kubectl kustomize infra/k8s/overlays/dev-aks | grep -c "imagePullPolicy: Always"
-# against the total count of `imagePullPolicy` — the two must match (24 today).
+# Four targets rather than one because JSON6902 `replace` fails on a path that
+# does not exist, and the pod-template shapes sit at four different paths:
+# Deployment/StatefulSet `.spec.template`, CronJob
+# `.spec.jobTemplate.spec.template`, and initContainers in their own array.
 patches:
   - path: patch-image-pull-policy.yaml
     target:
@@ -59,13 +79,8 @@ patches:
       version: v1
       kind: CronJob
   # Named targets: an untargeted initContainer patch would fail the build on
-  # every Deployment that has none (JSON6902 `replace` errors on a missing
-  # path). c12-workflow carries the n8n workflow importer; the other nine
-  # carry `wait-for-deps` from the `wait-for-deps` COMPONENT — which is why
-  # THAT COMPONENT MUST BE COMPOSED BEFORE THIS ONE in an overlay's
-  # `components:` list. Compose it after, and these paths do not exist yet,
-  # the patch silently matches nothing, and nine initContainers keep
-  # `IfNotPresent` on a cluster with no image store.
+  # every Deployment that has none. c12-workflow carries the n8n workflow
+  # importer; the other nine carry `wait-for-deps`.
   - path: patch-image-pull-policy-initcontainer.yaml
     target:
       group: apps
