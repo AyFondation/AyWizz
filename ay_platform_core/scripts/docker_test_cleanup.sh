@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: docker_test_cleanup.sh
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/scripts/docker_test_cleanup.sh
 # Description: Stops and removes orphaned Docker containers spawned by
 #              testcontainers (ArangoDB / MinIO / Loki / Elasticsearch /
@@ -38,8 +38,14 @@ fi
 
 # Image-prefix patterns we treat as testcontainer-spawned. Anything not
 # matching these stays untouched.
+# NOTE: the match below is a PREFIX match, so a registry-qualified image
+# needs its own entry — `quay.io/minio/minio` does not match `minio/minio`.
+# MinIO moved to quay.io when its Docker Hub repositories stopped serving
+# public pulls; the bare entry stays so containers left over from before
+# that switch are still reaped.
 PATTERNS=(
     "arangodb/arangodb"
+    "quay.io/minio/minio"
     "minio/minio"
     "grafana/loki"
     "docker.elastic.co/elasticsearch"
