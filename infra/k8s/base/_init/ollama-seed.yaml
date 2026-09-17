@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ollama-seed.yaml
-# Version: 5
+# Version: 6
 # Path: infra/k8s/base/_init/ollama-seed.yaml
 # Description: One-shot Job pulling an embedding model into Ollama's
 #              persistent cache so it is available to REGISTER as an in-app
@@ -63,10 +63,20 @@ spec:
             - |
               set -e
               MODEL="${OLLAMA_SEED_MODEL:-all-minilm}"
-              echo "Waiting for ollama"
-              until ollama list >/dev/null 2>&1; do
+              echo "[ollama-seed] target : ${OLLAMA_HOST:-<unset>}"
+              echo "[ollama-seed] model  : $MODEL"
+              echo "[ollama-seed] waiting for the server to answer 'ollama list'"
+              attempt=0
+              until out="$(ollama list 2>&1)"; do
+                attempt=$((attempt + 1))
+                if [ "$attempt" -le 10 ] || [ $((attempt % 10)) -eq 0 ]; then
+                  echo "[ollama-seed] not ready ($((attempt * 2))s, attempt $attempt): $out"
+                fi
                 sleep 2
               done
-              echo "Pulling embedding model $MODEL"
+              echo "[ollama-seed] server reachable after $((attempt * 2))s"
+              echo "[ollama-seed] models already present:"
+              echo "$out"
+              echo "[ollama-seed] pulling $MODEL (this is the server's download, not ours)"
               ollama pull "$MODEL"
-              echo "Seed done."
+              echo "[ollama-seed] DONE — $MODEL available for the embedding registry"

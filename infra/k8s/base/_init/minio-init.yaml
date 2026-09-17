@@ -1,6 +1,6 @@
 # =============================================================================
 # File: minio-init.yaml
-# Version: 6
+# Version: 7
 # Path: infra/k8s/base/_init/minio-init.yaml
 # Description: One-shot Job creating MinIO buckets + app user with a
 #              readwrite policy (R-100-118 v2). Idempotent: existing
@@ -60,15 +60,29 @@ spec:
             - -c
             - |
               set -e
-              echo "Waiting for minio readiness"
-              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+              # This Job creates the APPLICATION credentials. The components'
+              # `wait-for-deps` probe MinIO unauthenticated, so they will pass
+              # their wait even if this Job never runs — and then fail in
+              # their own startup on ensure_bucket(). That makes these logs
+              # the place the trail goes cold, so nothing is swallowed here.
+              echo "[minio-init] target     : http://minio:9000"
+              echo "[minio-init] root user  : $MINIO_ROOT_USER"
+              echo "[minio-init] app user   : $MINIO_ACCESS_KEY"
+              echo "[minio-init] waiting for minio to accept an admin alias"
+              attempt=0
+              until out="$(mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>&1)"; do
+                attempt=$((attempt + 1))
+                if [ "$attempt" -le 10 ] || [ $((attempt % 10)) -eq 0 ]; then
+                  echo "[minio-init] not ready ($((attempt * 2))s, attempt $attempt): $out"
+                fi
                 sleep 2
               done
-              echo "Ensuring buckets"
+              echo "[minio-init] minio reachable after $((attempt * 2))s"
+              echo "[minio-init] ensuring buckets"
               for b in orchestrator requirements validation memory c13-extractor-artifacts backups; do
                 mc mb --ignore-existing "local/$b"
               done
-              echo "Ensuring policy ay-app-readwrite"
+              echo "[minio-init] ensuring policy ay-app-readwrite"
               cat > /tmp/policy.json <<'POLICY'
               {
                 "Version": "2012-10-17",
@@ -89,8 +103,8 @@ spec:
               }
               POLICY
               mc admin policy create local ay-app-readwrite /tmp/policy.json || true
-              echo "Ensuring app user $MINIO_ACCESS_KEY"
+              echo "[minio-init] ensuring app user $MINIO_ACCESS_KEY + policy attachment"
               mc admin user add local "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" || \
                 mc admin user svcacct edit local "$MINIO_ACCESS_KEY" --secret-key "$MINIO_SECRET_KEY" || true
               mc admin policy attach local ay-app-readwrite --user "$MINIO_ACCESS_KEY" || true
-              echo "MinIO bootstrap done."
+              echo "[minio-init] DONE — buckets, policy and app credentials in place"

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 4
+# Version: 5
 # Path: infra/k8s/base/ollama/deployment.yaml
 # Description: Ollama embeddings provider — production C7 default
 #              (`C7_EMBEDDING_ADAPTER=ollama`, `all-minilm` model). Single
@@ -44,14 +44,27 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /root/.ollama
-          # `curl` not present in image; `ollama list` is the canonical
-          # liveness check (mirrors docker-compose v6).
+          # HTTP, not exec. The previous `ollama list` probe was justified by
+          # "curl is not in the image" — but an httpGet probe is performed by
+          # the KUBELET, from outside the container, so curl's absence was
+          # never an obstacle. The `tcpSocket` liveness probe below was always
+          # the proof of that.
+          #
+          # It stopped being merely wasteful and started failing on AKS
+          # (2026-09-17): every 5 seconds the exec forked a shell and loaded
+          # the ollama binary, which grew by orders of magnitude between 0.5.4
+          # and 0.34.0 (a 3.7 GB image). Cold, under a CPU limit, that exceeds
+          # `timeoutSeconds: 3` — while the same command run by hand returns
+          # instantly, because the binary is already in page cache. The probe
+          # was measuring process startup, not service health.
+          #
+          # `/api/tags` rather than `/`: it exercises the API layer and returns
+          # the model list, so a server that is listening but not serving is
+          # still reported unready.
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - "ollama list >/dev/null 2>&1"
+            httpGet:
+              path: /api/tags
+              port: ollama
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3

@@ -74,6 +74,15 @@ spec:
             - -c
             - |
               set -e
+              # This initContainer gates the whole c12 pod. It depends on
+              # NOTHING external — only the PVC and the /workflows ConfigMap —
+              # so if c12 hangs here the cause is local, not a missing
+              # dependency. Saying so up front saves looking for one.
+              echo "[c12-init] db       : ${DB_SQLITE_DATABASE}"
+              echo "[c12-init] source   : /workflows (ConfigMap, versioned)"
+              echo "[c12-init] no external dependency — PVC + ConfigMap only"
+              echo "[c12-init] workflows found:"
+              ls -1 /workflows 2>/dev/null || echo "  (none)"
               if [ -d /workflows ] && [ -n "$(ls -A /workflows 2>/dev/null)" ]; then
                 # GitOps model: the workflow DB is FULLY derived from
                 # /workflows (the versioned source of truth). n8n has no delete
@@ -85,26 +94,26 @@ spec:
                 # the schema + the current set. n8n stores no credentials here
                 # (C7/C13 auth is header-based) and execution history is
                 # ephemeral, so the reset is safe.
-                echo "Resetting n8n workflow DB (derived from /workflows)"
+                echo "[c12-init] resetting the sqlite DB (fully derived from /workflows)"
                 rm -f "${DB_SQLITE_DATABASE}" "${DB_SQLITE_DATABASE}"-shm \
                       "${DB_SQLITE_DATABASE}"-wal 2>/dev/null || true
-                echo "Importing n8n workflows from /workflows"
+                echo "[c12-init] importing (this boots n8n and runs the SQLite migrations)"
                 n8n import:workflow --separate --input=/workflows
                 # See _init/c12-workflow-seed.yaml: n8n 2.x removed
                 # `update:workflow --all --active=true` and `import:workflow`
                 # deactivates what it imports, so publishing is per id now.
                 # No `|| true` here either — a pod whose webhooks are not
                 # registered must NOT report itself ready.
-                echo "Publishing imported workflows"
+                echo "[c12-init] publishing each workflow by id (n8n 2.x: import deactivates)"
                 for wf in /workflows/*.json; do
                   wf_id="$(node -p "require('${wf}').id")"
                   echo "  publishing ${wf_id}"
                   n8n publish:workflow --id="${wf_id}"
                 done
               else
-                echo "No /workflows to import (ConfigMap optional/empty)"
+                echo "[c12-init] nothing to import — /workflows is absent or empty"
               fi
-              echo "Workflow import (init) done."
+              echo "[c12-init] DONE — n8n may start with every webhook registered"
           volumeMounts:
             - name: data
               mountPath: /home/node/.n8n
