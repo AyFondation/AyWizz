@@ -50,6 +50,13 @@ spec:
             limits:
               cpu: "100m"
               memory: "256Mi"
+          env:
+            # Lets the endpoint below be written as an FQDN without pinning a
+            # namespace into `base/`.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           envFrom:
             - configMapRef:
                 name: aywizz-config
@@ -81,12 +88,53 @@ spec:
               # their wait even if this Job never runs — and then fail in
               # their own startup on ensure_bucket(). That makes these logs
               # the place the trail goes cold, so nothing is swallowed here.
-              echo "[minio-init] target     : http://minio:9000"
+              # STABLE PER-POD DNS, not the bare Service name (2026-09-17).
+              # `minio` is a HEADLESS service: it resolves to the set of ready
+              # endpoints, while `minio-0.minio` is the canonical, deterministic
+              # address of one StatefulSet pod. `mc` failed against
+              # `http://minio:9000` with "Connection closed by foreign host" —
+              # reproducibly, and even FROM INSIDE minio-0 itself, while
+              # `http://127.0.0.1:9000` succeeded with the same credentials and
+              # the same binary. Same pod, same secret, only the hostname
+              # differed, so the server and the credentials are both exonerated.
+              #
+              # Overridable from aywizz-config so the two forms can be compared
+              # without editing this manifest.
+              # APPEND to the proxy exclusions, never replace them. A cluster
+              # that injects HTTP_PROXY also injects a NO_PROXY carrying
+              # entries this platform must not drop (the cloud metadata
+              # endpoint, internal ranges). We only add what is missing: the
+              # in-cluster names this Job talks to.
+              #
+              # `mc` is written in Go and honours these variables natively, so
+              # without the exclusion it hands `minio:9000` to a proxy that
+              # cannot route it, and the proxy closes the connection —
+              # "Connection closed by foreign host", with a perfectly healthy
+              # server (2026-09-17). `arangosh` ignores proxy variables
+              # entirely, which is why arangodb-init never showed this.
+              #
+              # SUFFIX MATCHING NEVER COVERS A SINGLE-LABEL NAME: `.svc` does
+              # not match `minio`. The bare names have to be listed.
+              _NP="localhost,127.0.0.1,::1,.svc,.svc.cluster.local,.cluster.local,minio"
+              NO_PROXY="${NO_PROXY:+${NO_PROXY},}${_NP}"
+              no_proxy="${no_proxy:+${no_proxy},}${_NP}"
+              export NO_PROXY no_proxy
+              echo "[minio-init] no_proxy    : ${NO_PROXY}"
+              # FQDN, not the short name — and this is the load-bearing part.
+              # A cluster NO_PROXY typically already carries `.svc` and
+              # `.svc.cluster.local`, but those are SUFFIXES and a suffix never
+              # matches a single-label host: `.svc` does NOT cover `minio`.
+              # Writing the name in the form the existing exclusions already
+              # describe fixes this without anyone editing NO_PROXY.
+              # Namespace comes from the downward API, so this stays correct
+              # wherever the platform is installed.
+              MINIO_INIT_ENDPOINT="${MINIO_INIT_ENDPOINT:-http://minio.${POD_NAMESPACE}.svc:9000}"
+              echo "[minio-init] target     : $MINIO_INIT_ENDPOINT"
               echo "[minio-init] root user  : $MINIO_ROOT_USER"
               echo "[minio-init] app user   : $MINIO_ACCESS_KEY"
               echo "[minio-init] waiting for minio to accept an admin alias"
               attempt=0
-              until out="$(mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>&1)"; do
+              until out="$(mc alias set local "$MINIO_INIT_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>&1)"; do
                 attempt=$((attempt + 1))
                 if [ "$attempt" -le 10 ] || [ $((attempt % 10)) -eq 0 ]; then
                   echo "[minio-init] not ready ($((attempt * 2))s, attempt $attempt): $out"

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 5
+# Version: 6
 # Path: infra/k8s/base/ollama/deployment.yaml
 # Description: Ollama embeddings provider — production C7 default
 #              (`C7_EMBEDDING_ADAPTER=ollama`, `all-minilm` model). Single
@@ -44,6 +44,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /root/.ollama
+          # NO `OLLAMA_HOST` HERE, deliberately. The image ships
+          # `OLLAMA_HOST=0.0.0.0:11434`, which is what makes the server listen
+          # on all interfaces — overriding it would bind the server to
+          # localhost and the readiness probe, which comes from the kubelet
+          # OUTSIDE the container, would never pass.
+          #
+          # THE TRAP, if you open a shell in this pod: ollama uses the SAME
+          # variable for the server's bind address and the CLI's target, so a
+          # bare `ollama list` here tries to CONNECT to 0.0.0.0 — an address
+          # to listen on, not to reach. Docker Desktop remaps it to localhost;
+          # AKS does not, and the CLI fails while the server is perfectly
+          # healthy (2026-09-17). Use `OLLAMA_HOST=127.0.0.1:11434 ollama …`
+          # for anything run inside this container.
           # HTTP, not exec. The previous `ollama list` probe was justified by
           # "curl is not in the image" — but an httpGet probe is performed by
           # the KUBELET, from outside the container, so curl's absence was

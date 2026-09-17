@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ollama-seed.yaml
-# Version: 6
+# Version: 7
 # Path: infra/k8s/base/_init/ollama-seed.yaml
 # Description: One-shot Job pulling an embedding model into Ollama's
 #              persistent cache so it is available to REGISTER as an in-app
@@ -50,9 +50,32 @@ spec:
             limits:
               cpu: "100m"
               memory: "256Mi"
+          # Pulls in NO_PROXY / no_proxy where the cluster injects a corporate
+          # HTTP proxy: the ollama CLI is written in Go and honours those
+          # variables, so without the in-cluster exclusions it hands
+          # `ollama:11434` to a proxy that cannot route it and reports
+          # "something went wrong" while the server is healthy. The explicit
+          # `env:` below still wins over anything of the same name here.
+          envFrom:
+            - configMapRef:
+                name: aywizz-config
           env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: OLLAMA_HOST
-              value: "http://ollama:11434"
+              # HOST:PORT, no scheme. `http://ollama:11434` is what this
+              # carried under ollama 0.5.4; the 0.34.0 CLI does not accept it
+              # and fails with the unhelpful "something went wrong, please see
+              # the ollama server logs" — while the server logs show nothing,
+              # because the request never arrives (2026-09-17).
+              #
+              # Proven in the pod: `OLLAMA_HOST=127.0.0.1:11434 ollama list`
+              # returns a well-formed empty list, the scheme-carrying form
+              # does not. A silent parsing change across twenty months of
+              # upstream, surfaced by the image bump.
+              value: "ollama:11434"
             # Seed-local model id (not a C7 config knob). Override only to seed
             # a different embedding model for in-app registration.
             - name: OLLAMA_SEED_MODEL
@@ -62,6 +85,24 @@ spec:
             - -c
             - |
               set -e
+              # APPEND to the proxy exclusions, never replace them — see
+              # _init/minio-init.yaml for the full rationale. The ollama CLI
+              # is written in Go and honours these variables, so without the
+              # exclusion it hands `ollama:11434` to a proxy that cannot route
+              # it and reports "something went wrong, please see the ollama
+              # server logs" — while those logs show nothing, because the
+              # request never arrives.
+              _NP="localhost,127.0.0.1,::1,.svc,.svc.cluster.local,.cluster.local,ollama"
+              NO_PROXY="${NO_PROXY:+${NO_PROXY},}${_NP}"
+              no_proxy="${no_proxy:+${no_proxy},}${_NP}"
+              export NO_PROXY no_proxy
+              echo "[ollama-seed] no_proxy : ${NO_PROXY}"
+              # FQDN for the same reason as minio-init: a cluster NO_PROXY
+              # carries `.svc` as a SUFFIX, and a suffix never matches the
+              # single-label `ollama`. Written this way it is covered by the
+              # exclusions that already exist.
+              OLLAMA_HOST="ollama.${POD_NAMESPACE}.svc:11434"
+              export OLLAMA_HOST
               MODEL="${OLLAMA_SEED_MODEL:-all-minilm}"
               echo "[ollama-seed] target : ${OLLAMA_HOST:-<unset>}"
               echo "[ollama-seed] model  : $MODEL"
