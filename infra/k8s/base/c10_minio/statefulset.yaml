@@ -94,9 +94,18 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+          # CPU ABOVE the 200m platform default, like arangodb and litellm:
+          # MinIO does work, it does not route. Startup verifies the disk
+          # format and initialises erasure sets, and every object write is
+          # checksummed. At 200m (2026-09-17) it accepted TCP connections and
+          # then closed them without responding — `mc alias set` failed for
+          # 280s straight, minio-init never created the application user, and
+          # nine pods waited on credentials that were never going to exist.
+          # Its readiness probe passed throughout, because /minio/health/ready
+          # is cheap: healthy in ArgoCD, unable to serve.
           resources:
             limits:
-              cpu: "200m"
+              cpu: "500m"
               memory: "512Mi"
             requests:
               cpu: "25m"

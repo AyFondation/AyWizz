@@ -76,9 +76,16 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+          # CPU ABOVE the 200m platform default: ollama runs a neural network.
+          # Even serving only `all-minilm` (22M parameters) every embedded
+          # chunk is real compute, not an HTTP hop. At 200m it showed the same
+          # symptom as MinIO on 2026-09-17 — connections accepted then closed
+          # without response. 1000m is still five times less than the 2000m
+          # this carried before the quota pass; embedding is slower, not
+          # broken.
           resources:
             limits:
-              cpu: "200m"
+              cpu: "800m"
               memory: "2048Mi"
             requests:
               # Serves EMBEDDINGS only (all-minilm, 22M params, ~45MB — see

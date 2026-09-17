@@ -323,10 +323,16 @@ spec:
               )
 
               log("ALL DEPENDENCIES READY — starting the component")
+          # Nine copies of this exist, so its limit is multiplied by nine in a
+          # namespace ResourceQuota — 900m at 100m each, more than MinIO and
+          # ollama combined, for a container that makes one HTTP call every
+          # three seconds. Halved (2026-09-17) to fund the two services that
+          # actually compute. The work here is one urllib GET plus one HMAC
+          # signature; 50m is still generous for that.
           resources:
             requests:
               cpu: 10m
               memory: 32Mi
             limits:
-              cpu: 100m
+              cpu: 50m
               memory: 128Mi
