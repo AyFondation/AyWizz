@@ -1,6 +1,6 @@
 {
   "_comment": "AUTO-GENERATED from ay_platform_core/tests/e2e/auth_matrix/_catalog.py. Do not hand-edit. Regenerate via ay_platform_core/scripts/checks/export_route_catalog_json.py --write. Pinned by tests/coherence/test_ui_contract_snapshot.py.",
-  "route_count": 183,
+  "route_count": 185,
   "routes": [
     {
       "method": "GET",
@@ -183,6 +183,12 @@
       "auth": "role_gated"
     },
     {
+      "method": "POST",
+      "path": "/admin/v1/llm/providers/{provider_id}/probe",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
       "method": "GET",
       "path": "/admin/v1/llm/registry",
       "component": "c8_admin",
@@ -203,6 +209,12 @@
     {
       "method": "PUT",
       "path": "/admin/v1/llm/registry/{model_id}",
+      "component": "c8_admin",
+      "auth": "role_gated"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/llm/registry/{model_id}/probe",
       "component": "c8_admin",
       "auth": "role_gated"
     },

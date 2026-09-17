@@ -86,7 +86,7 @@ spec:
             requests:
               # Extraction is bursty: nothing at rest, heavy while a document
               # is processed. Reserve little, burst into the limit.
-              cpu: "100m"
+              cpu: "25m"
               memory: "512Mi"
             limits:
               # R-100-125 v2 §9 baseline. Image vision (Phase 1e) and
@@ -97,5 +97,5 @@ spec:
               # single extraction starve etcd and the apiserver, which can
               # freeze the whole cluster. 2 keeps extraction fast while
               # leaving half the node to everything else.
-              cpu: "2"
+              cpu: "200m"
               memory: "4Gi"

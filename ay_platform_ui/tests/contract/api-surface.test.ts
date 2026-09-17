@@ -188,6 +188,8 @@ function invocations(client: ApiClient): Record<string, () => Promise<unknown> |
       client.updateLlmProvider("p1", { name: "P", base_url: "https://x", wire_format: "openai" }),
     putLlmProviderApiKey: () => client.putLlmProviderApiKey("p1", "sk-x"),
     deleteLlmProvider: () => client.deleteLlmProvider("p1"),
+    probeLlmProvider: () => client.probeLlmProvider("p1"),
+    probeLlmModel: () => client.probeLlmModel("m1", true),
     listUserProjectAccess: () => client.listUserProjectAccess("u1"),
     listProjectConsumption: () => client.listProjectConsumption(),
     getRequestBreakdown: () => client.getRequestBreakdown("r1", "run"),

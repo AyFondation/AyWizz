@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { LLMProviderPublic, LLMProviderUpsert } from "@/lib/types";
+import type { LLMProviderPublic, LLMProviderUpsert, ProviderProbeResult } from "@/lib/types";
 
 type FormTarget = LLMProviderPublic | "new" | null;
 
@@ -28,6 +28,8 @@ export default function LlmProvidersPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<FormTarget>(null);
+  /** provider_id being probed — the probe bills tokens, so one at a time. */
+  const [probing, setProbing] = useState<string | null>(null);
 
   const isTenantManager = useMemo(() => {
     if (authState.status !== "authenticated") return false;
@@ -46,6 +48,39 @@ export default function LlmProvidersPage() {
   useEffect(() => {
     if (isTenantManager) reload();
   }, [isTenantManager, reload]);
+
+  /** Reach the provider through the platform's own pipeline (R-800-150).
+   *
+   *  Reports the verdict verbatim rather than a green tick: `not_configured`
+   *  when the provider has no model (there is then no pipeline path to
+   *  exercise), and the upstream error untouched when there is one. */
+  const probe = useCallback(
+    async (p: LLMProviderPublic) => {
+      setProbing(p.provider_id);
+      setError(null);
+      setNotice(null);
+      try {
+        const v: ProviderProbeResult = await apiClient.probeLlmProvider(p.provider_id);
+        if (v.outcome === "ok") {
+          setNotice(
+            `${p.name}: reachable in ${v.latency_ms}ms via ${v.via_alias} → ${v.effective_url}`,
+          );
+        } else {
+          setError(
+            `${p.name}: ${v.outcome}` +
+              (v.status_code ? ` (HTTP ${v.status_code})` : "") +
+              (v.error ? ` — ${v.error}` : "") +
+              (v.effective_url ? ` · api_base ${v.effective_url}` : ""),
+          );
+        }
+      } catch (err) {
+        setError(err instanceof ApiError ? `Probe failed (${err.status})` : "Probe failed.");
+      } finally {
+        setProbing(null);
+      }
+    },
+    [apiClient],
+  );
 
   const run = useCallback(
     async (fn: () => Promise<unknown>, ok: string) => {
@@ -199,6 +234,17 @@ export default function LlmProvidersPage() {
                       data-testid={`provider-edit-${p.provider_id}`}
                     >
                       Edit
+                    </button>
+                    <button
+                      type="button"
+                      disabled={probing === p.provider_id}
+                      onClick={() => probe(p)}
+                      className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      // Stated on the control, not hidden: this spends money.
+                      title="Reaches the provider through the real pipeline (client → proxy → provider) using one of its models. Uses provider tokens."
+                      data-testid={`provider-probe-${p.provider_id}`}
+                    >
+                      {probing === p.provider_id ? "Testing…" : "Test connection 💳"}
                     </button>
                     <button
                       type="button"

@@ -478,10 +478,80 @@ export interface EnrichmentConfig {
 
 export type ModelQuality = "low" | "medium" | "high";
 
+/** How a capability flag came to hold its value (R-800-152).
+ *
+ *  `unknown` is deliberately distinct from a `false` value: "never checked"
+ *  and "checked, and it cannot" lead an operator to different actions. */
+export type CapabilityEvidence = "measured" | "declared" | "asserted" | "unknown";
+
+export interface CapabilityProvenance {
+  vision: CapabilityEvidence;
+  tool_calling: CapabilityEvidence;
+  thinking: CapabilityEvidence;
+  context_window: CapabilityEvidence;
+}
+
+/** The operator's SUBTRACTIVE override: `true` means "the model can do this,
+ *  and we choose not to use it". There is no shape here for enabling a
+ *  capability the model lacks — that is not a preference, it is a false
+ *  claim. */
+export interface CapabilityOverrides {
+  vision: boolean;
+  tool_calling: boolean;
+  thinking: boolean;
+}
+
+/** What a model CAN do (measured), how we know (`provenance`), and what we
+ *  allow ourselves to use (`disabled`). Effective = flag AND NOT disabled. */
 export interface ModelCapabilities {
   vision: boolean;
   tool_calling: boolean;
+  thinking: boolean;
   context_window: number;
+  provenance: CapabilityProvenance;
+  disabled: CapabilityOverrides;
+}
+
+export type ProbeOutcome = "ok" | "unreachable" | "rejected" | "timeout" | "not_configured";
+
+/** Verdict of a provider probe. Reaches the provider through the platform
+ *  pipeline, so it CONSUMES PROVIDER TOKENS. */
+export interface ProviderProbeResult {
+  provider_id: string;
+  outcome: ProbeOutcome;
+  /** The `api_base` the pipeline resolves — what LiteLLM will actually call. */
+  effective_url: string;
+  status_code: number | null;
+  latency_ms: number | null;
+  /** Upstream body verbatim. An empty string is itself a finding. */
+  error: string | null;
+  api_key_hint: string;
+  /** Which model carried the probe: a failure may be the provider OR that one
+   *  model, and the operator needs to know which was tried. */
+  via_model_id: string | null;
+  via_alias: string | null;
+}
+
+export interface CapabilityProbeOutcome {
+  capability: string;
+  /** `null` = undetermined, distinct from `false` = asked and refused. */
+  supported: boolean | null;
+  evidence: CapabilityEvidence;
+  detail: string | null;
+}
+
+/** Verdict of a model probe through the production path. CONSUMES TOKENS. */
+export interface ModelProbeResult {
+  model_id: string;
+  alias: string;
+  provider_id: string;
+  outcome: ProbeOutcome;
+  /** The `<wire_format>/<upstream_model>` actually sent to the proxy. */
+  resolved_target: string;
+  status_code: number | null;
+  latency_ms: number | null;
+  error: string | null;
+  capabilities: CapabilityProbeOutcome[];
 }
 
 /** A provider = an endpoint + a wire-format + a write-only credential. Models

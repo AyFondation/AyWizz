@@ -1,6 +1,6 @@
 # =============================================================================
 # File: provider_router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/provider_router.py
 # Description: FastAPI APIRouter for the LLM PROVIDER registry (endpoint +
 #              credential layer), platform_manager only, forward-auth gated. A
@@ -21,6 +21,11 @@ from fastapi import (
     status,
 )
 
+from ay_platform_core.c8_llm.registry.probe_models import (
+    ModelProbeResult,
+    ProviderProbeResult,
+)
+from ay_platform_core.c8_llm.registry.probe_service import LLMProbeService
 from ay_platform_core.c8_llm.registry.provider_models import (
     LLMProviderApiKeyUpdate,
     LLMProviderListResponse,
@@ -58,6 +63,10 @@ def _require_role(x_user_roles: str | None, required: tuple[str, ...]) -> None:
 
 def get_provider_service(request: Request) -> LLMProviderService:
     return request.app.state.provider_service  # type: ignore[no-any-return]
+
+
+def get_probe_service(request: Request) -> LLMProbeService:
+    return request.app.state.probe_service  # type: ignore[no-any-return]
 
 
 @router.get("/admin/v1/llm/providers", response_model=LLMProviderListResponse)
@@ -132,6 +141,61 @@ async def set_provider_api_key(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="key management unavailable: no master key configured",
         ) from exc
+
+
+@router.post(
+    "/admin/v1/llm/providers/{provider_id}/probe",
+    response_model=ProviderProbeResult,
+)
+async def probe_provider(
+    provider_id: str,
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    service: LLMProbeService = Depends(get_probe_service),
+) -> ProviderProbeResult:
+    """Check that the provider answers THROUGH THE PLATFORM PIPELINE.
+
+    **Consumes provider tokens**: the pipeline's unit of work is a completion,
+    so probing a provider means one minimal completion through one of its
+    models. A provider with no model returns `not_configured` — there is then
+    no pipeline path to exercise.
+
+    Always 200 with a verdict inside — an unreachable provider is a RESULT of
+    this endpoint, not a failure of it. Mapping "the provider is down" onto a
+    5xx here would make the probe indistinguishable from its own outage.
+
+    @relation implements:R-800-150
+    """
+    _require_role(x_user_roles, _PROVIDER_ROLES)
+    return await service.probe_provider(provider_id)
+
+
+@router.post(
+    # `/registry/{id}/probe`, matching where the model registry actually lives
+    # (`/admin/v1/llm/registry`). A `/models/...` path would have been a second
+    # name for the same collection — the kind of drift the route catalogue
+    # exists to prevent.
+    "/admin/v1/llm/registry/{model_id}/probe",
+    response_model=ModelProbeResult,
+)
+async def probe_model(
+    model_id: str,
+    capabilities: bool = False,
+    _user: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
+    service: LLMProbeService = Depends(get_probe_service),
+) -> ModelProbeResult:
+    """Check that a configured model answers, THROUGH THE PRODUCTION PATH.
+
+    **Consumes provider tokens**: one minimal completion, plus one per
+    capability when `capabilities=true`. The caller is the operator console,
+    which states the cost at the button rather than burying it here.
+
+    @relation implements:R-800-151
+    @relation implements:R-800-152
+    """
+    _require_role(x_user_roles, _PROVIDER_ROLES)
+    return await service.probe_model(model_id, probe_capabilities=capabilities)
 
 
 @router.delete(

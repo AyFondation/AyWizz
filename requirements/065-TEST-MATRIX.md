@@ -40,7 +40,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 
 ## 3. Endpoint catalog
 
-**183 endpoints** across 9 components. Order: by component, method, path.
+**185 endpoints** across 9 components. Order: by component, method, path.
 
 ### c2_auth
 
@@ -205,6 +205,8 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `PUT` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
 | `PUT` | `/admin/v1/llm/providers/{provider_id}/api-key` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 200 |
 | `DELETE` | `/admin/v1/llm/providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `llm_providers` | 204 |
+| `POST` | `/admin/v1/llm/providers/{provider_id}/probe` | role_gated | — | `platform_manager` | — | — | 200 |
+| `POST` | `/admin/v1/llm/registry/{model_id}/probe` | role_gated | — | `platform_manager` | — | — | 200 |
 | `GET` | `/admin/v1/llm/embedding-providers` | role_gated | — | `platform_manager` | — | — | 200 |
 | `POST` | `/admin/v1/llm/embedding-providers` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 201 |
 | `PUT` | `/admin/v1/llm/embedding-providers/{provider_id}` | role_gated | — | `platform_manager` | — | arango · `embedding_providers` | 200 |

@@ -66,10 +66,10 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "400m"
+              cpu: "200m"
               memory: "512Mi"
             requests:
               # On the path of EVERY request (forward-auth) — see the sizing
               # policy in base/kustomization.yaml.
-              cpu: "50m"
+              cpu: "25m"
               memory: "128Mi"

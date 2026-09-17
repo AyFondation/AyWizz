@@ -1,6 +1,6 @@
 ---
 document: 800-SPEC-LLM-ABSTRACTION
-version: 13
+version: 14
 path: requirements/800-SPEC-LLM-ABSTRACTION.md
 language: en
 status: draft
@@ -21,6 +21,8 @@ derives-from: [D-002, D-011, D-012, D-020, D-021]
 >
 > **Version 8 changes.** **Cost/quality optimisation — increment 1: provider-aware prompt caching.** **R-800-042 v1→v2** makes the `X-Cache-Hint: static` translation **provider-aware** and applied AFTER upstream resolution: the cache marker is keyed on the resolved model's `wire_format` — `anthropic` gets the `cache_control: {type: ephemeral}` breakpoint, automatic-caching providers (`openai`, `gemini`) get NONE (an Anthropic-shaped block sent there is rejected — a defect, not best-effort), and an unresolved alias/mock gets none. This fixes a latent bug (the marker was emitted unconditionally) and establishes the **per-`wire_format` translation seam** at C8 that increments 2 (extended thinking on generate/judge) and 3 (token counting + budget-aware routing) reuse. C3 chat (`c3-rag` stream + `c3-docgen`) now opts in (`cache_hint="static"`) — its system + RAG prefix recurs every turn. C13 sliding-window caching (R-800-131/132) remains the next sub-step (ay_extractor prompt restructuring).
 
+> **Version 14 changes.** **Provider/model probes, and capabilities that are measured rather than declared.** `R-800-150` adds an operator-only provider-endpoint probe that consumes no tokens and — the load-bearing clause — reports the URL it ACTUALLY COMPOSED, because the 2026-09-09 outage came from a stored `base_url` that looked right while the composed one (`…com//v1/messages`) was wrong. `R-800-151` adds a model probe that SHALL traverse the production path (client → proxy → credential resolution) and not call the provider directly: a bypassing probe would have reported health throughout the period when the OpenHands engine had no authentication path at all, which is worse than no probe. `R-800-152` closes the class: `tool_calling` / `vision` / `thinking` GATE quality→model resolution, so the platform SHALL be able to OBSERVE them instead of trusting a ticked box, and every flag carries its provenance (`measured` / `declared` / `asserted` / `unknown`). `context_window` is explicitly exempt — measuring it costs a maximum-length request. Same principle as `R-200-011`/`R-200-012` applied one layer down: a routing decision must not rest on an unverified assertion.
+>
 > **Version 13 changes.** **The per-call credential injection is now a REQUIREMENT, not prose.** `R-800-148` states the contract the C8 client and `key_provider` have implemented all along — proxy holds no credential at rest, the alias resolves to `<wire>/<upstream>` + `api_base` + decrypted key per call, best-effort, never logged. It existed only in the "Version 6 changes" note below, which is why the implementing module carried no `@relation` marker: there was nothing to point at (found 2026-09-11 while auditing a marker of my own that claimed R-800-011 — access mode — for credential behaviour). `R-800-149` adds the direct-caller path: a component embedding its own LiteLLM client never performs that rewrite, so the proxy resolves for it via a pre-call hook, under five NORMATIVE containments (never overrides an app-resolved request ; hosted by a component that already holds the master key ; not reachable through C1 ; constant-time shared-credential check failing CLOSED ; failure leaves the request untouched). The accepted residual risk — an enumerable endpoint — is stated in the requirement itself rather than left to a commit message. Also removes a duplicated "Version 6 changes" paragraph.
 >
 > **Version 7 changes.** **Per-project model lists + tenant defaults (scoped resolution).** A tenant catalogue entry gains `default_for_new_projects` (the tenant-admin browses the catalogue and flags the models new projects should start with). A NEW per-project association (`project_llm_models/<tenant>:<project>`, a list of `model_id`s) records which models a project may use. The `model_quality` resolution is now SCOPED: `resolve(tenant, quality, project_id?)` selects the cheapest qualifying model AMONG the project's EFFECTIVE set — the explicit list if configured, ELSE the tenant's `default_for_new_projects` set (LAZY: no project-creation hook; an unconfigured project inherits the defaults until its list is set), ELSE the whole catalogue (backward-compatible). C7's resolver client forwards the project via `X-Project-Id`. Admin surface (admin / tenant_admin): `GET`/`PUT /api/v1/llm/projects/{project_id}/models` ; catalogue PUT carries the `default_for_new_projects` flag. HMI: catalogue "default for new projects" checkbox + a project-Settings "Models" section. Catalogued in `065-TEST-MATRIX.md` (135 endpoints).
@@ -1344,6 +1346,146 @@ R-800-148, where a credential only ever travels attached to a call the platform
 decided to make, this endpoint can be ENUMERATED by anything holding the
 gateway credential in-cluster. The containments above are what bound that risk;
 weakening any one of them re-opens it.
+
+#### R-800-150
+
+```yaml
+id: R-800-150
+version: 1
+status: draft
+category: functional
+derives-from: [D-011]
+impacts: [E-800-001]
+```
+
+**Provider endpoint probe.** The registry SHALL expose an operator-only probe
+that establishes whether a configured provider is reachable **through the
+platform's own request path** — client, quota enforcement, alias resolution,
+credential injection, proxy — and SHALL NOT reach the provider by any other
+route. The probe SHALL:
+
+- run entirely platform-side, so the decrypted credential never reaches a
+  browser; the response SHALL carry no secret material, only the existing
+  `api_key_hint`;
+- report the `api_base` the pipeline resolved, and which model carried the
+  probe;
+- report the upstream status code, the round-trip latency, and the upstream
+  error body verbatim when the call fails;
+- distinguish *unreachable* (DNS, TLS, connection) from *reachable but
+  rejected* (4xx/5xx), because the two have different operator remedies;
+- report *not configured* when the provider has no model, since there is then
+  no pipeline path to exercise.
+
+**Rationale.** The pipeline has no "ping an endpoint" operation — its unit of
+work is a completion — so honouring "no bypass" means this probe consumes a
+minimal completion. That cost is the price of a verdict that transfers.
+
+A cheaper design was implemented first and rejected: a direct GET to
+`{base_url}/v1/models` issued by the admin component. It was free, and it
+measured the wrong thing. Production egress to a provider leaves the PROXY
+pod; a direct call from the admin pod could read green while the real route
+was blocked by an egress rule, or red while production was fine. The same
+argument that governs R-800-151 governs this requirement: a probe whose
+verdict does not cover the deployed path converts an unknown into a false
+assurance, which is worse than no probe.
+
+Composing the URL is no longer this requirement's concern, because the
+composition now happens where it happens in production. The 2026-09-09 failure
+mode — a stored trailing slash yielding `https://api.anthropic.com//v1/messages`
+and a total outage whose error reached end users EMPTY — is covered more
+strongly than by echoing a URL back: the probe performs the real call, so a
+broken composition surfaces as the real upstream error rather than as a
+prediction.
+
+#### R-800-151
+
+```yaml
+id: R-800-151
+version: 1
+status: draft
+category: functional
+derives-from: [D-011]
+impacts: [E-800-001]
+```
+
+**Model probe through the production path.** The registry SHALL expose an
+operator-only probe that establishes whether a configured model actually
+answers. The probe SHALL traverse the SAME path a production call takes —
+platform client, proxy, credential resolution — and SHALL NOT call the provider
+directly.
+
+The probe SHALL report the resolved `<wire_format>/<upstream_model>` it sent,
+the upstream status, and any upstream error verbatim. It SHALL be declared as
+token-consuming at its call site, and SHALL bound its own cost (minimal prompt,
+minimal completion budget).
+
+**Rationale.** A probe that bypasses the proxy proves only that the provider
+exists. It would have passed throughout the period when the OpenHands engine
+had no authentication path at all (fixed 2026-09-10 by R-800-149), reporting
+health for a route that could not carry a single real call. A probe whose
+verdict does not cover the deployed path is worse than no probe: it converts an
+unknown into a false assurance.
+
+#### R-800-152
+
+```yaml
+id: R-800-152
+version: 1
+status: draft
+category: functional
+derives-from: [D-011]
+impacts: [E-800-001, E-800-002]
+```
+
+**Capabilities are measured, not asserted.** Model capabilities
+(`tool_calling`, `vision`, `thinking`, and any capability added later) gate
+quality→model resolution: a resolution requiring tool calling SHALL NOT select
+a model whose `tool_calling` is false. Because those flags decide routing, the
+platform SHALL be able to establish them by OBSERVATION rather than by operator
+declaration.
+
+Each capability SHALL therefore carry its provenance, one of:
+
+- `measured` — the platform exercised the capability against the model and
+  observed the result;
+- `declared` — the provider's own model metadata stated it;
+- `asserted` — a human set it in the HMI;
+- `unknown` — never established.
+
+The probe of R-800-151 SHALL, on request, exercise each capability and record
+the outcome with `measured` provenance and the observed upstream response.
+Provenance SHALL be visible wherever the flags are shown.
+
+**Capability and enablement are DISTINCT, and only one of them is a human
+decision.** A capability states what the model CAN do and SHALL be established
+by measurement, not by an operator setting it in the HMI. Whether the platform
+MAY use a capability it has is a separate, operator-owned choice, expressed as
+a SUBTRACTIVE override:
+
+- the effective capability SHALL be `measured AND NOT disabled-by-operator`;
+- an operator SHALL be able to disable a capability the model has — for cost,
+  policy, or determinism reasons;
+- an operator SHALL NOT be able to enable a capability the model does not
+  have. That direction is not a preference, it is a false claim, and it is the
+  exact failure this requirement exists to remove.
+
+The write API MAY continue to accept capability values, for seeding from a
+canonical configuration and for bootstrapping a registry before any probe has
+run; such values SHALL be recorded as `asserted` so they remain
+distinguishable from measurements.
+
+`context_window` is EXEMPT from measurement and SHALL remain `declared` or
+`asserted`: establishing it empirically requires a maximum-length request, whose
+cost is not proportionate to its value.
+
+**Rationale.** These flags are the same class of claim as gate evidence
+(`R-200-011`, `R-200-012`): a routing decision resting on an unverified
+assertion. An operator ticking `tool_calling` on a model that cannot call tools
+does not fail at configuration time — it fails inside an agent run, where the
+symptom (an agent that never edits a file) is several layers from the cause.
+Provenance is what keeps a measured value from being silently overwritten by a
+guess, and what makes "we never checked" distinguishable from "we checked and
+it is false".
 
 #### E-800-003: Agent-to-feature catalog reference
 

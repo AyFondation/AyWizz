@@ -81,13 +81,13 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "1500m"
+              cpu: "300m"
               memory: "1536Mi"
             requests:
               # Background work (WAL, compaction, index maintenance) is real
               # but light at the dataset sizes this platform sees; the 1500m
               # limit absorbs query + ingestion bursts.
-              cpu: "150m"
+              cpu: "25m"
               memory: "512Mi"
   volumeClaimTemplates:
     - metadata:

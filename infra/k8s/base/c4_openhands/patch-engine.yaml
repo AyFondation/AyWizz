@@ -54,8 +54,8 @@ spec:
           # compose service already uses for the same image.
           resources:
             limits:
-              cpu: "2.0"
+              cpu: "300m"
               memory: "2048Mi"
             requests:
-              cpu: "250m"
+              cpu: "25m"
               memory: "512Mi"

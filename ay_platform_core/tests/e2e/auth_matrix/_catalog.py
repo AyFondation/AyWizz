@@ -1710,6 +1710,45 @@ _C8_ADMIN: list[EndpointSpec] = [
         backend=Backend.ARANGO,
         backend_collection="llm_providers",
     ),
+    # Probes (R-800-150/151/152). Both reach the provider THROUGH THE
+    # PLATFORM PIPELINE — client, quota, alias resolution, credential
+    # injection, proxy — never directly, so both CONSUME PROVIDER TOKENS.
+    # Neither writes, hence Backend.NONE. Both answer 200 carrying a verdict
+    # even when the upstream is down: an unreachable provider is a RESULT, and
+    # mapping it to a 5xx would make the probe indistinguishable from its own
+    # outage.
+    EndpointSpec(
+        component="c8_admin",
+        method="POST",
+        path="/admin/v1/llm/providers/{provider_id}/probe",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.NONE,
+        notes=(
+            "CONSUMES PROVIDER TOKENS: one minimal completion through one of "
+            "the provider's models, since the pipeline has no 'ping an "
+            "endpoint' operation. `not_configured` when the provider has no "
+            "model — there is then no pipeline path to exercise."
+        ),
+    ),
+    EndpointSpec(
+        component="c8_admin",
+        method="POST",
+        path="/admin/v1/llm/registry/{model_id}/probe",
+        auth=Auth.ROLE_GATED,
+        scope=Scope.NONE,
+        success_status=200,
+        accept_global_roles=("platform_manager",),
+        backend=Backend.NONE,
+        notes=(
+            "CONSUMES PROVIDER TOKENS. Traverses the production path "
+            "(client -> proxy -> credential resolution), never the provider "
+            "directly. `?capabilities=true` additionally measures "
+            "tool_calling / vision / thinking (one call each)."
+        ),
+    ),
     # EMBEDDING registry (D-011) — platform_manager. Providers (endpoint +
     # write-only key) + models (upstream + dimension). Parallel to the chat
     # provider/model registry above.

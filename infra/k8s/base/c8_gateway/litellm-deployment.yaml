@@ -102,14 +102,14 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "1"
+              cpu: "300m"
               # 768Mi OOM-killed the proxy under k8s cgroup enforcement at
               # startup (config + cost-forwarder callback load). 2Gi gives
               # comfortable headroom ; tune down per-env in an overlay.
               memory: "2Gi"
             requests:
               # Pure proxy — the work happens upstream at the provider.
-              cpu: "50m"
+              cpu: "25m"
               memory: "256Mi"
       volumes:
         - name: litellm-config

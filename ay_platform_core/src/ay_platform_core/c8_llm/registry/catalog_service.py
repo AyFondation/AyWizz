@@ -204,9 +204,13 @@ class TenantCatalogService:
                 continue
             if rp.default_model_quality != model_quality:
                 continue
-            if require_vision and not rp.capabilities.vision:
+            # EFFECTIVE capability, not the raw flag (R-800-152): a capability
+            # the model has but the operator disabled must not be selected for.
+            # Reading `.vision` here would answer "can it" when the question
+            # is "may we".
+            if require_vision and not rp.capabilities.supports("vision"):
                 continue
-            if require_tool_calling and not rp.capabilities.tool_calling:
+            if require_tool_calling and not rp.capabilities.supports("tool_calling"):
                 continue
             candidates.append(rp)
         if not candidates:
@@ -218,8 +222,9 @@ class TenantCatalogService:
             model_alias=best.alias,
             model_quality=model_quality,
             upstream_model=best.upstream_model,
-            vision=best.capabilities.vision,
-            tool_calling=best.capabilities.tool_calling,
+            # What the caller MAY use, which is what it will act on.
+            vision=best.capabilities.supports("vision"),
+            tool_calling=best.capabilities.supports("tool_calling"),
         )
 
 

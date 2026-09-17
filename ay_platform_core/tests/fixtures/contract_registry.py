@@ -790,6 +790,10 @@ from ay_platform_core.c8_llm.registry.models import (  # noqa: E402
     LLMRegistryListResponse,
     LLMRegistryPublic,
 )
+from ay_platform_core.c8_llm.registry.probe_models import (  # noqa: E402
+    ModelProbeResult,
+    ProviderProbeResult,
+)
 from ay_platform_core.c8_llm.registry.provider_models import (  # noqa: E402
     LLMProviderApiKeyUpdate,
     LLMProviderListResponse,
@@ -840,6 +844,37 @@ register_contract(
         description=(
             "Read projection of a provider (endpoint + credential layer). "
             "WRITE-ONLY KEY: key_status + masked hint only."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="ProviderProbeResult",
+        schema=ProviderProbeResult,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "Verdict of a provider endpoint probe (R-800-150). Carries the URL "
+            "the platform ACTUALLY COMPOSED plus the upstream status and error "
+            "verbatim. No secret: the masked hint is the only "
+            "credential-adjacent field."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C8_admin",
+        name="ModelProbeResult",
+        schema=ModelProbeResult,
+        consumers=("C1_gateway", "ay_platform_ui"),
+        transport="rest",
+        description=(
+            "Verdict of a model probe through the production path "
+            "(R-800-151), optionally carrying MEASURED capability outcomes "
+            "(R-800-152). Shares `alias`/`model_id`/`provider_id` with the "
+            "registry contracts by design — it identifies the same model — but "
+            "its `capabilities` are probe RESULTS, not the configured flags."
         ),
     )
 )

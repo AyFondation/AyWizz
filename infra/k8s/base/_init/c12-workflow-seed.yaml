@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c12-workflow-seed.yaml
-# Version: 4
+# Version: 5
 # Path: infra/k8s/base/_init/c12-workflow-seed.yaml
 # Description: One-shot Job importing every workflow JSON under the
 #              c12-workflow-files ConfigMap into the running n8n.
@@ -10,6 +10,14 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: c12-workflow-seed
+  annotations:
+    # See arangodb-init.yaml for the full rationale. This Job is the most
+    # exposed of the four: the n8n 2.x migration changed BOTH its image and its
+    # whole command (`publish:workflow` replacing the removed
+    # `update:workflow --all`). Without a delete-and-recreate, ArgoCD keeps the
+    # old Job and the ingestion webhooks stay unregistered — green sync, dead
+    # chain. Inert outside ArgoCD.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
   labels:
     app.kubernetes.io/name: c12-workflow-seed
     app.kubernetes.io/component: c12
@@ -29,6 +37,20 @@ spec:
         - name: n8n-import
           image: n8nio/n8n:2.38.7
           imagePullPolicy: IfNotPresent
+          # Required wherever a namespace ResourceQuota is in force — see
+          # arangodb-init.yaml. Sized ABOVE the other init containers because
+          # this one is not a thin client: `n8n import:workflow` boots the n8n
+          # runtime and runs the full SQLite migration chain (visible in its
+          # own logs) before importing. The main c12 container requests
+          # 50m/256Mi with a 500m/1024Mi limit; this does the same work in a
+          # burst, so it gets the same ceiling.
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "256Mi"
+            limits:
+              cpu: "100m"
+              memory: "1024Mi"
           env:
             - name: DB_TYPE
               value: "sqlite"

@@ -62,10 +62,10 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "400m"
+              cpu: "200m"
               memory: "512Mi"
             requests:
               # On the ingestion path (embedding orchestration) — see
               # base/kustomization.yaml.
-              cpu: "50m"
+              cpu: "25m"
               memory: "128Mi"

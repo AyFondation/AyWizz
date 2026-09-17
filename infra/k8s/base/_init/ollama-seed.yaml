@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ollama-seed.yaml
-# Version: 4
+# Version: 5
 # Path: infra/k8s/base/_init/ollama-seed.yaml
 # Description: One-shot Job pulling an embedding model into Ollama's
 #              persistent cache so it is available to REGISTER as an in-app
@@ -14,6 +14,11 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ollama-seed
+  annotations:
+    # See arangodb-init.yaml for the full rationale: a Job's `spec.template` is
+    # immutable, so a changed image cannot be patched and ArgoCD would keep the
+    # old Job. Inert outside ArgoCD.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
   labels:
     app.kubernetes.io/name: ollama-seed
     app.kubernetes.io/component: ollama
@@ -33,6 +38,18 @@ spec:
         - name: ollama-pull
           image: ollama/ollama:0.34.0
           imagePullPolicy: IfNotPresent
+          # Required wherever a namespace ResourceQuota is in force — see
+          # arangodb-init.yaml. This container only DRIVES the pull: the model
+          # is downloaded and written by the ollama SERVER, so the work here is
+          # an HTTP client waiting on a 45 MB transfer, not the transfer's
+          # memory cost.
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"
           env:
             - name: OLLAMA_HOST
               value: "http://ollama:11434"

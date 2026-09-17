@@ -19,13 +19,16 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import yaml
 from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 
 from ay_platform_core.c8_admin.config import C8AdminConfig
-from ay_platform_core.c8_llm.config import LiteLLMConfig
+from ay_platform_core.c8_llm.client import LLMGatewayClient
+from ay_platform_core.c8_llm.config import ClientSettings, LiteLLMConfig
+from ay_platform_core.c8_llm.quota.guard import build_quota_guard
 from ay_platform_core.c8_llm.quota.repository import QuotaRepository
 from ay_platform_core.c8_llm.quota.router import router as quota_router
 from ay_platform_core.c8_llm.quota.service import QuotaService
@@ -57,6 +60,7 @@ from ay_platform_core.c8_llm.registry.embedding_service import (
     EmbeddingProviderService,
 )
 from ay_platform_core.c8_llm.registry.key_provider import build_registry_key_provider
+from ay_platform_core.c8_llm.registry.probe_service import LLMProbeService
 from ay_platform_core.c8_llm.registry.provider_repository import LLMProviderRepository
 from ay_platform_core.c8_llm.registry.provider_router import router as provider_router
 from ay_platform_core.c8_llm.registry.provider_service import LLMProviderService
@@ -90,6 +94,34 @@ def _cipher_from_env() -> SecretCipher | None:
             "(list / catalogue / resolve still served)"
         )
         return None
+
+
+def _probe_completer(db: Any) -> LLMGatewayClient:
+    """Gateway client for the MODEL probe (R-800-151).
+
+    Carries the same `key_provider` AND the same `quota_guard` production
+    uses, so the probe exercises every step of the real path — no bypass
+    (operator's call, 2026-09-17).
+
+    An earlier version omitted the quota guard, reasoning that an operator
+    whose tenant is over quota is precisely the one who needs to diagnose.
+    That convenience made the probe a slightly different call from the one it
+    claims to verify, which defeats its purpose: a probe that skips a step
+    cannot report on that step. An over-quota tenant now gets the same refusal
+    a real call would get — which is itself the correct diagnostic.
+
+    It deliberately carries NO `model_provider`: the probe pins its target by
+    alias, because its question is "does THIS model answer", not "what would
+    the router pick". That is a narrowing of the input, not a bypass of a
+    stage — `_resolve_model` honours an explicit model by design (R-800-030).
+    """
+    settings = ClientSettings()
+    return LLMGatewayClient(
+        settings,
+        bearer_token=settings.effective_bearer,
+        key_provider=build_registry_key_provider(db),
+        quota_guard=build_quota_guard(db),
+    )
 
 
 def _load_litellm_config(path: str) -> LiteLLMConfig | None:
@@ -127,6 +159,13 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
     secret_cipher = cipher if cipher is not None else _cipher_from_env()
     service = LLMRegistryService(repo)
     provider_service = LLMProviderService(provider_repo, secret_cipher)
+    # Probes (R-800-150/151/152). The gateway client is passed in so the MODEL
+    # probe traverses the production path; when it is absent the probe reports
+    # `not_configured` rather than silently falling back to a direct provider
+    # call, which would report health for a route it never exercised.
+    probe_service = LLMProbeService(
+        provider_repo, repo, secret_cipher, _probe_completer(db),
+    )
     catalog_service = TenantCatalogService(catalog_repo, service)
     quota_service = QuotaService(QuotaRepository(db))
 
@@ -229,6 +268,7 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
     app.state.call_target_provider = build_registry_key_provider(db)
     app.state.registry_service = service
     app.state.provider_service = provider_service
+    app.state.probe_service = probe_service
     app.state.embedding_provider_service = embedding_provider_service
     app.state.embedding_model_service = embedding_model_service
     app.state.embedding_catalog_service = embedding_catalog_service

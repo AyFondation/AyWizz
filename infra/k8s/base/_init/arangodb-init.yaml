@@ -1,6 +1,6 @@
 # =============================================================================
 # File: arangodb-init.yaml
-# Version: 3
+# Version: 4
 # Path: infra/k8s/base/_init/arangodb-init.yaml
 # Description: One-shot Job creating the platform ArangoDB database +
 #              the dedicated app user (R-100-012 v3, R-100-118 v2).
@@ -15,6 +15,17 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: arangodb-init
+  annotations:
+    # ArgoCD: a Job's `spec.template` is IMMUTABLE, so a changed image or
+    # command makes the sync fail with "field is immutable" and the cluster
+    # silently keeps the OLD Job. `Force=true` is the half that matters —
+    # `Replace=true` alone maps to `kubectl replace`, which rejects immutable
+    # fields just as `apply` does; together they become a delete-and-recreate,
+    # which is what `run.sh --reinit` does outside ArgoCD.
+    #
+    # Inert wherever ArgoCD is not the deployer: kubectl ignores unknown
+    # annotations, so `run.sh` behaves exactly as before.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
   labels:
     app.kubernetes.io/name: arangodb-init
     app.kubernetes.io/component: c11
@@ -34,6 +45,27 @@ spec:
         - name: arangosh
           image: arangodb/arangodb:3.12.4.3
           imagePullPolicy: IfNotPresent
+          # A namespace ResourceQuota REJECTS any pod that does not declare
+          # limits — the Job never creates a pod, so it reads as "the Job
+          # failed" rather than "the Job was refused". That is how this
+          # surfaced on AKS (2026-09-17), and its blast radius was the whole
+          # platform: without this Job the `platform` database is never
+          # created, so every `wait-for-deps` initContainer waits forever and
+          # nine pods sit in Init.
+          #
+          # arangosh here runs a handful of short statements: create database,
+          # create user, grant. The request is a floor, not a measurement.
+          # CPU deliberately LOW (operator's call, 2026-09-17): these run once
+          # at install, so slower is an acceptable trade for fitting inside a
+          # constrained namespace quota. Memory is NOT throttled the same way —
+          # a starved process waits, an OOM-killed one fails.
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"
+              memory: "512Mi"
           envFrom:
             - configMapRef:
                 name: aywizz-config

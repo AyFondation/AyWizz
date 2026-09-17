@@ -1,8 +1,19 @@
 # =============================================================================
 # File: models.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/registry/models.py
 # Description: Pydantic contracts for the platform LLM model registry.
+#
+#              v3 (R-800-152): capabilities gain `thinking` and, more
+#              importantly, PROVENANCE. These flags are not descriptive — they
+#              GATE routing: `catalog_service` refuses a model whose
+#              `tool_calling` is false when the resolution requires it. So a
+#              box ticked wrongly in the HMI does not fail at configuration
+#              time, it fails inside an agent run, where "the agent never edits
+#              a file" is several layers from "someone guessed a capability".
+#              `CapabilityProvenance` records, per flag, whether the value was
+#              MEASURED against the model, DECLARED by the provider's metadata,
+#              ASSERTED by a human, or never established at all.
 #
 #              v2 (provider normalisation + stable ids): a model is keyed by a
 #              STABLE technical id (`model_id`); its `alias` and every other
@@ -35,15 +46,90 @@ class ModelQuality(StrEnum):
     HIGH = "high"
 
 
-class ModelCapabilities(BaseModel):
-    """Capability gating used by quality→model resolution (e.g. a vision role
-    SHALL resolve to a vision-capable model)."""
+class CapabilityEvidence(StrEnum):
+    """How a capability flag came to hold its value (R-800-152).
+
+    The distinction that matters operationally is MEASURED vs everything
+    else: only `measured` means the platform exercised the capability and
+    watched what happened. `unknown` is deliberately separate from a `False`
+    value — "we never checked" and "we checked and it cannot" lead an
+    operator to different actions."""
+
+    MEASURED = "measured"
+    DECLARED = "declared"
+    ASSERTED = "asserted"
+    UNKNOWN = "unknown"
+
+
+class CapabilityProvenance(BaseModel):
+    """Per-flag provenance for `ModelCapabilities`.
+
+    Spelled out field by field rather than a `dict[str, …]` so mypy --strict
+    catches a capability added to one model and forgotten in the other. The
+    cost is one extra edit per new capability; the benefit is that the
+    omission is a build error instead of a silently `unknown` flag."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vision: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    tool_calling: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    thinking: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    context_window: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+
+
+class CapabilityOverrides(BaseModel):
+    """The operator's SUBTRACTIVE override (R-800-152).
+
+    `True` means "the model can do this, and we choose not to use it" — for
+    cost, policy or determinism. The override can only ever take away: there
+    is deliberately no way to express "enable a capability the model lacks",
+    because that is not a preference, it is a false claim, and it is the exact
+    failure this whole mechanism exists to remove."""
 
     model_config = ConfigDict(extra="forbid")
 
     vision: bool = False
     tool_calling: bool = False
+    thinking: bool = False
+
+
+class ModelCapabilities(BaseModel):
+    """What a model CAN do, how we know, and what we choose to use.
+
+    Three distinct things that used to be one checkbox:
+      - the flag itself — what the model can do, established by MEASUREMENT ;
+      - `provenance` — how that value came to be, so a measurement is never
+        confused with a guess ;
+      - `disabled` — the operator's choice not to use a capability that
+        exists.
+
+    Read routing decisions through `supports()`, never off the raw flag.
+    Defaults keep pre-v3 documents readable: they come back with everything
+    `unknown` and nothing disabled, which is exactly their state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vision: bool = False
+    tool_calling: bool = False
+    thinking: bool = False
+    """Extended / adaptive reasoning. Gated like the others because a route
+    that asks for thinking on a model without it is rejected upstream, not
+    silently downgraded."""
     context_window: int = Field(ge=1)
+    """EXEMPT from measurement, per R-800-152: `context_window` can only be
+    established empirically with a maximum-length request, whose cost is not
+    proportionate to its value. It stays `declared` or `asserted`."""
+    provenance: CapabilityProvenance = Field(default_factory=CapabilityProvenance)
+    disabled: CapabilityOverrides = Field(default_factory=CapabilityOverrides)
+
+    def supports(self, capability: str) -> bool:
+        """Effective capability: `measured AND NOT disabled-by-operator`.
+
+        The single place routing should ask. Reading `caps.vision` directly
+        answers "can it" when the question is almost always "may we"."""
+        return bool(getattr(self, capability, False)) and not bool(
+            getattr(self.disabled, capability, False)
+        )
 
 
 class _RegistryFields(BaseModel):

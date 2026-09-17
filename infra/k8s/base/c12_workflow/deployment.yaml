@@ -51,6 +51,19 @@ spec:
         - name: import-workflows
           image: n8nio/n8n:2.38.7
           imagePullPolicy: IfNotPresent
+          # An initContainer needs its own limits: a namespace ResourceQuota
+          # rejects the POD, so one undeclared initContainer blocks the whole
+          # Deployment — which is how c12 joined the nine stuck pods on AKS
+          # (2026-09-17) even though its main container was fully sized.
+          # Same envelope as the seed Job: this runs the identical n8n boot +
+          # SQLite migration chain.
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "256Mi"
+            limits:
+              cpu: "100m"
+              memory: "1024Mi"
           env:
             - name: DB_TYPE
               value: "sqlite"
@@ -158,10 +171,10 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "500m"
+              cpu: "200m"
               memory: "1024Mi"
             requests:
-              cpu: "50m"
+              cpu: "25m"
               memory: "256Mi"
       volumes:
         - name: data

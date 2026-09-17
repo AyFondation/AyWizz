@@ -1,8 +1,18 @@
 // =============================================================================
 // File: page.tsx
-// Version: 4
+// Version: 5
 // Path: ay_platform_ui/app/(protected)/admin/llm-registry/page.tsx
 // Description: Platform LLM MODEL registry admin surface (platform_manager only).
+//              v5 (R-800-151 / R-800-152): capabilities are no longer TICKED
+//              here. They gate routing — `catalog_service` refuses a model
+//              whose tool_calling is false when a resolution requires it — so
+//              a box ticked wrongly does not fail at configuration time, it
+//              fails inside an agent run, where "the agent never edits a file"
+//              is several layers from "someone guessed". They are now measured
+//              by the "Test model" probe and shown read-only with a provenance
+//              badge. What the operator decides is the opposite direction:
+//              refusing a capability the model HAS. There is deliberately no
+//              control for enabling one it lacks.
 //              v4 (provider normalisation + stable ids): a model references a
 //              PROVIDER (endpoint + key, managed on the Providers page) and is
 //              addressed by a stable model_id — renaming the alias never breaks
@@ -18,9 +28,11 @@ import { useAuth } from "@/app/auth-provider";
 import { useReadyConfig } from "@/app/providers";
 import { ApiClient, ApiError } from "@/lib/apiClient";
 import type {
+  CapabilityEvidence,
   LLMModelUpsert,
   LLMProviderPublic,
   LLMRegistryPublic,
+  ModelProbeResult,
   ModelQuality,
 } from "@/lib/types";
 
@@ -52,6 +64,9 @@ export default function LlmRegistryPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<FormTarget>(null);
+  /** model_id currently being probed — probes bill tokens, so the button is
+   *  locked per row rather than globally: one in flight, not a queue. */
+  const [probing, setProbing] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("default_model_quality");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -116,6 +131,72 @@ export default function LlmRegistryPage() {
       }
     },
     [reload],
+  );
+
+  /** Measure the model's capabilities and WRITE THEM BACK.
+   *
+   *  The write is the point (R-800-152): a measurement left on screen would
+   *  leave the registry holding the guess it just disproved, and routing reads
+   *  the registry. The operator's own `disabled` choices are carried through
+   *  untouched — the probe answers "can it", never "may we". */
+  const probe = useCallback(
+    async (model: LLMRegistryPublic) => {
+      setProbing(model.model_id);
+      setError(null);
+      setNotice(null);
+      try {
+        const verdict: ModelProbeResult = await apiClient.probeLlmModel(model.model_id, true);
+        if (verdict.outcome !== "ok") {
+          // Upstream text verbatim: an empty error is itself a finding, and
+          // replacing it with something friendlier is how the 2026-09-09
+          // outage reached end users as a blank message.
+          setError(
+            `${model.alias}: ${verdict.outcome}` +
+              (verdict.status_code ? ` (HTTP ${verdict.status_code})` : "") +
+              (verdict.error ? ` — ${verdict.error}` : "") +
+              ` · sent as ${verdict.resolved_target}`,
+          );
+          setProbing(null);
+          return;
+        }
+        const measured = Object.fromEntries(
+          verdict.capabilities.map((c) => [c.capability, c.supported === true]),
+        );
+        await apiClient.updateLlmRegistryModel(model.model_id, {
+          alias: model.alias,
+          provider_id: model.provider_id,
+          upstream_model: model.upstream_model,
+          provider_cost_in_per_1m: model.provider_cost_in_per_1m,
+          provider_cost_out_per_1m: model.provider_cost_out_per_1m,
+          default_model_quality: model.default_model_quality,
+          enabled: model.enabled,
+          capabilities: {
+            vision: measured.vision ?? false,
+            tool_calling: measured.tool_calling ?? false,
+            thinking: measured.thinking ?? false,
+            context_window: model.capabilities.context_window,
+            provenance: {
+              vision: "measured",
+              tool_calling: "measured",
+              thinking: "measured",
+              // Untouched: measuring it would cost a maximum-length request.
+              context_window: model.capabilities.provenance.context_window,
+            },
+            disabled: model.capabilities.disabled,
+          },
+        });
+        const summary = verdict.capabilities
+          .map((c) => `${c.capability}: ${c.supported ? "yes" : "no"}`)
+          .join(", ");
+        setNotice(`${model.alias} answered in ${verdict.latency_ms}ms — ${summary}.`);
+        reload();
+      } catch (err) {
+        setError(err instanceof ApiError ? `Probe failed (${err.status})` : "Probe failed.");
+      } finally {
+        setProbing(null);
+      }
+    },
+    [apiClient, reload],
   );
 
   const onSave = useCallback(
@@ -245,8 +326,22 @@ export default function LlmRegistryPage() {
                   <div className="font-medium text-neutral-800">{m.alias}</div>
                   <div className="text-xs text-neutral-500">{m.upstream_model}</div>
                   <div className="mt-0.5 text-[11px] text-neutral-400">
-                    {m.capabilities.vision ? "vision · " : ""}
-                    {m.capabilities.tool_calling ? "tools · " : ""}
+                    {/* EFFECTIVE capability — what the platform may use.
+                        A capability the operator disabled is not listed,
+                        because listing it would describe a routing behaviour
+                        that will not happen.
+
+                        Optional chaining is not defensive noise: a model
+                        stored before R-800-152 has no `disabled` block, and a
+                        registry page that crashes on old rows is worse than
+                        one that treats "absent" as "nothing refused". */}
+                    {m.capabilities.vision && !m.capabilities.disabled?.vision ? "vision · " : ""}
+                    {m.capabilities.tool_calling && !m.capabilities.disabled?.tool_calling
+                      ? "tools · "
+                      : ""}
+                    {m.capabilities.thinking && !m.capabilities.disabled?.thinking
+                      ? "thinking · "
+                      : ""}
                     {m.capabilities.context_window.toLocaleString()} ctx
                   </div>
                 </td>
@@ -273,6 +368,18 @@ export default function LlmRegistryPage() {
                       data-testid={`registry-edit-${m.alias}`}
                     >
                       Edit
+                    </button>
+                    <button
+                      type="button"
+                      disabled={probing === m.model_id}
+                      onClick={() => probe(m)}
+                      className="rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      // The cost is stated on the control, not in a tooltip:
+                      // this button spends money on a real provider.
+                      title="Runs 4 minimal completions through the real pipeline (uses provider tokens) and measures vision / tool_calling / thinking."
+                      data-testid={`registry-probe-${m.alias}`}
+                    >
+                      {probing === m.model_id ? "Testing…" : "Test model 💳"}
                     </button>
                     <button
                       type="button"
@@ -319,6 +426,73 @@ function Field({
   );
 }
 
+/** Badge naming HOW a capability value was established (R-800-152).
+ *
+ *  `unknown` gets its own visual weight rather than being drawn like a plain
+ *  `false`: "we never checked" and "we checked and it cannot" are different
+ *  facts, and only the first is fixed by pressing a button. */
+function EvidenceBadge({ evidence }: { evidence: CapabilityEvidence }) {
+  const style: Record<CapabilityEvidence, string> = {
+    measured: "bg-emerald-100 text-emerald-800",
+    declared: "bg-sky-100 text-sky-800",
+    asserted: "bg-amber-100 text-amber-800",
+    unknown: "bg-neutral-200 text-neutral-600",
+  };
+  const label: Record<CapabilityEvidence, string> = {
+    measured: "measured",
+    declared: "declared by provider",
+    asserted: "asserted by hand",
+    unknown: "never checked",
+  };
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${style[evidence]}`}
+      data-testid={`evidence-${evidence}`}
+    >
+      {label[evidence]}
+    </span>
+  );
+}
+
+/** One capability: what the model can do (read-only) + whether we use it. */
+function CapabilityRow({
+  name,
+  supported,
+  evidence,
+  disabled,
+  onToggle,
+}: {
+  name: string;
+  supported: boolean;
+  evidence: CapabilityEvidence;
+  disabled: boolean;
+  onToggle: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs" data-testid={`capability-${name}`}>
+      <span className="w-24 font-mono text-neutral-700">{name}</span>
+      <span className={supported ? "text-emerald-700" : "text-neutral-400"}>
+        {supported ? "supported" : "not supported"}
+      </span>
+      <EvidenceBadge evidence={evidence} />
+      {/* The toggle exists only when there is something to refuse. Offering
+          "don't use" on a capability the model lacks would suggest the
+          opposite switch exists somewhere — it does not, by construction. */}
+      {supported ? (
+        <label className="ml-auto flex items-center gap-1.5 text-neutral-700">
+          <input
+            type="checkbox"
+            checked={disabled}
+            onChange={(e) => onToggle(e.target.checked)}
+            data-testid={`capability-${name}-disable`}
+          />{" "}
+          do not use
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 function ModelForm({
   existing,
   providers,
@@ -340,9 +514,16 @@ function ModelForm({
   const [costIn, setCostIn] = useState(String(existing?.provider_cost_in_per_1m ?? 0));
   const [costOut, setCostOut] = useState(String(existing?.provider_cost_out_per_1m ?? 0));
   const [ctx, setCtx] = useState(String(existing?.capabilities.context_window ?? 200000));
-  const [vision, setVision] = useState(existing?.capabilities.vision ?? false);
-  const [tools, setTools] = useState(existing?.capabilities.tool_calling ?? true);
+  // Capabilities are NOT edited here (R-800-152): what a model can do is
+  // established by the "Test model" probe, never by a human ticking a box.
+  // They are carried through a save unchanged so an edit of the cost or the
+  // alias cannot silently erase a measurement.
+  const caps = existing?.capabilities;
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
+  // What the operator DOES decide: refusing a capability the model has.
+  const [noVision, setNoVision] = useState(caps?.disabled?.vision ?? false);
+  const [noTools, setNoTools] = useState(caps?.disabled?.tool_calling ?? false);
+  const [noThinking, setNoThinking] = useState(caps?.disabled?.thinking ?? false);
 
   const valid = alias.trim() && providerId && upstream.trim();
 
@@ -351,7 +532,21 @@ function ModelForm({
       alias: alias.trim(),
       provider_id: providerId,
       upstream_model: upstream.trim(),
-      capabilities: { vision, tool_calling: tools, context_window: Number(ctx) || 1 },
+      capabilities: {
+        // Preserved verbatim — a new model starts with everything unknown and
+        // false, and only a probe changes that.
+        vision: caps?.vision ?? false,
+        tool_calling: caps?.tool_calling ?? false,
+        thinking: caps?.thinking ?? false,
+        provenance: caps?.provenance ?? {
+          vision: "unknown",
+          tool_calling: "unknown",
+          thinking: "unknown",
+          context_window: "asserted",
+        },
+        context_window: Number(ctx) || 1,
+        disabled: { vision: noVision, tool_calling: noTools, thinking: noThinking },
+      },
       provider_cost_in_per_1m: Number(costIn) || 0,
       provider_cost_out_per_1m: Number(costOut) || 0,
       default_model_quality: quality,
@@ -461,25 +656,46 @@ function ModelForm({
           />
         </Field>
       </div>
+      {editing ? (
+        <div className="mt-4 rounded-md border border-neutral-200 bg-white p-3">
+          <p className="text-xs font-semibold text-neutral-800">Capabilities</p>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-neutral-500">
+            Established by <span className="font-medium">Test model</span>, not set by hand — a
+            capability a model does not have cannot be granted by ticking a box, and an agent that
+            cannot call tools cannot edit a file. You decide only whether to <em>use</em> what it
+            has.
+          </p>
+          <div className="mt-2 space-y-1.5" data-testid="registry-form-capabilities">
+            <CapabilityRow
+              name="vision"
+              supported={caps?.vision ?? false}
+              evidence={caps?.provenance?.vision ?? "unknown"}
+              disabled={noVision}
+              onToggle={setNoVision}
+            />
+            <CapabilityRow
+              name="tool_calling"
+              supported={caps?.tool_calling ?? false}
+              evidence={caps?.provenance?.tool_calling ?? "unknown"}
+              disabled={noTools}
+              onToggle={setNoTools}
+            />
+            <CapabilityRow
+              name="thinking"
+              supported={caps?.thinking ?? false}
+              evidence={caps?.provenance?.thinking ?? "unknown"}
+              disabled={noThinking}
+              onToggle={setNoThinking}
+            />
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] text-neutral-500" data-testid="registry-form-caps-hint">
+          Capabilities start unknown. Save the model, then run{" "}
+          <span className="font-medium">Test model</span> to measure them.
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-1.5 text-xs text-neutral-700">
-          <input
-            type="checkbox"
-            checked={vision}
-            onChange={(e) => setVision(e.target.checked)}
-            data-testid="registry-form-vision"
-          />{" "}
-          vision
-        </label>
-        <label className="flex items-center gap-1.5 text-xs text-neutral-700">
-          <input
-            type="checkbox"
-            checked={tools}
-            onChange={(e) => setTools(e.target.checked)}
-            data-testid="registry-form-tools"
-          />{" "}
-          tool_calling
-        </label>
         <label className="flex items-center gap-1.5 text-xs text-neutral-700">
           <input
             type="checkbox"

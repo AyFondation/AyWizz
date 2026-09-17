@@ -96,10 +96,10 @@ spec:
             failureThreshold: 3
           resources:
             limits:
-              cpu: "500m"
+              cpu: "200m"
               memory: "512Mi"
             requests:
-              cpu: "50m"
+              cpu: "25m"
               memory: "128Mi"
   volumeClaimTemplates:
     - metadata:

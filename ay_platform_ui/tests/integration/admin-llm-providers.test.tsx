@@ -166,4 +166,93 @@ describe("LlmProvidersPage", () => {
     await user.click(screen.getByTestId("provider-delete-p1"));
     await waitFor(() => expect(del).toHaveBeenCalled());
   });
+
+  // -------------------------------------------------------------------------
+  // Probe (R-800-150) — through the pipeline, verdict reported verbatim
+  // -------------------------------------------------------------------------
+
+  it("reports a reachable provider with the model that carried the probe", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(PROV, () => HttpResponse.json({ providers: [provider()] })),
+      http.post(`${PROV}/p1/probe`, () =>
+        HttpResponse.json({
+          provider_id: "p1",
+          outcome: "ok",
+          effective_url: "https://api.anthropic.com",
+          status_code: 200,
+          latency_ms: 341,
+          error: null,
+          api_key_hint: "…abcd",
+          via_model_id: "m1",
+          via_alias: "claude-haiku-fast",
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("providers-table")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("provider-probe-p1"));
+
+    const notice = await screen.findByTestId("providers-notice");
+    // Which model was tried matters: a failure may be the provider OR that one
+    // model, and the operator cannot tell them apart without this.
+    expect(notice).toHaveTextContent("claude-haiku-fast");
+    expect(notice).toHaveTextContent("https://api.anthropic.com");
+  });
+
+  it("surfaces the upstream error and the resolved api_base on failure", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(PROV, () => HttpResponse.json({ providers: [provider()] })),
+      http.post(`${PROV}/p1/probe`, () =>
+        HttpResponse.json({
+          provider_id: "p1",
+          outcome: "unreachable",
+          effective_url: "https://api.anthropic.com",
+          status_code: null,
+          latency_ms: 15000,
+          error: "name or service not known",
+          api_key_hint: "…abcd",
+          via_model_id: "m1",
+          via_alias: "claude-haiku-fast",
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("providers-table")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("provider-probe-p1"));
+
+    const err = await screen.findByTestId("providers-error");
+    expect(err).toHaveTextContent("unreachable");
+    expect(err).toHaveTextContent("name or service not known");
+    expect(err).toHaveTextContent("api_base https://api.anthropic.com");
+  });
+
+  it("explains that a provider with no model has nothing to exercise", async () => {
+    seedToken(["platform_manager"]);
+    server.use(
+      http.get(PROV, () => HttpResponse.json({ providers: [provider()] })),
+      http.post(`${PROV}/p1/probe`, () =>
+        HttpResponse.json({
+          provider_id: "p1",
+          outcome: "not_configured",
+          effective_url: "https://api.anthropic.com",
+          status_code: null,
+          latency_ms: null,
+          error:
+            "no model is configured for this provider, so there is no pipeline path to exercise. Add a model, then probe.",
+          api_key_hint: "…abcd",
+          via_model_id: null,
+          via_alias: null,
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("providers-table")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("provider-probe-p1"));
+
+    // Honest "nothing verified" rather than a fabricated green.
+    const err = await screen.findByTestId("providers-error");
+    expect(err).toHaveTextContent("no model is configured");
+  });
 });

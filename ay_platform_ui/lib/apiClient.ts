@@ -83,6 +83,7 @@ import type {
   LLMRegistryListResponse,
   LLMRegistryPublic,
   MessageList,
+  ModelProbeResult,
   OrchestratorRun,
   OrchestratorRunCreate,
   OrchestratorRunFeedback,
@@ -99,6 +100,7 @@ import type {
   ProjectStorageSeries,
   ProjectUpdate,
   PromptReference,
+  ProviderProbeResult,
   QuotaPolicy,
   QuotaStatus,
   QuotaWindow,
@@ -560,6 +562,32 @@ export class ApiClient {
     await this.request<void>(`/admin/v1/llm/providers/${encodeURIComponent(providerId)}`, {
       method: "DELETE",
     });
+  }
+
+  /** POST /admin/v1/llm/providers/{id}/probe — reach the provider THROUGH the
+   *  platform pipeline (client → quota → alias resolution → credential
+   *  injection → proxy).
+   *
+   *  CONSUMES PROVIDER TOKENS: the pipeline's unit of work is a completion, so
+   *  this runs one minimal completion through one of the provider's models.
+   *  Always resolves with a verdict — an unreachable provider is a RESULT, not
+   *  an error of this call. */
+  async probeLlmProvider(providerId: string): Promise<ProviderProbeResult> {
+    return this.request<ProviderProbeResult>(
+      `/admin/v1/llm/providers/${encodeURIComponent(providerId)}/probe`,
+      { method: "POST" },
+    );
+  }
+
+  /** POST /admin/v1/llm/registry/{id}/probe — check a model through the
+   *  production path. CONSUMES PROVIDER TOKENS: one minimal completion, plus
+   *  one per capability when `capabilities` is true. */
+  async probeLlmModel(modelId: string, capabilities = false): Promise<ModelProbeResult> {
+    const suffix = capabilities ? "?capabilities=true" : "";
+    return this.request<ModelProbeResult>(
+      `/admin/v1/llm/registry/${encodeURIComponent(modelId)}/probe${suffix}`,
+      { method: "POST" },
+    );
   }
 
   // -------------------------------------------------------------------------
