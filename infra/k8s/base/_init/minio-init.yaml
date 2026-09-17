@@ -60,6 +60,22 @@ spec:
             - -c
             - |
               set -e
+              # ROOT USER DEFAULTS, and it must match the StatefulSet. That one
+              # sets `MINIO_ROOT_USER: minioadmin` as a LITERAL with a comment
+              # saying "minio-init connects with the same value via the
+              # configmap" — but the key was never added to
+              # .env.config.example, so on a fresh AKS namespace it arrived
+              # EMPTY and `mc alias set` failed on every attempt
+              # (2026-09-17). Defaulting to the same literal makes the two
+              # agree by construction instead of by an operator remembering.
+              MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
+              if [ -z "$MINIO_ROOT_PASSWORD" ]; then
+                echo "[minio-init] FATAL: MINIO_ROOT_PASSWORD is empty." >&2
+                echo "[minio-init] It must be set in aywizz-secrets" >&2
+                echo "[minio-init] (overlays/<env>/.env.secret). The MinIO" >&2
+                echo "[minio-init] StatefulSet reads the same key." >&2
+                exit 1
+              fi
               # This Job creates the APPLICATION credentials. The components'
               # `wait-for-deps` probe MinIO unauthenticated, so they will pass
               # their wait even if this Job never runs — and then fail in

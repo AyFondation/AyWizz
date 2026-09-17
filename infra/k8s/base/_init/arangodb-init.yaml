@@ -80,6 +80,25 @@ spec:
               # initContainer probes the database and user created below), so
               # a silent wait here reads as nine stuck pods with no cause.
               # Hence: say what is awaited, and never swallow the error.
+              #
+              # ROOT USERNAME DEFAULTS. It was consumed here but documented
+              # nowhere — not in .env.config.example, not as an overlay
+              # literal — so on a fresh AKS namespace it arrived EMPTY and
+              # arangosh died with "no value specified for --server.username".
+              # That took out the whole platform: no database, no app user,
+              # nine pods waiting on a 401 (2026-09-17). ArangoDB's admin
+              # account is always `root`, so defaulting it removes a required
+              # value that had no reason to be required.
+              ARANGO_ROOT_USERNAME="${ARANGO_ROOT_USERNAME:-root}"
+              # The PASSWORD is genuinely secret and must NOT be defaulted —
+              # guessing it would replace a clear failure with an obscure one.
+              if [ -z "$ARANGO_ROOT_PASSWORD" ]; then
+                echo "[arangodb-init] FATAL: ARANGO_ROOT_PASSWORD is empty." >&2
+                echo "[arangodb-init] It must be set in aywizz-secrets" >&2
+                echo "[arangodb-init] (overlays/<env>/.env.secret). The" >&2
+                echo "[arangodb-init] StatefulSet reads the same key." >&2
+                exit 1
+              fi
               echo "[arangodb-init] target      : tcp://arangodb:8529"
               echo "[arangodb-init] database    : $ARANGO_DB"
               echo "[arangodb-init] app user    : $ARANGO_USERNAME"

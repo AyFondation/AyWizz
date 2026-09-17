@@ -100,6 +100,9 @@ spec:
             - -c
             - |
               import base64, os, time, urllib.error, urllib.request
+              from datetime import datetime, timezone
+
+              UTC = timezone.utc
 
               timeout = float(os.environ.get("WAIT_FOR_DEPS_TIMEOUT", "600"))
               deadline = time.monotonic() + timeout
@@ -121,7 +124,13 @@ spec:
                   return value
 
               def log(msg):
-                  print(f"[wait-for-deps] {msg}", flush=True)
+                  # Wall-clock UTC on every line. `kubectl logs --timestamps`
+                  # can add its own, but nobody passes that flag while staring
+                  # at a stuck pod — and correlating this container with the
+                  # arangodb-init Job means comparing absolute times, which
+                  # elapsed-seconds alone cannot do.
+                  stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                  print(f"[wait-for-deps] {stamp} {msg}", flush=True)
 
               # Status → the thing an operator should go look at. A raw "HTTP
               # 401" sends people hunting for a wrong password; on this
@@ -162,9 +171,18 @@ spec:
                   log(f"{name}: probing {target}")
                   started = time.monotonic()
                   attempt = 0
+                  # The failure SIGNATURE, not the attempt number, is what
+                  # deserves a line. A stuck dependency emits the same 200-char
+                  # error hundreds of times; what an operator needs to see is
+                  # the moment it CHANGES — "name resolution" giving way to
+                  # "401" is the whole story, and it was previously buried in
+                  # eighteen identical lines.
+                  last_sig = None
+                  repeats = 0
                   while True:
                       attempt += 1
                       status = None
+                      hint_s = None
                       try:
                           check()
                           log(f"{name}: READY after "
@@ -194,8 +212,6 @@ spec:
                           if isinstance(code, str):
                               detail = f"{code}: {exc}"
                               hint_s = S3_HINTS.get(code)
-                              if hint_s and attempt in (1, 10):
-                                  log(f"{name}: hint — {hint_s}")
 
                       hint = HINTS.get(status)
                       elapsed = time.monotonic() - started
@@ -203,22 +219,39 @@ spec:
                           log(f"{name}: GIVING UP after {elapsed:.0f}s / "
                               f"{attempt} attempts")
                           log(f"{name}: last response — {detail}")
-                          if hint:
-                              log(f"{name}: likely cause — {hint}")
+                          if hint or hint_s:
+                              log(f"{name}: likely cause — {hint or hint_s}")
                           raise SystemExit(
                               f"[wait-for-deps] {name} never became ready. "
                               f"Raise WAIT_FOR_DEPS_TIMEOUT (currently "
                               f"{timeout:.0f}s) only if the dependency is "
                               f"genuinely just slow."
                           )
-                      # Every attempt for the first 30s (the common case is a
-                      # few seconds), then every 10th — enough to see movement
-                      # without burying the cause under hundreds of lines.
-                      if elapsed < 30 or attempt % 10 == 0:
-                          log(f"{name}: not ready yet ({elapsed:.0f}s, "
-                              f"attempt {attempt}) — {detail}")
-                          if hint and attempt in (1, 10):
-                              log(f"{name}: hint — {hint}")
+                      # Log on CHANGE, heartbeat on repetition. A new failure
+                      # signature is news and gets its cause explained; the
+                      # same one repeating is not, and gets one line per
+                      # minute carrying its count.
+                      sig = detail[:160]
+                      if sig != last_sig:
+                          if repeats:
+                              log(f"{name}: (previous error repeated "
+                                  f"{repeats}x)")
+                          log(f"{name}: not ready ({elapsed:.0f}s, attempt "
+                              f"{attempt}) — {detail}")
+                          # The hint fires HERE, on first sight of this
+                          # signature — not at a fixed attempt number. The
+                          # earlier version explained attempt 1 and 10, which
+                          # on a real AKS start were still DNS warm-up, so the
+                          # 401 that arrived at attempt 20 was never explained.
+                          if hint or hint_s:
+                              log(f"{name}: likely cause — {hint or hint_s}")
+                          last_sig, repeats = sig, 0
+                      else:
+                          repeats += 1
+                          if repeats % 20 == 0:  # ~every 60s at 3s intervals
+                              log(f"{name}: still the same error "
+                                  f"({elapsed:.0f}s, attempt {attempt}, "
+                                  f"{repeats}x) — {sig}")
                       time.sleep(3)
 
               # ArangoDB: authenticated read of the application database. Proves
