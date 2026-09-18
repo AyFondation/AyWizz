@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c12-workflow-seed.yaml
-# Version: 5
+# Version: 6
 # Path: infra/k8s/base/_init/c12-workflow-seed.yaml
 # Description: One-shot Job importing every workflow JSON under the
 #              c12-workflow-files ConfigMap into the running n8n.
@@ -33,6 +33,17 @@ spec:
         app.kubernetes.io/part-of: aywizz-platform
     spec:
       restartPolicy: OnFailure
+      # Same volume, same UID mismatch, same fix as c12_workflow/deployment.yaml
+      # — see the full rationale there. This Job mounts `c12-data` too, so
+      # without it the seed fails on the identical
+      # `EACCES ... /home/node/.n8n/config`. It MUST stay in step with the
+      # Deployment: the two write the same SQLite DB, and a volume chowned by
+      # one and not the other is worse than neither.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: n8n-import
           image: n8nio/n8n:2.38.7

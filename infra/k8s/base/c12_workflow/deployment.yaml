@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 7
+# Version: 8
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
 #              `n8nio/n8n:2.38.7` image. SQLite DB on PVC.
@@ -43,6 +43,34 @@ spec:
         app.kubernetes.io/component: c12
         app.kubernetes.io/part-of: aywizz-platform
     spec:
+      # THE PVC IS MOUNTED ROOT-OWNED, AND n8n RUNS AS UID 1000. The image
+      # declares `USER node` (uid/gid 1000), but a freshly provisioned volume
+      # arrives owned by root:root, so n8n's first write to
+      # `/home/node/.n8n/config` — the auto-generated encryption key, written
+      # before anything else — fails with
+      # `EACCES: permission denied, open '/home/node/.n8n/config'`, and
+      # `import:workflow` never loads. Observed on AKS 2026-09-18.
+      #
+      # WHY IT WORKED LOCALLY AND NOT ON AKS: Docker Desktop backs PVCs with a
+      # permissive hostpath, which hides the ownership entirely. The Azure Disk
+      # CSI driver does not — this class of bug cannot surface before the first
+      # real cluster.
+      #
+      # `fsGroup` makes the kubelet set the volume's group to 1000 and add
+      # group-write, which is the supported way to hand a volume to a non-root
+      # container. `OnRootMismatch` restricts the (recursive) ownership pass to
+      # the case where the volume root is actually wrong, so a restart does not
+      # walk a grown volume for nothing.
+      #
+      # `runAsUser` / `runAsGroup` pin what the image already does. They are
+      # not the fix — `fsGroup` is — but they make the UID that must match
+      # `fsGroup` explicit here rather than implicit in an upstream base image
+      # that could change it.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
         # Import + activate all workflows INTO the PVC before n8n starts, so
         # the server boots with every webhook registered (no seed-Job race).
