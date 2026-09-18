@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: gen_k8s_workflow_configmap.py
-# Version: 2
+# Version: 3
 # Path: infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py
 # Description: Generate the `c12-workflow-files` ConfigMap manifest from the
 #              single source of truth — `infra/c12_workflow/workflows/*.json`
 #              — so the SAME workflow files feed both the docker-compose
 #              bootstrap (mounted dir + c12_workflow_seed one-shot) AND the
 #              Kubernetes bootstrap (this ConfigMap, mounted at /workflows by
-#              the c12-workflow Deployment + imported by the c12-workflow-seed
-#              Job).
+#              the c12-workflow Deployment and imported by its
+#              `import-workflows` initContainer).
+#
+#              The two sides are NOT symmetric any more: compose still uses a
+#              `c12_workflow_seed` service, while the Kubernetes seed Job of
+#              the same name was deleted on 2026-09-18 in favour of the
+#              initContainer. Only the workflow FILES are shared.
 #
 #              Why a generated, committed manifest instead of a Kustomize
 #              `configMapGenerator`: `kubectl kustomize` / `kubectl apply -k`
@@ -41,8 +46,8 @@ _HEADER = (
     "# Description: GENERATED — do not edit by hand. The `c12-workflow-files`\n"
     "#              ConfigMap holds every n8n workflow JSON (single source:\n"
     "#              infra/c12_workflow/workflows/). Mounted at /workflows by the\n"
-    "#              c12-workflow Deployment and imported by the c12-workflow-seed\n"
-    "#              Job. Regenerate with:\n"
+    "#              c12-workflow Deployment and imported by its\n"
+    "#              `import-workflows` initContainer. Regenerate with:\n"
     "#                python3 infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py\n"
     "# =============================================================================\n"
 )

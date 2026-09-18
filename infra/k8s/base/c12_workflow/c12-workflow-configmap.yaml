@@ -4,8 +4,8 @@
 # Description: GENERATED — do not edit by hand. The `c12-workflow-files`
 #              ConfigMap holds every n8n workflow JSON (single source:
 #              infra/c12_workflow/workflows/). Mounted at /workflows by the
-#              c12-workflow Deployment and imported by the c12-workflow-seed
-#              Job. Regenerate with:
+#              c12-workflow Deployment and imported by its
+#              `import-workflows` initContainer. Regenerate with:
 #                python3 infra/c12_workflow/scripts/gen_k8s_workflow_configmap.py
 # =============================================================================
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: run_k8s_system_tests.sh
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/scripts/run_k8s_system_tests.sh
 # Description: Bring up a kind cluster, deploy the system-test overlay,
 #              run pytest against it, tear down. End-to-end self-contained.
@@ -164,7 +164,10 @@ for s in arangodb minio; do
 done
 
 echo "==> Waiting for bootstrap Jobs to complete"
-for j in arangodb-init minio-init c12-workflow-seed; do
+# `c12-workflow-seed` removed 2026-09-18 — the c12-workflow Deployment's
+# `import-workflows` initContainer imports and publishes the workflows, so a
+# ready c12-workflow pod is now the proof this wait used to provide.
+for j in arangodb-init minio-init; do
     echo "    waiting for job/${j}"
     kubectl wait --for=condition=Complete -n "${NAMESPACE}" \
         "job/${j}" --timeout=10m

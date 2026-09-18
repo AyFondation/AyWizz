@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 8
+# Version: 9
 # Path: infra/k8s/base/c12_workflow/deployment.yaml
 # Description: C12 Workflow Engine (n8n) Deployment. Off-the-shelf
 #              `n8nio/n8n:2.38.7` image. SQLite DB on PVC.
@@ -13,8 +13,14 @@
 #              the shared PVC while the server is ALREADY running, so a
 #              NEWLY-added workflow's webhook only became live on a SECOND
 #              restart. The init runs on every (re)start, is idempotent,
-#              and reads the same `c12-workflow-files` ConfigMap. The seed
-#              Job in `_init/` is now a redundant safety net.
+#              and reads the same `c12-workflow-files` ConfigMap.
+#
+#              v8 (2026-09-18): that seed Job, described here since v2 as "a
+#              redundant safety net", is DELETED. It was not merely redundant:
+#              it wrote the same SQLite DB on the same ReadWriteOnce volume
+#              that the initContainer below resets before importing, and on
+#              AKS it hung indefinitely waiting on a readiness it could not
+#              observe. This initContainer is now the single importer.
 #
 #              Public webhook endpoints under `/uploads/*` (per
 #              R-100-080..088); routed to this service by C1 Traefik
@@ -127,7 +133,7 @@ spec:
                       "${DB_SQLITE_DATABASE}"-wal 2>/dev/null || true
                 echo "[c12-init] importing (this boots n8n and runs the SQLite migrations)"
                 n8n import:workflow --separate --input=/workflows
-                # See _init/c12-workflow-seed.yaml: n8n 2.x removed
+                # n8n 2.x removed
                 # `update:workflow --all --active=true` and `import:workflow`
                 # deactivates what it imports, so publishing is per id now.
                 # No `|| true` here either — a pod whose webhooks are not

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: kustomization.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/_init/kustomization.yaml
 # Description: Kustomize entry for one-shot bootstrap Jobs. Listed AFTER
 #              the data tier in the parent kustomization so the Jobs
@@ -11,8 +11,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# `c12-workflow-seed.yaml` was REMOVED here (2026-09-18). n8n's workflows are
+# imported and published by the `import-workflows` initContainer of the
+# c12-workflow Deployment, which was introduced precisely to replace this Job
+# — its comment says so: "so the server boots with every webhook registered
+# (no seed-Job race)". The Job was never deleted, so both wrote the same
+# SQLite DB on the same ReadWriteOnce volume, and the initContainer resets
+# that DB before importing. On AKS the Job then hung forever waiting on a
+# readiness it could not observe, redoing work that was already done.
 resources:
   - arangodb-init.yaml
   - minio-init.yaml
   - ollama-seed.yaml
-  - c12-workflow-seed.yaml

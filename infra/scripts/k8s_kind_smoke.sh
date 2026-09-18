@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: k8s_kind_smoke.sh
-# Version: 4
+# Version: 5
 # Path: infra/scripts/k8s_kind_smoke.sh
 # Description: L2 + L3 — apply the system-test overlay to an ephemeral
 #              kind cluster and verify endpoints respond.
@@ -161,7 +161,11 @@ for s in "${STATEFULSETS[@]}"; do
 done
 
 echo "==> Waiting for bootstrap Jobs to complete"
-JOBS=(arangodb-init minio-init c12-workflow-seed)
+# `c12-workflow-seed` is deliberately absent: the Job was removed on
+# 2026-09-18 (see base/_init/kustomization.yaml). n8n's workflows are now
+# imported by the c12-workflow Deployment's `import-workflows` initContainer,
+# so the readiness wait above already covers what this Job used to prove.
+JOBS=(arangodb-init minio-init)
 for j in "${JOBS[@]}"; do
     echo "    waiting for job/${j}"
     kubectl wait --for=condition=Complete -n "${NAMESPACE}" \
