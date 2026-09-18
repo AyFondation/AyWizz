@@ -67,6 +67,11 @@ resources:
 # `overlays/prod` only.
 components:
   - ../../components/wait-for-deps
+  # Stops the liveness probe from killing a container that is still running
+  # its FastAPI lifespan. Independent of `wait-for-deps` — that one makes the
+  # pod WAIT for its dependencies, this one keeps it alive while its own
+  # startup is slow, and keeps it attachable so the reason can be read.
+  - ../../components/startup-probe
 
 configMapGenerator:
   - name: aywizz-config

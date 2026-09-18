@@ -1,0 +1,208 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 2
+# Path: infra/k8s/components/startup-probe/kustomization.yaml
+# Description: Kustomize COMPONENT adding a `startupProbe` to EVERY workload
+#              in the platform, so a liveness probe can no longer kill a
+#              container that is still starting.
+#
+#              THE DEFECT. Not one workload in `base/` declared a
+#              `startupProbe`. Several declare a liveness probe that arms
+#              30-120s after container start with `failureThreshold: 3`, so
+#              the kubelet kills anything that has not served its health
+#              endpoint by roughly 120-210s — regardless of why. While a
+#              startupProbe is running the kubelet suspends BOTH the liveness
+#              and the readiness probe, which is exactly the semantics these
+#              pods needed and none of them had.
+#
+#              WHY IT MATTERS MORE THAN IT LOOKS. For the API tier the health
+#              endpoint is a static handler, but it is registered by
+#              `create_app()` and uvicorn runs the FastAPI `lifespan` to
+#              completion BEFORE accepting any connection. That lifespan opens
+#              ArangoDB collections and a MinIO bucket with no timeout. A
+#              dependency that is SLOW rather than absent — a proxy that
+#              blackholes instead of refusing, a cold PVC, a throttled CPU —
+#              therefore outlives the liveness budget and the container is
+#              SIGTERMed mid-startup. The result is the worst possible failure
+#              shape: a reboot loop with no Python traceback (it was killed,
+#              it did not raise), a log truncated wherever the kill landed,
+#              and no container instance alive long enough to attach a shell
+#              to. Observed on AKS 2026-09-17/18 across nine pods whose
+#              initContainers had all completed successfully.
+#
+#              SCOPE IS DELIBERATELY EVERY POD, INCLUDING THE HEALTHY ONES.
+#              A pod that starts fast today is one PVC, one image bump or one
+#              quota change away from starting slowly, and the defect is
+#              invisible until the day it costs a diagnosis. Applying it only
+#              to what is currently broken would leave the trap armed
+#              everywhere else.
+#
+#              THIS BUYS THE DIAGNOSIS, IT IS NOT THE CURE. It does not make
+#              an unreachable dependency reachable. It makes a pod survive
+#              long enough to say what it is waiting for. The missing
+#              lifespan timeouts and the api-tier proxy exclusions are
+#              separate changes.
+#
+#              WHY A COMPONENT. Same mechanical reason as `wait-for-deps`:
+#              `overlays/dev` and `overlays/system-test` compose
+#              `../../base/<component>` individually and never evaluate
+#              `base/kustomization.yaml`, so a cross-cutting patch placed in
+#              base would reach `overlays/prod` alone.
+#
+#              ORDER IS IRRELEVANT, unlike `wait-for-deps`: every patch here
+#              targets a container `base/` already declares, so it neither
+#              creates nor consumes what another Component produces.
+#
+#              TWO WORKLOADS ARE ABSENT, both deliberately:
+#                - `arangodb` (StatefulSet) — its readiness probe is an
+#                  `exec arangosh`, and arangod's own startup is what the
+#                  arangodb-init Job already waits on with a verbose,
+#                  non-swallowing loop. Adding a probe here would duplicate
+#                  that wait while forking a shell + arangosh every few
+#                  seconds under a CPU limit, which is the exact pattern that
+#                  broke ollama's exec probe on AKS.
+#                - `c4-sub-agent` sandbox pods — created by the orchestrator
+#                  at runtime, not by kustomize; they are Jobs with no
+#                  service to probe.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  # ---- API tier ------------------------------------------------------------
+  # Ten Deployments plus `mock-llm`, all built from `Dockerfile.api`: container
+  # `api`, port `http`, path `/health`. Matched by name rather than by a broad
+  # selector so that a target whose container is NOT named `api` fails to match
+  # visibly here instead of silently gaining a second, image-less container.
+  - path: patch-api-tier.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "^(c2-auth|c3-conversation|c4-orchestrator|c5-requirements|c6-validation|c7-memory|c8-admin|c8-cost-receiver|c9-mcp|c16-backup|mock-llm)$"
+
+  # ---- c12 n8n -------------------------------------------------------------
+  - path: patch-c12-workflow.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c12-workflow
+
+  # ---- One-offs ------------------------------------------------------------
+  # Each has its own container name, port name and health path, so none can
+  # share a merge patch. JSON6902 against an explicit index is used instead of
+  # more merge patches because a merge patch keyed on a container name that
+  # does not exist APPENDS a container rather than failing — a silent, ugly
+  # outcome on images this repo does not build. `op: add` fails loudly.
+  # All five declare exactly one container (verified against base/ at v1).
+
+  # litellm — the C8 proxy. `/health/liveliness` is litellm's own cheap
+  # endpoint; `/health` on this image actively CALLS every configured provider
+  # and must never be used as a probe.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: litellm
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /health/liveliness
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+
+  # c13 extractor.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c13-extractor
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+
+  # UI — Next.js. `/` is the only endpoint it serves that proves the server
+  # is up; there is no dedicated health route.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ay-platform-ui
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+
+  # c1 Traefik — `/ping` on the dedicated `traefik` admin port, not the
+  # data-plane port.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: c1-gateway
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /ping
+            port: traefik
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60
+
+  # ollama — the longest legitimate cold start of the set: a 3.7 GB image
+  # whose server loads from a PVC. httpGet, never exec: the kubelet performs
+  # it from OUTSIDE the container, so the binary is never forked, which is the
+  # regression that took the previous `ollama list` probe down on AKS.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ollama
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /api/tags
+            port: ollama
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 60
+
+  # minio — StatefulSet, not Deployment. `/minio/health/ready` on the `s3`
+  # port is MinIO's own readiness contract.
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: minio
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/startupProbe
+        value:
+          httpGet:
+            path: /minio/health/ready
+            port: s3
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 60

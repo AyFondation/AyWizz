@@ -1,0 +1,40 @@
+# =============================================================================
+# File: patch-api-tier.yaml
+# Version: 1
+# Path: infra/k8s/components/startup-probe/patch-api-tier.yaml
+# Description: `startupProbe` for the API tier — every container built from
+#              `Dockerfile.api` plus the `mock-llm` test double, which is the
+#              same image. Container `api`, port `http`, path `/health`.
+#
+#              See kustomization.yaml for the defect this closes. The short
+#              version: these Deployments carry a liveness probe with no
+#              startupProbe, so the kubelet kills the container at ~120s if
+#              `/health` has not answered — and `/health` cannot answer until
+#              uvicorn has run the FastAPI `lifespan` to completion, which
+#              opens ArangoDB collections and a MinIO bucket with no timeout.
+#              A dependency that is SLOW rather than absent therefore produces
+#              a reboot loop with no traceback (SIGTERM, not an exception) and
+#              no attachable container to debug from.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PATCHED-BY-TARGET
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            # No initialDelaySeconds: an early failure costs one of the 60
+            # attempts and nothing else.
+            periodSeconds: 5
+            timeoutSeconds: 3
+            # 60 × 5s = 300s. The budget only has to exceed the slowest
+            # LEGITIMATE startup; erring the other way is what produced an
+            # undebuggable crash loop. Liveness still bounds the container
+            # afterwards, so nothing is left unbounded.
+            failureThreshold: 60

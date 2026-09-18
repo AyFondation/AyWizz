@@ -114,6 +114,10 @@ components:
   # that had no Kubernetes equivalent; the race is universal, only the odds
   # differ per cluster.
   - ../../components/wait-for-deps
+  # Order-independent (it patches the `api` container base/ already declares,
+  # so it neither creates nor consumes what the other two produce). Placed
+  # between them only because that is where it reads best.
+  - ../../components/startup-probe
   - ../../components/managed-cluster
 
 patches:

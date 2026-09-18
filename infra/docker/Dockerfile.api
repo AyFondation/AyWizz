@@ -1,6 +1,6 @@
 # =============================================================================
 # File: Dockerfile.api
-# Version: 4
+# Version: 5
 # Path: infra/docker/Dockerfile.api
 # Description: Shared image for the platform's Python API tier.
 #
@@ -115,5 +115,38 @@ EXPOSE 8000
 # Production-grade CMD. `${COMPONENT_MODULE}` is read from the runtime
 # environment supplied by compose / K8s. No `--reload`: dev compose
 # overrides `command:` to enable it on top of this image.
-CMD exec uvicorn "ay_platform_core.${COMPONENT_MODULE}.main:app" \
+#
+# THE PROXY PRELUDE. Managed clusters behind a corporate egress inject
+# `HTTP_PROXY` / `HTTPS_PROXY` into every pod, together with a `NO_PROXY`
+# that lists what the CLUSTER knows about — never this platform's Service
+# names. Python's `httpx` and `requests` both honour these variables, so
+# without the exclusions below an in-cluster call to `litellm:4000` or
+# `c7-memory:8000` is handed to a proxy that cannot route it. The proxy
+# then DROPS rather than refuses, the call waits out its TCP timeout inside
+# the FastAPI lifespan, `/health` never answers, and the kubelet kills the
+# container mid-startup. That is the AKS failure of 2026-09-17/18.
+#
+# APPEND, NEVER REPLACE. The injected `NO_PROXY` carries entries that must
+# survive — the cloud metadata endpoint (169.254.169.254), internal ranges,
+# the API server. `${NO_PROXY:+${NO_PROXY},}` prepends the inherited value
+# when it is non-empty and expands to nothing when it is not, so this adds
+# without ever clobbering. Same construct as the `_init` Jobs, which have
+# carried it since minio-init v7.
+#
+# SUFFIX MATCHING NEVER COVERS A SINGLE-LABEL NAME. `no_proxy` matches by
+# suffix, so `.svc` does NOT match `minio` — and every URL in this
+# platform's config uses the short form. The bare Service names therefore
+# have to be listed one by one. Regenerate after adding a Service:
+#   kubectl kustomize infra/k8s/overlays/dev | grep -A1 'kind: Service'
+#
+# BOTH SPELLINGS. Go reads the uppercase form, parts of the Python stack
+# read the lowercase one; setting only one leaves half the clients proxied.
+#
+# It is a PRELUDE and not an `ENV` line on purpose: `ENV NO_PROXY=...` is
+# baked at build time and would OVERWRITE whatever the cluster injects at
+# runtime, which is precisely the mistake this construct exists to avoid.
+CMD _NP="localhost,127.0.0.1,::1,.svc,.svc.cluster.local,.cluster.local,arangodb,ay-platform-ui,c1-gateway,c1-gateway-dashboard,c12,c12-workflow,c13-extractor,c16-backup,c2,c2-auth,c3-conversation,c4-orchestrator,c5-requirements,c6-validation,c7,c7-memory,c8-admin,c8-cost-receiver,c9-mcp,gitea,litellm,minio,mock-llm,nats,ollama" && \
+    export NO_PROXY="${NO_PROXY:+${NO_PROXY},}${_NP}" && \
+    export no_proxy="${no_proxy:+${no_proxy},}${_NP}" && \
+    exec uvicorn "ay_platform_core.${COMPONENT_MODULE}.main:app" \
       --host 0.0.0.0 --port 8000

@@ -1,0 +1,37 @@
+# =============================================================================
+# File: patch-c12-workflow.yaml
+# Version: 1
+# Path: infra/k8s/components/startup-probe/patch-c12-workflow.yaml
+# Description: `startupProbe` for c12 (n8n). Container `n8n`, port `http`,
+#              path `/healthz`.
+#
+#              THE LARGEST BUDGET OF THE SET, and the one with the clearest
+#              justification. c12's readiness already declares
+#              `initialDelaySeconds: 90` with the comment "first boot runs
+#              SQLite migrations (60-90s)" — an acknowledgement that this
+#              container is legitimately slow. Its liveness probe, however,
+#              starts at 120s with `failureThreshold: 3 × 30s`, so the kill
+#              lands at ~210s, and the pod ALSO carries an initContainer that
+#              boots n8n twice over (schema migration, then one
+#              `publish:workflow` per file). At a 200m CPU limit that is not a
+#              comfortable margin.
+#
+#              600s here means the migrations may take five times their
+#              expected duration before the kubelet intervenes.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PATCHED-BY-TARGET
+spec:
+  template:
+    spec:
+      containers:
+        - name: n8n
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 60

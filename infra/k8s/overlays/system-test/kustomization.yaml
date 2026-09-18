@@ -78,6 +78,10 @@ resources:
 # converging the slow way inside a kind cluster.
 components:
   - ../../components/wait-for-deps
+  # See overlays/dev. Kept in system-test so the kind run exercises the same
+  # probe topology the real clusters get — a startupProbe that only exists in
+  # dev/prod is one the test tier can never contradict.
+  - ../../components/startup-probe
 
 # Excise the Ollama Deployment, Service, PVC + the ollama-seed Job.
 # Each $patch: delete strips the matching resource from the build.

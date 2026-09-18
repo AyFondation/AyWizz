@@ -1,6 +1,6 @@
 # =============================================================================
 # File: Dockerfile
-# Version: 2
+# Version: 3
 # Path: infra/c13_extractor/docker/Dockerfile
 # Description: C13 (AyExtractor) container image — HTTP wrapper around
 #              `facade.analyze`. Per D-020 R-100-125 v2 §3 vendoring rule,
@@ -83,4 +83,19 @@ EXPOSE 8000
 # stateful runtime (in-memory _runs registry); horizontal scaling is
 # achieved by multiple Deployments behind a load balancer, NOT by
 # multiple uvicorn workers in one container.
-CMD exec uvicorn "ayextractor.api.http:app" --host 0.0.0.0 --port 8000
+#
+# THE PROXY PRELUDE — identical construct to infra/docker/Dockerfile.api, and
+# carried here for the same reason: C13 reaches MinIO and C7 by in-cluster
+# Service name, `httpx` / `requests` honour `HTTP_PROXY`, and a managed
+# cluster's injected `NO_PROXY` never lists this platform's Service names. The
+# proxy then drops the call rather than refusing it, so the failure surfaces
+# as a startup that never completes rather than as a connection error.
+#
+# APPEND, NEVER REPLACE — the injected value carries the cloud metadata
+# endpoint and internal ranges, which must survive. Suffix matching never
+# covers a single-label name (`.svc` does not match `minio`), so the bare
+# Service names are listed explicitly. Both spellings are set.
+CMD _NP="localhost,127.0.0.1,::1,.svc,.svc.cluster.local,.cluster.local,arangodb,ay-platform-ui,c1-gateway,c1-gateway-dashboard,c12,c12-workflow,c13-extractor,c16-backup,c2,c2-auth,c3-conversation,c4-orchestrator,c5-requirements,c6-validation,c7,c7-memory,c8-admin,c8-cost-receiver,c9-mcp,gitea,litellm,minio,mock-llm,nats,ollama" && \
+    export NO_PROXY="${NO_PROXY:+${NO_PROXY},}${_NP}" && \
+    export no_proxy="${no_proxy:+${no_proxy},}${_NP}" && \
+    exec uvicorn "ayextractor.api.http:app" --host 0.0.0.0 --port 8000

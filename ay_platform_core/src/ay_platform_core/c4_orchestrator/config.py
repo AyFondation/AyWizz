@@ -1,8 +1,15 @@
 # =============================================================================
 # File: config.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/config.py
 # Description: Runtime settings for the C4 Orchestrator.
+#
+#              v6 (2026-09-17): `{namespace}` placeholder in the two
+#              `C4_K8S_POD_VIEW_*` endpoints, substituted with the
+#              orchestrator's OWN namespace (service-account projection).
+#              Removes the hardcoded namespace those FQDNs forced into
+#              `.env.config` while keeping them fully qualified, which a
+#              cross-namespace sandbox pod requires.
 #
 #              v3 (2026-05-22): OpenHands engine knobs (V2 #2 / R-200-029) —
 #              `C4_OPENHANDS_MODEL` (a C8 model_list name prefixed
@@ -23,10 +30,27 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Where the kubelet projects the pod's own namespace. Present in EVERY pod
+# that has a service account mounted, which is every pod unless the
+# deployment opts out — so it is the cheapest way for a component to learn
+# where it runs, with no RBAC and no API call.
+_NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+
+_NAMESPACE_PLACEHOLDER = "{namespace}"
+
+
+def _own_namespace() -> str:
+    """Return the namespace this process runs in, or `""` outside a cluster."""
+    try:
+        return _NAMESPACE_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 class OrchestratorConfig(BaseSettings):
@@ -173,12 +197,20 @@ class OrchestratorConfig(BaseSettings):
     k8s_service_account_name: str = Field(default="c4-sub-agent")
     k8s_pod_view_minio_endpoint: str = Field(
         default="host.docker.internal:9000",
-        description="MinIO endpoint as the sub-agent pod sees it.",
+        description=(
+            "MinIO endpoint as the sub-agent pod sees it. May contain "
+            "`{namespace}`, replaced with the namespace THIS component runs "
+            "in — so the value carries no deployment-specific name."
+        ),
     )
     k8s_pod_view_c8_gateway_url: str = Field(
         default="http://host.docker.internal:4000/v1",
-        description="C8 LLM gateway URL as the sub-agent pod sees it.",
+        description=(
+            "C8 LLM gateway URL as the sub-agent pod sees it. Supports the "
+            "same `{namespace}` placeholder."
+        ),
     )
+
     k8s_pod_view_c8_default_model: str = Field(default="")
     # The single shared gateway credential, propagated to sub-agent pods
     # as `C8_GATEWAY_API_KEY` (same value the orchestrator itself uses).
@@ -192,3 +224,40 @@ class OrchestratorConfig(BaseSettings):
     # Path to kubeconfig. Empty = in-cluster config first, fall back
     # to default kubeconfig discovery (~/.kube/config).
     k8s_kubeconfig_path: str = Field(default="")
+
+    @model_validator(mode="after")
+    def _expand_namespace_placeholder(self) -> OrchestratorConfig:
+        """Replace `{namespace}` in the pod-view endpoints with our own.
+
+        Those two values MUST be fully qualified — a sandbox pod may run in
+        another namespace, where a bare Service name does not resolve — and a
+        fully qualified name necessarily carries a namespace. Written
+        literally, it makes the operator's config specific to ONE
+        installation: `minio.aywizz.svc.cluster.local` has to be edited
+        wherever the namespace differs, and keeps silently pointing at the old
+        namespace when someone forgets.
+
+        The placeholder removes that adherence without weakening the FQDN: the
+        orchestrator reads its OWN namespace from the service-account
+        projection the kubelet mounts into every pod, and MinIO / LiteLLM run
+        beside it. A value WITHOUT the placeholder is passed through
+        untouched, so existing deployments and the compose defaults are
+        unaffected.
+        """
+        for field in ("k8s_pod_view_minio_endpoint", "k8s_pod_view_c8_gateway_url"):
+            value: str = getattr(self, field)
+            if _NAMESPACE_PLACEHOLDER not in value:
+                continue
+            namespace = _own_namespace()
+            if not namespace:
+                # Leaving the placeholder in place would yield an endpoint
+                # that fails much later, in a sandbox pod, as a DNS error
+                # naming a host nobody configured. Fail here instead.
+                raise ValueError(
+                    f"C4_{field.upper()} uses {_NAMESPACE_PLACEHOLDER} but this "
+                    f"process is not running in Kubernetes ({_NAMESPACE_FILE} is "
+                    "unreadable), so there is no namespace to substitute. Set an "
+                    "explicit value outside the cluster."
+                )
+            setattr(self, field, value.replace(_NAMESPACE_PLACEHOLDER, namespace))
+        return self
