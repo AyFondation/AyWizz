@@ -33,8 +33,13 @@ name: ci-system-tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  # Manual re-run, so this workflow can be iterated on without pushing a
+  # commit — it is new and its first runs are expected to need adjustment.
+  workflow_dispatch:
+  # NO `pull_request` trigger while this is unproven. A workflow that fails
+  # for its own reasons on every PR trains people to ignore CI, which costs
+  # more than the coverage it was added to provide. Restore it once a run
+  # has gone green.
 
 permissions:
   contents: read
@@ -65,6 +70,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e "ay_platform_core[all]"
+
 
       # NO env-file step is needed. `e2e_stack.sh` passes its own
       # `ay_platform_core/tests/.env.test` — a committed tier-1 file

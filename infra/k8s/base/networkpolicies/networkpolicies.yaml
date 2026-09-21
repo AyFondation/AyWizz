@@ -1,6 +1,6 @@
 # =============================================================================
 # File: networkpolicies.yaml
-# Version: 1
+# Version: 2
 # Path: infra/k8s/base/networkpolicies/networkpolicies.yaml
 # Description: The enforcement of the platform's two access levels.
 #
@@ -83,9 +83,30 @@ spec:
     - Ingress
   ingress:
     - from:
+        # The self-installed bundle (base/ingress_nginx), used on
+        # docker-desktop, kind and any cluster that ships no controller.
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+        # The AKS managed add-on (application routing). Added 2026-09-21
+        # after this policy was found to be the reason external requests
+        # never reached C1 on AKS: the Ingress had an address, DNS resolved
+        # correctly, and Traefik's access log stayed EMPTY on every external
+        # refresh while internal calls from `c9-mcp` were logged normally.
+        # That asymmetry is this policy — `c9-mcp` carries `part-of` and is
+        # admitted by `allow-intra-platform`; a controller in an unlisted
+        # namespace is admitted by nothing and falls to `default-deny-ingress`.
+        #
+        # LISTED RATHER THAN OPENED UP. `from` entries are OR-ed, so naming
+        # the two namespaces a controller realistically runs in keeps the
+        # "only door" property this policy exists for. A controller running
+        # anywhere else must be ADDED HERE — nothing detects the omission,
+        # and the failure is silent by construction: every packet is dropped
+        # before any component of the platform sees it, so no log in this
+        # namespace will ever mention it.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: app-routing-system
       ports:
         - protocol: TCP
           port: 80

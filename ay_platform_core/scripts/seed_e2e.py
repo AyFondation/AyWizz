@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: seed_e2e.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/scripts/seed_e2e.py
 # Description: Inject deterministic test data into a running docker-compose
 #              stack. Calls exclusively through the Traefik public gateway
@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import json
 import sys
 import time
 from typing import Any
@@ -124,10 +126,15 @@ async def obtain_token(client: httpx.AsyncClient, base_url: str) -> str:
     the global `admin` role.
 
     The seeder logs in with the SAME username / password — both
-    default to `alice` / `seed-password`, matching the env file. The
-    resulting JWT carries `roles=[admin]`, which clears the
-    project-scoped permission checks (`requires one of:
-    project_editor, project_owner, admin`) downstream services apply.
+    default to `alice` / `seed-password`, matching the env file.
+
+    THE RESULTING JWT IS NOT ENOUGH TO WRITE CONTENT, and this docstring
+    used to claim the opposite ("carries roles=[admin], which clears the
+    project-scoped permission checks"). E-100-002 v7 made `admin`
+    content-blind: the content components strip it before every gate, so a
+    token carrying only global roles is refused by C5/C6/C7 however
+    privileged it looks. `ensure_project_access` closes that gap by
+    granting a `project_*` role and re-minting the token.
     """
     resp = await client.post(
         f"{base_url}/auth/login",
@@ -139,6 +146,78 @@ async def obtain_token(client: httpx.AsyncClient, base_url: str) -> str:
     if not token:
         raise SeedError(f"no access_token in /auth/login response: {resp.text}")
     return str(token)
+
+
+def _subject_of(token: str) -> str:
+    """The `sub` claim of a JWT, read WITHOUT verifying the signature.
+
+    The seeder is not authenticating anyone here — it already holds a token
+    the platform issued — it only needs the user id that token belongs to,
+    in order to grant that user a project role. Decoding the payload avoids
+    hard-coding C2's internal `admin-<username>` id format, which is an
+    implementation detail of `_ensure_local_admin` and not a contract.
+    """
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)  # restore base64url padding
+    return str(json.loads(base64.urlsafe_b64decode(payload))["sub"])
+
+
+async def ensure_project_access(
+    client: httpx.AsyncClient, base_url: str, token: str
+) -> str:
+    """Give the seed user a PROJECT role on the demo project, and return a
+    fresh token that carries it.
+
+    WHY THIS EXISTS (added 2026-09-21). The seeder used to go straight to
+    C5 with the bootstrap admin's token, on the documented assumption that
+    "the resulting JWT carries roles=[admin], which clears the
+    project-scoped permission checks". That stopped being true at
+    E-100-002 v7, which made `admin` CONTENT-BLIND: per
+    100-SPEC-ARCHITECTURE.md §RBAC, an `admin` "SHALL NOT read or write ANY
+    project CONTENT … an `admin` who needs content must hold a project
+    role", and the content components enforce it by STRIPPING
+    `admin`/`tenant_admin` before every content gate. The seeder was never
+    updated, so it failed with
+    `403 requires one of: project_editor, project_owner, admin` — a message
+    that names `admin` while the code has just removed it.
+
+    `admin` remains the right identity to DO this: access governance
+    (granting a `project_*` role within its own tenant) is explicitly one of
+    its powers. What it cannot do is skip the grant and write content
+    directly.
+
+    THE RE-LOGIN IS NOT OPTIONAL. Project roles travel in the JWT
+    `project_scopes` claim, so a grant has no effect on a token minted
+    before it.
+    """
+    auth = {"Authorization": f"Bearer {token}", **_headers()}
+
+    # The project is a governance object owned by the tenant admin; 409 means
+    # a previous seed run already created it.
+    create = await client.post(
+        f"{base_url}/api/v1/projects",
+        json={"project_id": DEMO_PROJECT, "name": "Seed demo project"},
+        headers=auth,
+    )
+    if create.status_code not in (201, 409):
+        raise SeedError(
+            f"create project failed: {create.status_code} {create.text}"
+        )
+
+    user_id = _subject_of(token)
+    grant = await client.post(
+        f"{base_url}/api/v1/projects/{DEMO_PROJECT}/members/{user_id}",
+        json={"role": "project_owner"},
+        headers=auth,
+    )
+    # 204 on grant; a re-run may answer 409 if the grant already exists.
+    if grant.status_code not in (204, 409):
+        raise SeedError(
+            f"grant project_owner to {user_id!r} failed: "
+            f"{grant.status_code} {grant.text}"
+        )
+
+    return await obtain_token(client, base_url)
 
 
 async def ensure_project_document(
@@ -233,6 +312,9 @@ async def run(args: argparse.Namespace) -> int:
     await wait_stack_ready(args.base_url, timeout_s=args.timeout_s)
     async with httpx.AsyncClient(timeout=10.0) as client:
         token = await obtain_token(client, args.base_url)
+        # Re-bound: the returned token carries the project_scopes the grant
+        # just created, which the content endpoints below require.
+        token = await ensure_project_access(client, args.base_url, token)
         await ensure_project_document(client, args.base_url, token)
         await ensure_memory_source(client, args.base_url, token)
     await enqueue_mock_llm_response(args.mock_llm_url)
