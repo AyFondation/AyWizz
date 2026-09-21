@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_auth_guard.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/unit/observability/test_auth_guard.py
 # Description: Unit tests for `AuthGuardMiddleware`. Defense-in-depth
 #              that returns 401 on protected paths without an X-User-Id
@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from typing import Any
 
 import httpx
@@ -140,10 +141,45 @@ async def test_c2_exempt_list_lets_auth_endpoints_through() -> None:
 
 
 async def test_lifespan_scope_passes_through() -> None:
-    """Lifespan startup/shutdown SHALL NOT be intercepted by the guard."""
-    app = _make_app(component="c-test")
-    # If the guard interfered with lifespan, the AsyncClient would hang
-    # or error during startup — we assert it doesn't.
-    async with _client(app) as c:
-        resp = await c.get("/health")
-    assert resp.status_code == 200
+    """A NON-HTTP scope SHALL be delegated untouched to the inner app.
+
+    The guard's first line is `if scope["type"] != "http"`. Everything that
+    is not an HTTP request — `lifespan` at startup/shutdown, and `websocket`
+    — must reach the application unchanged; a guard that fell through to the
+    header check would 401 a lifespan message, which has no headers, and the
+    app would never start.
+
+    THIS TEST USED TO ASSERT NOTHING OF THE SORT. It opened an
+    `httpx.ASGITransport` client and asserted `GET /health` returned 200,
+    on the stated theory that "if the guard interfered with lifespan, the
+    AsyncClient would hang". It cannot: `ASGITransport` does not run the
+    lifespan protocol at all, so no lifespan scope ever reached the
+    middleware — which is precisely why the 2026-09-20 branch audit found
+    this line uncovered while the test sat green. The middleware is
+    therefore driven DIRECTLY here, which is the only way to present it
+    with the scope type in question.
+    """
+    seen: list[str] = []
+
+    async def inner(scope: Any, receive: Any, send: Any) -> None:
+        seen.append(scope["type"])
+
+    guard = AuthGuardMiddleware(inner, component="c-test")
+
+    async def _receive() -> MutableMapping[str, Any]:
+        return {"type": "lifespan.startup"}
+
+    async def _send(message: MutableMapping[str, Any]) -> None:
+        # Reached only on a regression: the guard answering a non-HTTP scope
+        # itself is exactly the failure this test exists to catch.
+        raise AssertionError(f"the guard must not answer a lifespan scope: {message}")
+
+    # No headers key at all — a lifespan scope genuinely has none, so this
+    # also proves the guard does not reach the header lookup.
+    await guard({"type": "lifespan"}, _receive, _send)
+    assert seen == ["lifespan"]
+
+    # Same contract for websockets, the other non-HTTP scope type.
+    seen.clear()
+    await guard({"type": "websocket", "path": "/ws"}, _receive, _send)
+    assert seen == ["websocket"]

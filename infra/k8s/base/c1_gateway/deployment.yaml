@@ -1,6 +1,6 @@
 # =============================================================================
 # File: deployment.yaml
-# Version: 6
+# Version: 7
 # Path: infra/k8s/base/c1_gateway/deployment.yaml
 # Description: Traefik v3 Deployment (C1 ingress tier). Uses the FILE
 #              provider: the routing table is mounted from the generated
@@ -93,6 +93,48 @@ spec:
             - --providers.file.watch=true
             - --log.level=INFO
             - --accesslog=true
+          # NO PROXY, EVER — and this is load-bearing on a managed cluster.
+          #
+          # Traefik is written in Go, and Go's `http.Transport` defaults to
+          # `ProxyFromEnvironment`: it honours HTTP_PROXY / HTTPS_PROXY for
+          # every connection it OPENS, which here means every call to a
+          # backend Service. A cluster that injects a corporate proxy into
+          # each pod therefore makes Traefik hand `http://ay-platform-ui:3000`
+          # to a proxy that cannot resolve an in-cluster name — and the result
+          # is 502 on EVERY route, with a perfectly healthy backend.
+          #
+          # THE SYMPTOM IS MISLEADING IN THREE WAYS (AKS, 2026-09-21):
+          #   - inbound is unaffected (the proxy only touches connections
+          #     Traefik opens), so the gateway answers, it just answers 502 ;
+          #   - `/api/http/services/ui@file` reports `status: enabled` with the
+          #     server UP, because with no `healthCheck` declared Traefik never
+          #     probes its servers — "UP" means "configured", not "reachable" ;
+          #   - the same backend answers 200 from any other pod, because a raw
+          #     socket and urllib3 ignore these variables. Only the Go client
+          #     fails, which is the same asymmetry that made `mc` and the
+          #     ollama CLI fail while `arangosh` succeeded.
+          #
+          # EMPTIED RATHER THAN EXCLUDED VIA NO_PROXY. The `_init` Jobs and the
+          # api tier APPEND to the inherited NO_PROXY because they also make
+          # external calls. Traefik makes none: every one of its backends is an
+          # in-cluster Service (see the `services.yml` binding), there is no
+          # ACME resolver configured, and nothing else reaches out. A blanket
+          # "no proxy" is therefore both correct and immune to the suffix trap
+          # that a NO_PROXY list has to dodge — `.svc` never matches the
+          # single-label `ay-platform-ui`.
+          #
+          # An empty value is what Go reads as "no proxy": it takes precedence
+          # over anything the cluster injects, per-container. Harmless on
+          # docker-desktop, where no proxy is injected in the first place.
+          env:
+            - name: HTTP_PROXY
+              value: ""
+            - name: HTTPS_PROXY
+              value: ""
+            - name: http_proxy
+              value: ""
+            - name: https_proxy
+              value: ""
           ports:
             - name: web
               containerPort: 80

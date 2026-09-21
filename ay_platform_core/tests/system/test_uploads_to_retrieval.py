@@ -31,19 +31,23 @@ import pytest
 pytestmark = pytest.mark.system
 
 
-@pytest.mark.xfail(
-    reason=(
-        "n8n CLI `import:workflow` + `update:workflow --all --active=true` "
-        "writes the workflow as active to SQLite, but the running n8n "
-        "process keeps its in-memory webhook router unchanged — the new "
-        "/uploads/ingest-text webhook is only registered after a c12 "
-        "restart. Activating via n8n REST API would require "
-        "N8N_USER_MANAGEMENT_DISABLED + owner setup. Tracked as a "
-        "follow-up; the C12 → C7 pipeline itself is exercised via "
-        "integration tests against testcontainers."
-    ),
-    strict=False,
-)
+# THE `xfail` THAT USED TO SIT HERE IS GONE (2026-09-20). Its reason was that
+# `import:workflow` wrote the workflow as active to SQLite while the RUNNING
+# n8n kept its in-memory webhook router unchanged, so /uploads/ingest-text was
+# only registered after a c12 restart. Both halves of that reason have since
+# been resolved:
+#   - the c12 Deployment gained an `import-workflows` initContainer that
+#     imports AND publishes BEFORE the server starts, so n8n now boots with
+#     every webhook registered — there is no "after a restart" any more ;
+#   - `update:workflow --all --active=true`, which the reason also named, was
+#     removed by n8n 2.x and replaced by per-id `n8n publish:workflow`.
+#
+# It was also `strict=False`, which is what made it dangerous: had the chain
+# started working, pytest would have reported xpass and NOBODY would have
+# learned that the platform's only upload→retrieval proof was passing again.
+# Removed rather than flipped to strict=True: a marker that documents a fixed
+# defect is worse than no marker, and a genuine failure now surfaces as a
+# failure, with this comment as the history to check first.
 @pytest.mark.asyncio
 async def test_upload_text_source_ends_up_retrievable(
     gateway_client: httpx.AsyncClient,

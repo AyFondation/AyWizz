@@ -238,15 +238,31 @@ async def test_retrieve_pulls_in_chunks_beyond_scan_cap(
             kg_repo=kg_repo,
         )
 
-        # 3 sources, keys ordered so the AQL primary-index scan
-        # (insertion order) returns alpha + beta first under cap=2.
+        # 3 sources, scan_cap=2 → the scan can only ever see two of them.
+        #
+        # WHICH two is NOT ours to choose, and this test used to assume it
+        # was. Its predecessor said "keys ordered so the AQL primary-index
+        # scan (insertion order) returns alpha + beta first" and asserted
+        # `"src-3-gamma" not in baseline_ids`. But `scan_chunks` issues
+        # `FOR c IN memory_chunks FILTER ... LIMIT @scan_cap RETURN c` with
+        # NO `SORT` (db/repository.py), and ArangoDB promises no ordering for
+        # an unsorted collection scan. The assumption held most of the time
+        # and failed intermittently in a full-suite run on 2026-09-20.
+        #
+        # It was also VACUOUS in the other direction: had the scan cut `beta`
+        # instead, gamma would already be in the baseline and the closing
+        # `assert "src-3-gamma" in with_kg_ids` would have passed without the
+        # expansion doing anything at all.
+        #
+        # So the test now asserts the REQUIREMENT rather than one arrangement
+        # of it: whatever the scan cut off, KG expansion brings it back.
         await _ingest(service, "src-1-alpha", "rocket fuel oxygen hydrogen")
         await _ingest(service, "src-2-beta", "garden flower meadow")
         await _ingest(service, "src-3-gamma", "rocket fuel propellant")
+        all_sources = {"src-1-alpha", "src-2-beta", "src-3-gamma"}
 
-        # Without KG: scan_cap=2 → filtered = {alpha, beta}. gamma is
-        # CUT OFF by the scan, so even though gamma cosine ≈ alpha
-        # cosine, it cannot appear in top_k.
+        # Without KG: the scan cap cuts at least one source out of the pool
+        # entirely, so it cannot reach top_k however well it scores.
         baseline = await service.retrieve(
             RetrievalRequest(
                 project_id=_PROJECT,
@@ -257,29 +273,62 @@ async def test_retrieve_pulls_in_chunks_beyond_scan_cap(
             tenant_id=_TENANT,
         )
         baseline_ids = {hit.source_id for hit in baseline.hits}
-        assert "src-3-gamma" not in baseline_ids
-
-        # Populate KG so alpha and gamma are graph-related: entity
-        # "rocket-fuel-system" mentioned by both, plus an explicit
-        # edge to ensure 1-hop traversal returns gamma's source_id.
-        rfs = KGEntity(name="rocket-fuel-system", type="concept")
-        propellant = KGEntity(name="propellant", type="concept")
-        await kg_repo.persist(
-            tenant_id=_TENANT, project_id=_PROJECT, source_id="src-1-alpha",
-            entities=[rfs], relations=[],
-        )
-        await kg_repo.persist(
-            tenant_id=_TENANT, project_id=_PROJECT, source_id="src-3-gamma",
-            entities=[propellant],
-            relations=[
-                KGRelation(subject=rfs, relation="uses", object=propellant),
-            ],
+        # The precondition itself, asserted rather than assumed: top_k=3 would
+        # admit all three, so anything missing was cut by the scan, not by
+        # ranking.
+        cut_by_scan = all_sources - baseline_ids
+        assert cut_by_scan, (
+            f"scan_cap=2 over 3 sources must exclude at least one, got "
+            f"{baseline_ids}"
         )
 
-        # With KG: alpha is in scan → seed. neighbours of alpha
-        # include propellant which mentions gamma. gamma is fetched
-        # OUT-OF-SCAN, scored, and now competes for top_k. Boost is
-        # 1.0 so the only mechanism active is pool widening.
+        # Populate the KG so the cut source is one hop from a surviving one,
+        # WHICHEVER pair the scan kept. One entity per source, joined in a
+        # triangle.
+        #
+        # THE ENTITY-PER-SOURCE PART IS LOAD-BEARING, and not obviously so.
+        # `find_neighbor_source_ids` builds `seeds` from every entity that
+        # mentions a scanned source, then traverses with
+        # `FILTER v._key NOT IN seed_keys`. An entity mentioned by BOTH a
+        # survivor and the cut source is therefore a seed, and is excluded
+        # from its own neighbour set — so the cut source becomes unreachable
+        # through it. Sharing one concept between two sources silently
+        # disables the very expansion under test (observed while writing
+        # this, 2026-09-20).
+        concepts = {
+            "src-1-alpha": KGEntity(name="rocket-fuel-system", type="concept"),
+            "src-2-beta": KGEntity(name="garden-bed", type="concept"),
+            "src-3-gamma": KGEntity(name="propellant", type="concept"),
+        }
+        for source_id, own in concepts.items():
+            await kg_repo.persist(
+                tenant_id=_TENANT, project_id=_PROJECT, source_id=source_id,
+                entities=[own], relations=[],
+            )
+
+        # The edges are persisted under a source that owns NO CHUNKS, and
+        # that is the second load-bearing subtlety. `_upsert_entity` appends
+        # the persisting `source_id` to EVERY entity it touches — including
+        # the endpoints named in `relations`, which it resolves leniently.
+        # Declaring the triangle from any of the three real sources would
+        # therefore make all three concepts mention all three sources, making
+        # every concept a seed, and `FILTER v._key NOT IN seed_keys` would
+        # then filter the entire neighbour set away. A link-only source keeps
+        # each concept mentioned by exactly one SCANNABLE source.
+        link_relations = [
+            KGRelation(subject=a, relation="related_to", object=b)
+            for i, a in enumerate(concepts.values())
+            for b in list(concepts.values())[i + 1 :]
+        ]
+        await kg_repo.persist(
+            tenant_id=_TENANT, project_id=_PROJECT, source_id="src-0-links",
+            entities=[], relations=link_relations,
+        )
+
+        # With KG: a scanned source seeds the traversal, its neighbours name
+        # the cut source, whose chunks are fetched OUT-OF-SCAN and scored.
+        # Boost is 1.0, so pool widening is the only mechanism at work — a
+        # recovered source proves the FETCH path, not a ranking nudge.
         with_kg = await service.retrieve(
             RetrievalRequest(
                 project_id=_PROJECT,
@@ -290,6 +339,9 @@ async def test_retrieve_pulls_in_chunks_beyond_scan_cap(
             tenant_id=_TENANT,
         )
         with_kg_ids = {hit.source_id for hit in with_kg.hits}
-        assert "src-3-gamma" in with_kg_ids
+        assert cut_by_scan <= with_kg_ids, (
+            f"KG expansion must recover what the scan cap cut: "
+            f"{cut_by_scan} missing from {with_kg_ids}"
+        )
     finally:
         cleanup_arango_database(arango_container, db_name)

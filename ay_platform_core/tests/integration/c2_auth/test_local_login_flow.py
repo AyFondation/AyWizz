@@ -130,10 +130,12 @@ class TestLocalLoginFlowService:
 class TestLocalLoginFlowHTTP:
     """HTTP-level tests for local mode endpoints."""
 
-    async def test_login_json_endpoint(self, local_app: httpx.ASGITransport) -> None:
-        transport = httpx.ASGITransport(app=local_app)  # type: ignore[arg-type]
-        async with httpx.AsyncClient(transport=transport, base_url="http://test"):
-            pass  # HTTP user creation tested separately
+    # `test_login_json_endpoint` was REMOVED here (2026-09-20). It opened an
+    # httpx client, executed `pass`, and asserted nothing — a green test named
+    # after an endpoint it never called. POST /auth/login over HTTP is covered
+    # for real by test_local_admin_bootstrap.py, test_local_platform_manager_
+    # bootstrap.py, test_none_mode_integration.py, e2e/auth_matrix/
+    # test_auth_modes.py and e2e/test_golden_path.py, so nothing was lost.
 
     async def test_config_shows_local_mode(self, local_app: httpx.ASGITransport) -> None:
         transport = httpx.ASGITransport(app=local_app)  # type: ignore[arg-type]

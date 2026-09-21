@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_functional_coverage.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/coherence/test_functional_coverage.py
 # Description: Coherence test pinning the functional-coverage of every
 #              catalogued endpoint. Complements the auth-matrix:
@@ -14,6 +14,29 @@
 #              functional test fails the build here. This is the gap
 #              CLAUDE.md §13 leaves implicit; this test makes it
 #              explicit.
+#
+#              WHAT THIS GATE DOES NOT PROVE (v2, 2026-09-20 — stated
+#              because the omission reads as a stronger guarantee than
+#              it is). Coverage is detected by matching URL LITERALS and
+#              the method marker in the text of each test file. That
+#              proves a test file MENTIONS the path with that method;
+#              it does not prove the test asserts anything about the
+#              response, nor that the mention is inside the test rather
+#              than in a comment. An endpoint called with no assertion
+#              satisfies this gate — which is exactly the kind of test
+#              CLAUDE.md §10.2 forbids, and one was found in
+#              `tests/integration/c2_auth/` during the 2026-09-20 audit.
+#              Treat a pass here as "someone wired the endpoint into a
+#              test", not as "the endpoint's behaviour is verified".
+#
+#              `_TEST_DIRS` includes `tests/system`, which is excluded
+#              from the default pytest run. That credit is only honest
+#              because `.github/workflows/ci-system-tests.yml` runs that
+#              tier against a real compose stack — before 2026-09-20 it
+#              ran nowhere, and an endpoint whose sole functional test
+#              lived there passed this gate while never executing. If
+#              that workflow is ever removed, remove the directory here
+#              too.
 #
 # @relation validates:E-100-002
 # =============================================================================

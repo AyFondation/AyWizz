@@ -1,0 +1,83 @@
+# Version: 1
+# Path: .github/workflows/ci-system-tests.yml
+#
+# CI — run the COMPOSE system tier (`tests/system/`, excluding `tests/system/
+# k8s/` which belongs to ci-k8s-validate) against a real, running stack.
+#
+# WHY THIS WORKFLOW EXISTS. Until 2026-09-20 these 40 tests ran in NO
+# workflow at all. `pyproject.toml` excludes them from the default pytest run
+# (`--ignore=tests/system`, so `run_tests.sh ci` does not need Docker), and
+# nothing else invoked them — they executed only when a developer typed the
+# command by hand. They are also the ONLY tier that exercises the platform as
+# deployed: through C1 Traefik, with forward-auth really issuing 401s, over
+# real TCP (keep-alive, HEAD, concurrent requests), against n8n's real webhook
+# router and C9's real MCP transport. The `e2e` tier that DOES run in CI wires
+# the components in-process via `ASGITransport`, so it validates component
+# wiring and says nothing about the deployed topology.
+#
+# A tier that never runs is a tier that silently rots: the `xfail` removed
+# from `tests/system/test_uploads_to_retrieval.py` on 2026-09-20 had outlived
+# its cause by two fixes precisely because nothing ever executed it.
+#
+# SEPARATE FROM ci-tests ON PURPOSE. `ci-build-images` is triggered by
+# `ci-tests` succeeding; folding a slow, Docker-dependent stack bring-up into
+# that workflow would put every image publication behind it. This one runs
+# alongside, and its failure does not block an image whose unit/integration
+# tiers are green.
+#
+# THE SCRIPT IS THE CONTRACT. `e2e_stack.sh full` = up + seed + pytest, the
+# same entry point used locally — no CI-only copy of the sequence to drift.
+
+name: ci-system-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-system-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  system:
+    name: compose stack + tests/system
+    runs-on: ubuntu-latest
+    # Generous: the stack builds the api image, boots ArangoDB, MinIO, n8n
+    # (SQLite migrations) and Traefik before the first test runs.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: ay_platform_core/pyproject.toml
+
+      - name: Install ay_platform_core (editable, all extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "ay_platform_core[all]"
+
+      # NO env-file step is needed. `e2e_stack.sh` passes its own
+      # `ay_platform_core/tests/.env.test` — a committed tier-1 file
+      # (CLAUDE.md §4.6) — to every `docker compose` call, and `up` runs the
+      # `test` profile, which substitutes `mock_llm` for the real proxy. The
+      # stack therefore needs no provider key and no `.env.secret`.
+      - name: Bring up the stack, seed it, run tests/system
+        run: bash ay_platform_core/scripts/e2e_stack.sh full
+
+      - name: Stack logs on failure
+        if: failure()
+        run: bash ay_platform_core/scripts/e2e_stack.sh status
+
+      - name: Tear down
+        if: always()
+        run: bash ay_platform_core/scripts/e2e_stack.sh down

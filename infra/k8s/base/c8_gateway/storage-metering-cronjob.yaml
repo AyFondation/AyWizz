@@ -1,6 +1,6 @@
 # =============================================================================
 # File: storage-metering-cronjob.yaml
-# Version: 2
+# Version: 3
 # Path: infra/k8s/base/c8_gateway/storage-metering-cronjob.yaml
 # Description: Periodic per-project disk-storage metering pass (E-100-002 v7).
 #              Runs the shared aywizz-api image with the storage snapshot
@@ -34,6 +34,19 @@ spec:
           labels:
             app.kubernetes.io/name: c8-storage-metering
             app.kubernetes.io/component: c8
+            # WITHOUT THIS LABEL THE POD CANNOT REACH ANYTHING (2026-09-21).
+            # `networkpolicies/allow-intra-platform` admits ingress only from
+            # pods carrying `part-of: aywizz-platform`; everything else is cut
+            # by `default-deny-ingress`. This CronJob carried the label on the
+            # CronJob OBJECT but not on the pod template it creates — and a
+            # NetworkPolicy matches the POD, never its owner. It was the only
+            # one of 22 workloads in that state, which is exactly why it went
+            # unnoticed: the policy is right, the fleet is right, and one
+            # jobTemplate quietly opted itself out.
+            #
+            # This job talks straight to MinIO and ArangoDB (no HTTP hop, no
+            # C1), so the label is the whole of its network authorisation.
+            app.kubernetes.io/part-of: aywizz-platform
         spec:
           restartPolicy: Never
           containers:

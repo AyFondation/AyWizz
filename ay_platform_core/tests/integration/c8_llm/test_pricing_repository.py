@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_pricing_repository.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c8_llm/test_pricing_repository.py
 # Description: Integration tests for PricingRepository against a real ArangoDB
 #              (testcontainer). Exercises the DB methods the unit tier cannot
@@ -21,7 +21,7 @@ import pytest_asyncio
 from arango import ArangoClient  # type: ignore[attr-defined]
 
 from ay_platform_core.c8_llm.pricing.models import select_effective
-from ay_platform_core.c8_llm.pricing.repository import PricingRepository
+from ay_platform_core.c8_llm.pricing.repository import COLL_PRICING, PricingRepository
 from ay_platform_core.c8_llm.pricing.service import PricingService
 from tests.fixtures.containers import ArangoEndpoint, cleanup_arango_database
 
@@ -59,8 +59,46 @@ def _doc(mid: str, iso: str, inp: float, out: float) -> dict[str, object]:
 
 
 async def test_ensure_is_idempotent(pricing_repo: PricingRepository) -> None:
-    # A second ensure() must not raise (collection + index already present).
+    """A second `ensure()` SHALL leave the collection and its index exactly
+    as the first left them, and SHALL NOT touch existing rows.
+
+    The previous version of this test called `ensure()` a second time and
+    asserted NOTHING — it only proved the call does not raise. That is
+    strictly weaker than the property its name claims: it would have passed
+    just as green if the second call had added a DUPLICATE index, or dropped
+    and recreated the collection, taking every pricing row with it.
+    `ensure()` runs on every C8 startup (R-800-141), so both would be real
+    production defects.
+    """
+    # Reaching through to the driver is deliberate: the storage-level
+    # postconditions (index shape, surviving rows) ARE the subject here, and
+    # the repository exposes no accessor for them.
+    db = pricing_repo._db
+    coll = db.collection(COLL_PRICING)
+
+    await pricing_repo.insert(_doc("survivor", "2026-01-01T00:00:00+00:00", 1.0, 2.0))
+    indexes_before = coll.indexes()
+
     await pricing_repo.ensure()
+
+    # 1. No duplicate index. `add_index` is documented as idempotent for an
+    #    identical definition; this pins that, because a silent duplicate
+    #    costs write throughput on every insert and nothing else would notice.
+    assert coll.indexes() == indexes_before
+
+    # 2. Exactly one persistent index on the series fields — the one the
+    #    per-model scan in `list_series` relies on.
+    persistent = [
+        i for i in coll.indexes()
+        if i["type"] == "persistent" and i["fields"] == ["model_id", "effective_from"]
+    ]
+    assert len(persistent) == 1
+
+    # 3. Data survived. This is the destructive failure mode the old test
+    #    could not see.
+    assert [r["model_id"] for r in await pricing_repo.list_series("survivor")] == [
+        "survivor"
+    ]
 
 
 async def test_insert_and_series_round_trip(pricing_repo: PricingRepository) -> None:
