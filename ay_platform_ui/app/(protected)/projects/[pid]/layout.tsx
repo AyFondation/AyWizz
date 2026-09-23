@@ -19,6 +19,8 @@
 //              `GET /api/v1/projects/{pid}` endpoint exists, switch
 //              to a direct fetch. The list call is cheap enough for
 //              v1 (tenants typically have a handful of projects).
+//
+// @relation implements:R-500-002
 // =============================================================================
 
 "use client";

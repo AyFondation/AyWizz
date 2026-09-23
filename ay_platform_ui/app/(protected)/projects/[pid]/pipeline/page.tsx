@@ -32,6 +32,9 @@
 //              events are loaded lazily via the paginated /trace
 //              endpoint. A <SteerComposer> is visible while the run is
 //              RUNNING and POSTs operator hints to /steer (R-200-202).
+//
+// @relation implements:R-500-008
+// @relation implements:R-500-009
 // =============================================================================
 
 "use client";

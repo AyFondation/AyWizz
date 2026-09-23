@@ -8,6 +8,8 @@
 //              progress + findings. A real "list runs by project"
 //              endpoint doesn't exist yet on C6, so there's no list
 //              view here — the kick-off form is the only entry point.
+//
+// @relation implements:R-500-006
 // =============================================================================
 
 "use client";

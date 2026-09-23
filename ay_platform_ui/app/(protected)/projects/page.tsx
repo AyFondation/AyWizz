@@ -11,6 +11,8 @@
 //              profiles surface a neutral "Unknown" tag rather than
 //              an opaque id — operator gets a visible signal that
 //              their server uses a profile this UX doesn't support.
+//
+// @relation implements:R-500-001
 // =============================================================================
 
 "use client";

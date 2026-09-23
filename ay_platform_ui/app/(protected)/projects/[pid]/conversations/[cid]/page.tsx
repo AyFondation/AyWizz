@@ -134,6 +134,8 @@
 //              and the active project (effective project system_prompt)
 //              at mount, forwards both on every chat message so C3 can
 //              prepend them ahead of the RAG context.
+//
+// @relation implements:R-500-004
 // =============================================================================
 
 "use client";

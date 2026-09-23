@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_relation_markers.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/coherence/test_relation_markers.py
 # Description: Coherence 1 - spec<->code traceability.
 #              Scans src/ for @relation markers in comments/docstrings and
@@ -99,6 +99,40 @@ def test_all_relation_markers_point_to_declared_entities() -> None:
             messages
         )
         pytest.fail(msg)
+
+
+@pytest.mark.coherence
+def test_validating_tests_reach_the_code_they_claim_to_validate() -> None:
+    """A `validates:` marker SHALL name a test that can REACH its implementer.
+
+    The checks above prove markers are well-formed and point at declared
+    entities. They do not prove the two halves meet: a test file can claim to
+    validate a requirement while importing nothing that leads to the module
+    claiming to implement it, and `060-IMPLEMENTATION-STATUS.md` will still
+    report that requirement `tested` — on the strength of a comment.
+
+    (The marker syntax is deliberately NOT written out anywhere in this
+    docstring. The convention is greppable prose, so an EXAMPLE marker in a
+    comment is indistinguishable from a real one: the first version of this
+    test cited a requirement id as an illustration and promptly registered
+    itself as that requirement's validator, then failed on its own claim.)
+
+    This closes that gap with the import graph, seeded from each test's own
+    imports PLUS its `conftest.py` chain (pytest injects fixtures by name,
+    so a graph rooted at the test file alone sees nothing a fixture built).
+
+    NECESSARY, NOT SUFFICIENT: reaching the module does not prove the test
+    asserts anything useful about it — that is §10's territory and no static
+    analysis settles it. But a test that cannot reach the code is certainly
+    not validating it, and that much is mechanical.
+    """
+    import audit_validation_reachability as m  # noqa: PLC0415
+
+    issues = m.check()
+    assert not issues, (
+        "Requirements reported `tested` whose validating tests reach no "
+        "implementing module:\n" + "\n".join(issues)
+    )
 
 
 @pytest.mark.coherence

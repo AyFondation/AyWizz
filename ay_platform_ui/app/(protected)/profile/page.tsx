@@ -12,6 +12,8 @@
 //
 //              Eventually replaces /dashboard ; the legacy route
 //              stays for one release as a redirect-friendly fallback.
+//
+// @relation implements:R-500-007
 // =============================================================================
 
 "use client";

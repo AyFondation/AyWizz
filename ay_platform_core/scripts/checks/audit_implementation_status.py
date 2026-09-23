@@ -33,6 +33,18 @@ SRC = ROOT / "ay_platform_core" / "src"
 TESTS = ROOT / "ay_platform_core" / "tests"
 INFRA = ROOT / "infra"
 GH_WORKFLOWS = ROOT / ".github" / "workflows"
+# The frontend. Added 2026-09-21: without it, EVERY approved R-500-*
+# requirement was reported `divergent` — the report's own legend reads that
+# as "the impl forgot the marker or the requirement is unimplemented", and
+# neither was true. All eight are implemented, each by a route under
+# `app/(protected)/`; the auditor simply could not see the sub-project they
+# live in. A traceability tool that structurally cannot observe a whole tier
+# reports its blindness as the tier's fault, which is worse than not
+# reporting at all.
+UI_SRC = ROOT / "ay_platform_ui"
+# Generated / vendored trees carry no authored markers and would slow the
+# scan by orders of magnitude.
+_UI_SKIP_DIRS = frozenset({"node_modules", ".next", "coverage", "dist"})
 
 # (root, glob extensions) pairs — `@relation implements:` markers may
 # live in Python source, but also in compose YAML, Dockerfiles, CI
@@ -40,6 +52,8 @@ GH_WORKFLOWS = ROOT / ".github" / "workflows"
 # extensions appropriate to it.
 _IMPL_SCAN_TARGETS: list[tuple[Path, tuple[str, ...]]] = [
     (SRC, ("*.py",)),
+    # Frontend routes + components. `R-500-*` lives here and nowhere else.
+    (UI_SRC, ("*.ts", "*.tsx")),
     # `*.json` covers e.g. n8n workflow definitions that carry their
     # marker in a `_comment` field.
     (INFRA, ("*.yml", "*.yaml", "*.sh", "*.json", "Dockerfile*")),
@@ -130,6 +144,8 @@ def _scan_relations(
         for ext in extensions:
             for path in root.rglob(ext):
                 if "__pycache__" in path.parts or ".git" in path.parts:
+                    continue
+                if _UI_SKIP_DIRS.intersection(path.parts):
                     continue
                 try:
                     content = path.read_text(encoding="utf-8")
@@ -299,7 +315,13 @@ def main() -> int:
     # alongside Python sources.
     impls = _scan_relations(_IMPL_SCAN_TARGETS, relation_kind="implements")
     validates = _scan_relations(
-        [(TESTS, ("*.py",))], relation_kind="validates"
+        # The UI tree is listed whole rather than by its `tests/`
+        # sub-directory: vitest co-locates some specs beside the component
+        # they cover, so a path-based split would miss them. The
+        # `implements` / `validates` KIND is what separates the two roles,
+        # not the directory.
+        [(TESTS, ("*.py",)), (UI_SRC, ("*.ts", "*.tsx"))],
+        relation_kind="validates",
     )
     # `@relation implements:` in Python tests is also valid (some
     # tests use it to mean "this test file IS the implementation").

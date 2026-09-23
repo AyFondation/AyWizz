@@ -389,5 +389,6 @@ module = [
     "check_router_typing",
     "check_no_parallel_definitions",
     "check_canonical_imports",
+    "audit_validation_reachability",
 ]
 ignore_missing_imports = true

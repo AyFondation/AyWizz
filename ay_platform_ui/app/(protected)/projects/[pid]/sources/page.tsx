@@ -10,6 +10,8 @@
 //              slug, MIME from the extension. Unsupported MIMEs are
 //              rejected client-side with a clear error before any
 //              network round-trip.
+//
+// @relation implements:R-500-003
 // =============================================================================
 
 "use client";

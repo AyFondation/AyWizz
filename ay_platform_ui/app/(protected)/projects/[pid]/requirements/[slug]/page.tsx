@@ -8,6 +8,8 @@
 //              corpus is human-readable as-is and adding a renderer
 //              dep is deferred). Header surfaces version + status +
 //              update timestamp.
+//
+// @relation implements:R-500-005
 // =============================================================================
 
 "use client";
