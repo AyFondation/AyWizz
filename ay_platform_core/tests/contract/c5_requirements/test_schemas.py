@@ -47,11 +47,56 @@ class TestPublicSchemas:
 
 @pytest.mark.contract
 class TestContractRegistration:
+    # Inventory of C5's exposed contract surface. Extending it is a
+    # deliberate act: `test_no_unexpected_contracts` fails until a newly
+    # registered contract is listed here, which is how an unnoticed surface
+    # growth is caught. The object-grain contracts below were added with
+    # 310-SPEC-DOC-TRACEABILITY §4.1 (increment 1).
     EXPECTED: ClassVar[set[str]] = {
         "EntityPublic",
         "DocumentPublic",
         "HistoryEntry",
         "RelationEdge",
+        "DocObjectPublic",
+        "WorkingDraft",
+        "ObjectLock",
+        "CyclePublic",
+        "WorkflowPublic",
+        "Allocation",
+        "CoverageLink",
+        "RequirementCoverage",
+        "ContainerCoverage",
+        "SpeculativeMarking",
+        "SuppliedRequirement",
+        "QualityFinding",
+        "Fragment",
+        "SplitProposal",
+        "ReworkRequest",
+        # Change absorption (§4.8, increment 5). ImpactEdge / ImpactNode /
+        # ImpactSet are declared in `traversal.py`, not `models.py`: they are
+        # both the walk's output and the stored, exposed shape, and one
+        # definition is what §8.4 asks for.
+        "ImpactEdge",
+        "ImpactNode",
+        "ImpactSet",
+        "QualificationProposal",
+        "Disposition",
+        "ChangeTicket",
+        "ClosureReport",
+        # Negotiated piloting (§4.9, increment 6).
+        "StepEstimate",
+        "PlanStep",
+        "Ratification",
+        "TreatmentPlan",
+        "TreatmentReport",
+        # Baselines (§4.11, increment 8). ManifestObject / ManifestLink are
+        # deliberately distinct from DocObjectPublic / CoverageLink: a
+        # historical record needs a schema independent of the live model it
+        # photographed (R-310-204). See the registry for the full reason.
+        "ManifestObject",
+        "ManifestLink",
+        "BaselineManifest",
+        "BaselineReadiness",
     }
 
     def test_all_expected_contracts_registered(self) -> None:

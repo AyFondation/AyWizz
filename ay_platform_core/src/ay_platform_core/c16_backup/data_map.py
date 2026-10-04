@@ -1,6 +1,6 @@
 # =============================================================================
 # File: data_map.py
-# Version: 1
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c16_backup/data_map.py
 # Description: The authoritative DataMap (E-900-001 / R-900-001): every
 #              ArangoDB collection + MinIO bucket that holds tenant/project
@@ -73,6 +73,43 @@ DATA_MAP: tuple[DataMapEntry, ...] = (
                  scope=_P, tenant_scoped=True, project_scoped=True),
     DataMapEntry(store=_A, name="req_history", component="c5_requirements",
                  scope=_P, tenant_scoped=True, project_scoped=True),
+    # Derived index over the object-grain document model (R-310-002).
+    # Backed up for the same reason as req_entities, itself derived
+    # (R-300-013): a restore-as-new is immediately usable instead of
+    # requiring a reindex pass before the project shows any content.
+    DataMapEntry(store=_A, name="req_objects", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    # The engineering process expressed as data (D-024). Backed up for the
+    # same reason as req_objects: a restore-as-new without its cycle and
+    # workflow catalogue has documents but no process to produce them by.
+    DataMapEntry(store=_A, name="req_cycles", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    DataMapEntry(store=_A, name="req_workflows", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    # The traceability graph itself: allocation decisions and coverage links.
+    # This is the most valuable content of a project — documents without it
+    # are prose, and it is not derivable from anything else.
+    DataMapEntry(store=_A, name="req_allocations", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    DataMapEntry(store=_A, name="req_object_edges", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    # Change tickets. Backed up even though the index is rebuildable from
+    # MinIO, for the same reason as req_objects — and because a CLOSED
+    # ticket is the evidence that a supplied modification was absorbed end
+    # to end (R-310-150). Losing it loses the audit trail, not just a cache.
+    DataMapEntry(store=_A, name="req_changes", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    # Treatment plans. A RATIFICATION is an attributable record that an
+    # arbitration took place (R-310-175) — evidence, not a work queue, so
+    # losing it loses the audit trail.
+    DataMapEntry(store=_A, name="req_plans", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
+    # Baselines. The INDEX is rebuildable from MinIO, but a baseline is the
+    # artefact an audit reconstructs (R-310-204) and the object versions it
+    # names are retained because it names them — losing the index would hide
+    # a baseline that still exists.
+    DataMapEntry(store=_A, name="req_baselines", component="c5_requirements",
+                 scope=_P, tenant_scoped=True, project_scoped=True),
     # ---- C6 Validation ---------------------------------------------------
     DataMapEntry(store=_A, name="c6_runs", component="c6_validation",
                  scope=_P, tenant_scoped=True, project_scoped=True),
@@ -138,6 +175,12 @@ EXCLUDED: tuple[ExcludedStore, ...] = (
                   reason="operational idempotency keys; transient"),
     ExcludedStore(store=_A, name="req_reindex_jobs",
                   reason="operational reindex job tracking; transient"),
+    ExcludedStore(store=_A, name="req_object_locks",
+                  reason=(
+                      "live object edit leases (R-310-190); runtime state. "
+                      "Restoring them would block edits in the new project on "
+                      "behalf of holders that do not exist there"
+                  )),
     ExcludedStore(store=_A, name="llm_calls",
                   reason="usage/metering history; a restored tenant starts clean"),
     ExcludedStore(store=_A, name="llm_quota_policy",

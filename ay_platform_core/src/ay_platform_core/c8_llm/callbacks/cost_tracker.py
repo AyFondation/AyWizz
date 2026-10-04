@@ -27,13 +27,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from ay_platform_core.c8_llm.config import ModelInfo
 from ay_platform_core.c8_llm.cost import compute_cost
-from ay_platform_core.c8_llm.models import CallRecord, CallTags, CostCallEnvelope
+from ay_platform_core.c8_llm.models import (
+    CallRecord,
+    CallTags,
+    CostCallEnvelope,
+    RoutingDecision,
+)
 
 
 @runtime_checkable
@@ -272,7 +278,33 @@ def _extract_tags(request_data: dict[str, Any]) -> CallTags:
         source_id=_pick("X-Source-Id", "source_id"),
         run_id=_pick("X-Run-Id", "run_id"),
         turn_id=_pick("X-Turn-Id", "turn_id"),
+        routing=_extract_routing(_pick("X-Routing-Decision", "routing_decision")),
     )
+
+
+def _extract_routing(raw: str | None) -> RoutingDecision:
+    """Parse the compact routing decision the client attaches to the call.
+
+    TOLERANT BY DESIGN. This runs inside a cost callback: a malformed or
+    absent header must yield an EMPTY decision, never an exception. Losing
+    the reason for one call is a gap in the audit trail; raising here would
+    lose the call's cost entirely, which is strictly worse — the ledger is
+    the billing record before it is an explanation of itself.
+
+    An empty decision is also the correct answer for every call that did not
+    go through catalogue resolution (an explicit model, a legacy agent
+    route). It says "no decision was recorded", which is true, rather than
+    claiming price decided.
+    """
+    if not raw:
+        return RoutingDecision()
+    try:
+        return RoutingDecision.model_validate_json(raw)
+    except ValueError:
+        logging.getLogger("c8_llm.cost_tracker").warning(
+            "unparseable X-Routing-Decision header — recorded as empty",
+        )
+        return RoutingDecision()
 
 
 def _provider_of(model_name: str) -> str:

@@ -93,6 +93,11 @@ class CapabilityProbeOutcome(BaseModel):
     detail: str | None = None
     """What was observed: the upstream refusal, or the shape that proved
     support (a tool_use block came back, the image was accepted)."""
+    measured_value: int | None = None
+    """For a QUANTITY rather than a yes/no — today only `max_output_tokens`.
+    Kept on the same outcome type so one probe run returns one uniform list;
+    a second shape for one numeric capability would buy nothing and split
+    every consumer in two."""
 
 
 class ModelProbeResult(BaseModel):

@@ -489,6 +489,26 @@ export interface CapabilityProvenance {
   tool_calling: CapabilityEvidence;
   thinking: CapabilityEvidence;
   context_window: CapabilityEvidence;
+  structured_output: CapabilityEvidence;
+  prompt_caching: CapabilityEvidence;
+  streaming: CapabilityEvidence;
+  parallel_tool_calls: CapabilityEvidence;
+  max_output_tokens: CapabilityEvidence;
+}
+
+/** One benchmark's verdict on one model, 0-100.
+ *
+ *  Scores are keyed BY BENCHMARK because there is no such thing as "the"
+ *  quality of a model: a coding leaderboard says nothing about document
+ *  synthesis. Routing maximises score-per-euro on the benchmark the CALLER
+ *  names, so an averaged single figure would belong to no benchmark and
+ *  still decide real spending. */
+export interface BenchmarkScore {
+  score: number;
+  evidence: CapabilityEvidence;
+  /** ISO date. Benchmarks age; a score whose harness or model version has
+   *  moved on is stale rather than wrong, and the operator needs to see it. */
+  measured_at: string | null;
 }
 
 /** The operator's SUBTRACTIVE override: `true` means "the model can do this,
@@ -499,6 +519,13 @@ export interface CapabilityOverrides {
   vision: boolean;
   tool_calling: boolean;
   thinking: boolean;
+  structured_output: boolean;
+  prompt_caching: boolean;
+  streaming: boolean;
+  parallel_tool_calls: boolean;
+  // No `max_output_tokens`: the overrides are "do not use this" switches,
+  // and a token ceiling is a quantity — the lever on it is a lower number,
+  // not an off position.
 }
 
 /** What a model CAN do (measured), how we know (`provenance`), and what we
@@ -508,6 +535,14 @@ export interface ModelCapabilities {
   tool_calling: boolean;
   thinking: boolean;
   context_window: number;
+  structured_output: boolean;
+  prompt_caching: boolean;
+  streaming: boolean;
+  parallel_tool_calls: boolean;
+  /** Measured ceiling on ONE completion — distinct from `context_window`,
+   *  and an order of magnitude smaller on most models. `null` = never
+   *  measured; unlike the booleans a quantity has no sensible false value. */
+  max_output_tokens: number | null;
   provenance: CapabilityProvenance;
   disabled: CapabilityOverrides;
 }
@@ -538,6 +573,9 @@ export interface CapabilityProbeOutcome {
   supported: boolean | null;
   evidence: CapabilityEvidence;
   detail: string | null;
+  /** For a QUANTITY rather than a yes/no — today only `max_output_tokens`,
+   *  read out of the provider's refusal of an absurd request. */
+  measured_value: number | null;
 }
 
 /** Verdict of a model probe through the production path. CONSUMES TOKENS. */
@@ -589,6 +627,9 @@ export interface LLMRegistryPublic {
   provider_cost_in_per_1m: number;
   provider_cost_out_per_1m: number;
   default_model_quality: ModelQuality;
+  /** Benchmark scores keyed by benchmark name. Drives quality-per-euro
+   *  routing: the caller names which benchmark its work needs. */
+  quality_scores: Record<string, BenchmarkScore>;
   enabled: boolean;
   effective_from: string;
 }
@@ -606,6 +647,10 @@ export interface LLMModelUpsert {
   provider_cost_in_per_1m: number;
   provider_cost_out_per_1m: number;
   default_model_quality: ModelQuality;
+  /** Omit on a write that is not touching them and the server stores an
+   *  empty map — the registry's field-by-field copy has no notion of
+   *  "leave unchanged", so every caller must send what it wants kept. */
+  quality_scores: Record<string, BenchmarkScore>;
   enabled: boolean;
 }
 

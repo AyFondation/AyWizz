@@ -23,6 +23,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -220,10 +222,33 @@ class _Completer:
     """Records what the probe sent, so the tests can assert the PATH, not just
     the verdict."""
 
-    def __init__(self, *, fail: Exception | None = None, tool_call: bool = False):
+    def __init__(
+        self,
+        *,
+        fail: Exception | None = None,
+        tool_call: bool = False,
+        tool_calls: int | None = None,
+        content: str | None = None,
+        usage: dict[str, Any] | None = None,
+        stream_chunks: int = 1,
+        fail_sessions: dict[str, Exception] | None = None,
+    ):
         self.calls: list[ChatCompletionRequest] = []
+        self.stream_calls: list[ChatCompletionRequest] = []
         self._fail = fail
-        self._tool_call = tool_call
+        # Fail ONE probe while the others succeed, matched on the session-id
+        # suffix each probe uses (`…:maxout`, `…:tools`, …). Needed because
+        # `probe_model` returns early unless the reachability call succeeds:
+        # a blanket `fail=` never reaches the capability probes at all, so a
+        # test of a capability's FAILURE path could not be written with it.
+        self._fail_sessions = fail_sessions or {}
+        # `tool_calls` (a count) supersedes the older boolean when given, so
+        # the parallel-tool probe can be driven without breaking callers
+        # written against `tool_call=True`.
+        self._tool_calls = tool_calls if tool_calls is not None else int(tool_call)
+        self._content = content
+        self._usage = usage
+        self._stream_chunks = stream_chunks
 
     async def chat_completion(
         self, payload: ChatCompletionRequest, *, agent_name: str, session_id: str,
@@ -232,9 +257,37 @@ class _Completer:
         self.calls.append(payload)
         if self._fail is not None:
             raise self._fail
-        if self._tool_call:
-            return {"choices": [{"message": {"tool_calls": [{"id": "1"}]}}]}
-        return {"choices": [{"message": {"content": "ok"}}]}
+        for suffix, exc in self._fail_sessions.items():
+            if session_id.endswith(suffix):
+                raise exc
+        message: dict[str, Any] = {}
+        if self._tool_calls:
+            message["tool_calls"] = [
+                {"id": str(i)} for i in range(self._tool_calls)
+            ]
+        else:
+            message["content"] = self._content if self._content is not None else "ok"
+        body: dict[str, Any] = {"choices": [{"message": message}]}
+        if self._usage is not None:
+            body["usage"] = self._usage
+        return body
+
+    @asynccontextmanager
+    async def chat_completion_stream(
+        self, payload: ChatCompletionRequest, *, agent_name: str, session_id: str,
+    ) -> AsyncIterator[AsyncIterator[dict[str, Any]]]:
+        """Mirrors the real client's shape: an async CONTEXT MANAGER yielding
+        an async iterator. A stub that returned a plain iterator would let the
+        streaming probe pass here while failing against the deployed client."""
+        self.stream_calls.append(payload)
+        if self._fail is not None:
+            raise self._fail
+
+        async def _chunks() -> AsyncIterator[dict[str, Any]]:
+            for i in range(self._stream_chunks):
+                yield {"choices": [{"delta": {"content": str(i)}}]}
+
+        yield _chunks()
 
 
 @pytest.mark.asyncio
@@ -284,7 +337,16 @@ async def test_measured_capabilities_are_labelled_measured() -> None:
     result = await svc.probe_model("m-1", probe_capabilities=True)
 
     by_name = {c.capability: c for c in result.capabilities}
-    assert set(by_name) == {"tool_calling", "vision", "thinking"}
+    # CONTRACT CHANGE, 2026-09-29 (§10.3 case D): the probed set grew from
+    # three capabilities to eight. Asserted as an EXACT set on purpose — a
+    # capability added to `ModelCapabilities` and forgotten in the probe
+    # would otherwise ship as a permanently `unknown` flag that nothing
+    # surfaces, which is the failure R-800-152 exists to prevent.
+    assert set(by_name) == {
+        "tool_calling", "vision", "thinking",
+        "structured_output", "prompt_caching", "streaming",
+        "parallel_tool_calls", "max_output_tokens",
+    }
     for outcome in result.capabilities:
         # The whole point of R-800-152: a value that came from observation is
         # distinguishable from one a human asserted.
@@ -457,3 +519,134 @@ async def test_probes_are_platform_manager_only() -> None:
     assert anonymous.status_code == 401
 
 
+
+
+# ---------------------------------------------------------------------------
+# Second-wave capabilities (2026-09-29). One test per DECISION each probe can
+# reach — in particular the `None` verdicts, which exist so the registry never
+# records "cannot" where the probe only established "did not observe".
+# ---------------------------------------------------------------------------
+
+
+def _svc(completer: _Completer) -> LLMProbeService:
+    return LLMProbeService(
+        _Providers(_provider_doc()), _Registry(_model_doc()), None, completer,
+    )
+
+
+async def _capability(completer: _Completer, name: str) -> Any:
+    result = await _svc(completer).probe_model("m-1", probe_capabilities=True)
+    return next(c for c in result.capabilities if c.capability == name)
+
+
+@pytest.mark.asyncio
+async def test_structured_output_requires_the_answer_to_parse() -> None:
+    """Accepting `response_format` is not honouring it.
+
+    A provider that ignores an unknown field answers 200 with prose. A probe
+    that stopped at "no exception" would record that as support and the
+    router would then send schema-critical work to a model that free-texts.
+    """
+    prose = await _capability(_Completer(content="Sure! The value is 7."), "structured_output")
+    assert prose.supported is False
+
+    valid = await _capability(_Completer(content='{"value": 7}'), "structured_output")
+    assert valid.supported is True
+
+
+@pytest.mark.asyncio
+async def test_structured_output_rejects_valid_json_of_the_wrong_shape() -> None:
+    """Parsing is necessary, not sufficient — the schema asked for `value`."""
+    other = await _capability(_Completer(content='{"answer": 7}'), "structured_output")
+    assert other.supported is False
+
+
+@pytest.mark.asyncio
+async def test_prompt_caching_without_counters_is_undetermined_not_false() -> None:
+    """The distinction this whole tri-state exists for.
+
+    Providers only cache prompts above a minimum length that a probe cheap
+    enough to run per model does not reach. Recording `False` would assert
+    the model CANNOT cache, on evidence that shows only that this particular
+    prompt was not cached — and the operator would then route away from a
+    model that would have halved their bill.
+    """
+    outcome = await _capability(_Completer(usage={"prompt_tokens": 12}), "prompt_caching")
+    assert outcome.supported is None
+
+
+@pytest.mark.asyncio
+async def test_prompt_caching_counts_only_non_zero_counters() -> None:
+    """A counter reported as 0 proves the FIELD exists, not that anything was
+    cached. Treating its presence as support would mark every Anthropic model
+    as caching regardless of outcome."""
+    zeroed = await _capability(
+        _Completer(usage={"cache_read_input_tokens": 0}), "prompt_caching",
+    )
+    assert zeroed.supported is None
+
+    real = await _capability(
+        _Completer(usage={"cache_read_input_tokens": 1024}), "prompt_caching",
+    )
+    assert real.supported is True
+    assert "cache_read_input_tokens=1024" in (real.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_streaming_requires_a_real_chunk() -> None:
+    """A stream that opens and closes empty is not a working stream — C3
+    would render nothing and look hung rather than fail."""
+    empty = await _capability(_Completer(stream_chunks=0), "streaming")
+    assert empty.supported is False
+
+    live = await _capability(_Completer(stream_chunks=3), "streaming")
+    assert live.supported is True
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_distinguishes_one_from_none() -> None:
+    """Three outcomes, and the middle one matters.
+
+    Two or more calls prove the capability. ZERO disproves it. Exactly one is
+    undetermined: the model may be perfectly capable and have simply chosen
+    to sequence them, and marking that `False` would exclude it from the
+    OpenHands engine on no evidence.
+    """
+    both = await _capability(_Completer(tool_calls=2), "parallel_tool_calls")
+    assert both.supported is True
+
+    single = await _capability(_Completer(tool_calls=1), "parallel_tool_calls")
+    assert single.supported is None
+
+    none = await _capability(_Completer(tool_calls=0), "parallel_tool_calls")
+    assert none.supported is False
+
+
+@pytest.mark.asyncio
+async def test_max_output_tokens_is_read_from_the_refusal() -> None:
+    """The ceiling is learned from the provider's own error, which costs
+    nothing: the request is rejected on parameter validation, before a single
+    token is generated."""
+    refused = _Completer(
+        fail_sessions={":maxout": RuntimeError("max_tokens: must be <= 8192")},
+    )
+    outcome = await _capability(refused, "max_output_tokens")
+    assert outcome.measured_value == 8192
+    assert outcome.supported is True
+
+
+@pytest.mark.asyncio
+async def test_max_output_tokens_stays_undetermined_without_a_number() -> None:
+    """A refusal that names no ceiling, and an acceptance, both leave the
+    value unknown. Guessing one would be worse than leaving it blank — it
+    would silently cap what a `generate` phase is allowed to emit."""
+    vague = await _capability(
+        _Completer(fail_sessions={":maxout": RuntimeError("bad request")}),
+        "max_output_tokens",
+    )
+    assert vague.supported is None
+    assert vague.measured_value is None
+
+    accepted = await _capability(_Completer(), "max_output_tokens")
+    assert accepted.supported is None
+    assert accepted.measured_value is None

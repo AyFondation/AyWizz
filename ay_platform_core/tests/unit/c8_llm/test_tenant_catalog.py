@@ -25,6 +25,8 @@ from ay_platform_core.c8_llm.registry.catalog_service import (
     TenantCatalogService,
 )
 from ay_platform_core.c8_llm.registry.models import (
+    BenchmarkScore,
+    CapabilityEvidence,
     LLMModelUpsert,
     ModelCapabilities,
     ModelQuality,
@@ -100,22 +102,49 @@ async def _seed_registry(
     *,
     quality: ModelQuality,
     cost_in: float,
+    cost_out: float | None = None,
     vision: bool = False,
     tool_calling: bool = True,
+    structured_output: bool = False,
+    streaming: bool = False,
+    prompt_caching: bool = False,
+    quality_scores: dict[str, float] | None = None,
     enabled: bool = True,
 ) -> str:
-    """Create a registry model and return its stable model_id."""
+    """Create a registry model and return its stable model_id.
+
+    `cost_out` defaults to `cost_in * 5`, which is why the pre-2026-09-29
+    resolve tests could not tell input-only ranking from blended ranking:
+    with output price a FIXED MULTIPLE of input, the two orderings are
+    identical by construction. Tests that exercise the blend must set it
+    independently.
+    """
     public = await reg.create_model(
         LLMModelUpsert(
             alias=alias,
             provider_id="p1",
             upstream_model=alias,
             capabilities=ModelCapabilities(
-                vision=vision, tool_calling=tool_calling, context_window=200000
+                vision=vision,
+                tool_calling=tool_calling,
+                structured_output=structured_output,
+                streaming=streaming,
+                prompt_caching=prompt_caching,
+                context_window=200000,
             ),
             provider_cost_in_per_1m=cost_in,
-            provider_cost_out_per_1m=cost_in * 5,
+            provider_cost_out_per_1m=(
+                cost_in * 5 if cost_out is None else cost_out
+            ),
             default_model_quality=quality,
+            # Plain floats in, `BenchmarkScore` out: a test that had to spell
+            # the wrapper on every seed would bury the number that matters.
+            quality_scores={
+                name: BenchmarkScore(
+                    score=value, evidence=CapabilityEvidence.DECLARED,
+                )
+                for name, value in (quality_scores or {}).items()
+            },
             enabled=enabled,
         )
     )

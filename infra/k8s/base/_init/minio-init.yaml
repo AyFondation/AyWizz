@@ -1,6 +1,6 @@
 # =============================================================================
 # File: minio-init.yaml
-# Version: 7
+# Version: 8
 # Path: infra/k8s/base/_init/minio-init.yaml
 # Description: One-shot Job creating MinIO buckets + app user with a
 #              readwrite policy (R-100-118 v2). Idempotent: existing
@@ -37,7 +37,16 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          # SAME REBUILD AND SAME TAG AS THE SERVER (2026-09-28). When
+          # c10_minio moved to `pgsty/minio`, leaving the client on
+          # `quay.io/minio/mc` would have kept half the pair on the very line
+          # that move rejected: MinIO stopped publishing images for it, so it
+          # is frozen and its CVE fixes are unobtainable by pinning. Client
+          # and server now come from one source at one release, which also
+          # removes the version-skew question from any future admin-API
+          # failure — `mc admin policy create` and `mc admin user add` are
+          # what this Job lives on.
+          image: pgsty/mc:RELEASE.2026-08-04T00-00-00Z
           imagePullPolicy: IfNotPresent
           # Required wherever a namespace ResourceQuota is in force: a pod
           # without limits is REFUSED, and a refused Job pod looks like a

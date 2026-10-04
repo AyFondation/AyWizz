@@ -1,5 +1,5 @@
 # =============================================================================
-# Version: 1
+# Version: 2
 # Path: .dockerignore
 # Description: Excludes from Docker build contexts (devcontainer +
 #              future infra/docker/Dockerfile.{api,ui}). Cuts hundreds
@@ -11,6 +11,14 @@
 #                - ay_platform_core/src/
 #                - ay_platform_ui/package*.json
 #              Everything else is wasted bandwidth at build time.
+#
+#              v2 (2026-10-04): `**/coverage` narrowed to
+#              `ay_platform_ui/coverage`. The broad form excluded the Python
+#              package `c5_requirements/coverage/` from the api image and
+#              made C5 un-deployable from increment 3 of 310-SPEC onward. A
+#              build-exclusion pattern must not be able to delete SOURCE;
+#              `tests/coherence/test_dockerignore_spares_source.py` now
+#              enforces that.
 #
 #              Patterns use git-style globs ; last match wins.
 # =============================================================================
@@ -91,7 +99,14 @@ ay_platform_core/reports
 **/node_modules
 **/.next
 **/.turbo
-**/coverage
+# NOT `**/coverage`. That pattern was written to drop vitest's report
+# directory and silently dropped `c5_requirements/coverage/` — a real Python
+# PACKAGE — from the api image, leaving C5 un-deployable with
+# `ModuleNotFoundError: No module named '...c5_requirements.coverage'`. The
+# test suite could not see it: it runs against the source tree, never the
+# image. Anchored to the one directory that actually exists; a
+# coherence test now refuses any pattern that would exclude a source package.
+ay_platform_ui/coverage
 **/playwright-report
 **/test-results
 **/.vitest-cache

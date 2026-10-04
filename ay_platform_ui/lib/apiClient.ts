@@ -135,6 +135,22 @@ import type {
   ValidationPlugin,
   ValidationRun,
 } from "./types";
+import type {
+  BaselineList,
+  BaselineManifestView,
+  BaselineReadinessView,
+  ChangeTicketList,
+  ChangeTicketView,
+  ContainerCoverageView,
+  DocObjectList,
+  DocObjectSummary,
+  RenderFormatName,
+  RequirementCoverageView,
+  ResolvedCycleView,
+  SpeculativeList,
+  SuspectLinkList,
+  TreatmentPlanList,
+} from "./workbenchTypes";
 
 export class ApiError extends Error {
   constructor(
@@ -1861,6 +1877,181 @@ export class ApiClient {
     return this.request<OrchestratorRun>(
       `/api/v1/orchestrator/runs/${encodeURIComponent(runId)}/steer`,
       { method: "POST", body: JSON.stringify(payload) },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Traceability workbench — 310-SPEC §4.1 / §4.7 / §4.8 / §4.9
+  //
+  // EVERY PATH BELOW WAS COPIED FROM `tests/contract/backend-routes.json`,
+  // not recalled. Increment 6 of 310 shipped an agent client calling
+  // `/objects/containers/{c}` where C5 serves `/containers/{c}/objects`;
+  // only enumerating the live router found it. `api-surface.test.ts` is the
+  // standing guard, and it also enforces completeness — a method added here
+  // and not exercised there fails the build.
+  // -------------------------------------------------------------------------
+
+  /** GET /api/v1/projects/{pid}/process/cycles/{cid}/resolved — the cycle
+   *  this project actually runs on, project tailoring applied (R-310-046).
+   *  Its containers are the workbench navigator. */
+  async getResolvedCycle(projectId: string, cycleId: string): Promise<ResolvedCycleView> {
+    return this.request<ResolvedCycleView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/process/cycles/${encodeURIComponent(cycleId)}/resolved`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/containers/{c}/objects — one container's
+   *  objects in document order, with review state and version. */
+  async listContainerObjects(projectId: string, container: string): Promise<DocObjectList> {
+    return this.request<DocObjectList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/containers/${encodeURIComponent(container)}/objects`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/containers/{c}/objects/{oid} — one object. */
+  async getContainerObject(
+    projectId: string,
+    container: string,
+    objectId: string,
+  ): Promise<DocObjectSummary> {
+    return this.request<DocObjectSummary>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/containers/${encodeURIComponent(container)}/objects/${encodeURIComponent(objectId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/coverage/containers/{c} — what the
+   *  container owes and has delivered (R-310-120). Feeds both the coverage
+   *  region and the uncovered-allocation findings of R-500-018. */
+  async getContainerCoverage(projectId: string, container: string): Promise<ContainerCoverageView> {
+    return this.request<ContainerCoverageView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/coverage/containers/${encodeURIComponent(container)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/coverage/requirements/{rid} — the
+   *  aggregated coverage of one requirement, expanded in place on an
+   *  object's link (R-500-017). */
+  async getRequirementCoverage(
+    projectId: string,
+    requirementId: string,
+  ): Promise<RequirementCoverageView> {
+    return this.request<RequirementCoverageView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/coverage/requirements/${encodeURIComponent(requirementId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/coverage/suspect — links whose target has
+   *  moved past its pin (R-310-145). */
+  async listSuspectLinks(projectId: string): Promise<SuspectLinkList> {
+    return this.request<SuspectLinkList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/coverage/suspect`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/coverage/speculative — objects built on
+   *  upstreams nobody has accepted (R-310-177 v2). Computed server-side on
+   *  every read, so the UI never caches it across a review. */
+  async listSpeculativeObjects(projectId: string, container?: string): Promise<SpeculativeList> {
+    const query = container ? `?container=${encodeURIComponent(container)}` : "";
+    return this.request<SpeculativeList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/coverage/speculative${query}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/changes — change tickets. `onlyOpen` is the
+   *  review queue; the full list is the audit trail. */
+  async listChangeTickets(projectId: string, onlyOpen = false): Promise<ChangeTicketList> {
+    const query = onlyOpen ? "?only_open=true" : "";
+    return this.request<ChangeTicketList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/changes${query}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/changes/{drop}/{rid} — one ticket with its
+   *  impact set. */
+  async getChangeTicket(
+    projectId: string,
+    dropId: string,
+    requirementId: string,
+  ): Promise<ChangeTicketView> {
+    return this.request<ChangeTicketView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/changes/${encodeURIComponent(dropId)}/${encodeURIComponent(requirementId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/plans — treatment plans. `awaitingRatification`
+   *  includes a plan amended past its approval, not only a never-approved
+   *  one (R-310-170 + R-310-173). */
+  async listTreatmentPlans(
+    projectId: string,
+    awaitingRatification = false,
+  ): Promise<TreatmentPlanList> {
+    const query = awaitingRatification ? "?awaiting_ratification=true" : "";
+    return this.request<TreatmentPlanList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/plans${query}`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/baseline-readiness — the R-310-201 gate,
+   *  evaluated without taking a baseline. Its own first-level segment so no
+   *  `/{tag}` route can shadow it. */
+  async getBaselineReadiness(projectId: string): Promise<BaselineReadinessView> {
+    return this.request<BaselineReadinessView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/baseline-readiness`,
+      { method: "GET" },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/baselines — the taken baselines. */
+  async listBaselines(projectId: string): Promise<BaselineList> {
+    return this.request<BaselineList>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/baselines`,
+      { method: "GET" },
+    );
+  }
+
+  /** POST /api/v1/projects/{pid}/baselines/{tag} — take a baseline.
+   *  409 when the gate refuses, carrying the full readiness verdict; 409 too
+   *  when the tag is taken, because a baseline is immutable (R-310-204). */
+  async createBaseline(
+    projectId: string,
+    tag: string,
+    cycleId: string,
+    note = "",
+  ): Promise<BaselineManifestView> {
+    return this.request<BaselineManifestView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/baselines/${encodeURIComponent(tag)}`,
+      { method: "POST", body: JSON.stringify({ cycle_id: cycleId, note }) },
+    );
+  }
+
+  /** GET /api/v1/projects/{pid}/baselines/{tag} — the manifest itself. */
+  async getBaseline(projectId: string, tag: string): Promise<BaselineManifestView> {
+    return this.request<BaselineManifestView>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/baselines/${encodeURIComponent(tag)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** The download URL for a rendering (R-310-207).
+   *
+   *  A URL rather than a fetch: the response is a file, and routing bytes
+   *  through `request()` — which parses JSON — would corrupt it. The browser
+   *  downloads it directly, carrying the same auth as any other request.
+   */
+  baselineRenderUrl(projectId: string, tag: string, fmt: RenderFormatName): string {
+    return this.url(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/baselines/${encodeURIComponent(tag)}/render/${fmt}`,
     );
   }
 }

@@ -1,10 +1,10 @@
 ---
 document: 300-SPEC-REQUIREMENTS-MGMT
-version: 1
+version: 2
 path: requirements/300-SPEC-REQUIREMENTS-MGMT.md
 language: en
 status: draft
-derives-from: [D-001, D-005, D-012]
+derives-from: [D-001, D-005, D-012, D-023, D-025]
 ---
 
 # Requirements Management Specification
@@ -609,18 +609,27 @@ Reindex execution SHALL be authorised: only callers with the `admin` global role
 
 ```yaml
 id: R-300-080
-version: 1
+version: 2
 status: draft
 category: functional
+derives-from: [D-025]
+impacts: [R-310-060, R-310-061]
 ```
 
-The Requirements Service SHALL support import of a complete document set in two formats in v1:
-- **Markdown + YAML** (`format=md`) — the platform's native format; the import is a bulk upload of `.md` files.
-- **ReqIF** (`format=reqif`) — the OMG ReqIF 1.2 standard; the import converts ReqIF structures to the native Markdown + YAML format.
+The Requirements Service SHALL support import of a complete document set in the following formats, each carrying a **source confidence class** per `R-310-060`:
 
-Other formats (DOCX, CSV, XLSX) are explicitly out of scope for v1.
+| Format | `format=` | Confidence class |
+|---|---|---|
+| Markdown + YAML (platform native) | `md` | `structured` |
+| ReqIF 1.2 (OMG) | `reqif` | `structured` |
+| XLSX | `xlsx` | `structured` |
+| DOCX | `docx` | `textual` |
+| PDF with an extractable text layer | `pdf` | `textual` |
+| PDF requiring OCR | `pdf` | `degraded` |
 
-**Rationale.** Markdown is natively the platform's format; ReqIF is the industry standard for regulated contexts (automotive, aerospace) and aligns with the user's ISO 21434 background. Other formats are deferred until concrete demand emerges.
+An import of class `degraded` SHALL require human verification of the extracted text before any downstream splitting or allocation is proposed on it (`R-310-061`). CSV remains out of scope.
+
+**Rationale.** v1 of this requirement restricted import to the platform's own format and ReqIF, on the assumption that regulated customers supply ReqIF. That assumption does not hold: supplied requirement packages arrive in whatever format the issuing party uses, which in practice includes DOCX, XLSX and PDF — including scanned PDF. Refusing those formats would make the intake workflow of `310-SPEC` inapplicable to its actual input. The confidence class is not cosmetic: interval-anchored splitting (`R-310-091`) relies on character offsets into the source text, and OCR misrecognition shifts those offsets, so the exhaustiveness check of `R-310-092` would pass against corrupted text and lose a clause invisibly. The class is what gates that hazard.
 
 #### R-300-081
 
@@ -976,7 +985,7 @@ The canonical skeleton of a requirements document is defined in `meta/100-SPEC-M
 | ID | Question | Owning decision | Target resolution |
 |---|---|---|---|
 | Q-300-001 | Adapter layer implementation: depend on StrictDoc's public Python API, or reimplement the minimal subset needed? Impacts maintenance burden. | D-001 v2 | v1 (during initial C5 implementation) |
-| Q-300-002 | Historical snapshot storage: full document copy, or entity-level diff? Full copies are simpler; diffs save storage. | — | v1 (baseline: full document copy; revisit if storage grows) |
+| Q-300-002 | **RESOLVED** by `R-310-205` (D-023): full compressed snapshots, never deltas. Delta encoding introduces a chain dependency that turns the loss of one stored version into the loss of all subsequent history and complicates reindex, for a storage saving that `R-310-303` shows is not needed. | D-023 | resolved |
 | Q-300-003 | Reconciliation worker isolation: per-project worker, or single cluster-wide worker? Scaling and failure-isolation implications. | — | v1 (baseline: cluster-wide with per-project cursor) |
 | Q-300-004 | Soft-delete cleanup policy: do `_deleted/` files ever expire? If so, on what schedule? | — | v2 (retention policy is a compliance question) |
 | Q-300-005 | ReqIF dialect support: strict OMG ReqIF 1.2, or common extensions (Polarion, IBM DOORS)? | — | v1 (baseline: strict 1.2; extensions per user demand) |

@@ -52,7 +52,17 @@ const ROUTES: BackendRoute[] = (backendRoutes as { routes: BackendRoute[] }).rou
 
 // Prototype methods that do NOT emit an HTTP call to a backend route and are
 // therefore exempt from the completeness check (private helpers + ctor).
-const NON_HTTP_METHODS = new Set(["constructor", "url", "request"]);
+const NON_HTTP_METHODS = new Set([
+  "constructor",
+  "url",
+  "request",
+  // Builds a download URL for an <a href> rather than fetching: the baseline
+  // rendering is a FILE, and routing it through `request()` — which parses
+  // JSON — would corrupt it. The path it builds is still covered, because
+  // the backend route is in the snapshot and the e2e download test exercises
+  // it for real.
+  "baselineRenderUrl",
+]);
 
 /**
  * Match a FastAPI path template (with `{param}` and catch-all `{name:path}`
@@ -149,6 +159,13 @@ const CONV = "c1";
 const SLUG = "sl";
 const RID = "rid1";
 const FILE_PATH = "doc.md";
+// Traceability workbench fixtures (310-SPEC).
+const CYCLE = "C-AUTO";
+const CONTAINER = "030-ARCH";
+const OBJECT = "AD-100";
+const REQ = "CUST-001";
+const DROP = "W14";
+const TAG = "B-01";
 
 /**
  * One invocation per HTTP-bearing client method. The key is the method name;
@@ -310,6 +327,25 @@ function invocations(client: ApiClient): Record<string, () => Promise<unknown> |
     resumeOrchestratorRun: () => client.resumeOrchestratorRun(RID, "retry" as never),
     readOrchestratorTrace: () => client.readOrchestratorTrace(RID),
     steerOrchestratorRun: () => client.steerOrchestratorRun(RID, { hint: "x" } as never),
+    // --- Traceability workbench (310-SPEC) ---------------------------------
+    // Both forms of the optional-query methods are driven: a `?container=`
+    // or `?only_open=` suffix must still resolve to the same backend route,
+    // and only exercising the bare form would leave the query-bearing path
+    // unchecked.
+    getResolvedCycle: () => client.getResolvedCycle(P, CYCLE),
+    listContainerObjects: () => client.listContainerObjects(P, CONTAINER),
+    getContainerObject: () => client.getContainerObject(P, CONTAINER, OBJECT),
+    getContainerCoverage: () => client.getContainerCoverage(P, CONTAINER),
+    getRequirementCoverage: () => client.getRequirementCoverage(P, REQ),
+    listSuspectLinks: () => client.listSuspectLinks(P),
+    listSpeculativeObjects: () => client.listSpeculativeObjects(P, CONTAINER),
+    listChangeTickets: () => client.listChangeTickets(P, true),
+    getChangeTicket: () => client.getChangeTicket(P, DROP, REQ),
+    listTreatmentPlans: () => client.listTreatmentPlans(P, true),
+    getBaselineReadiness: () => client.getBaselineReadiness(P),
+    listBaselines: () => client.listBaselines(P),
+    createBaseline: () => client.createBaseline(P, TAG, CYCLE, "note"),
+    getBaseline: () => client.getBaseline(P, TAG),
   };
 }
 

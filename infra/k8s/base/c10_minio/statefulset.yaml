@@ -1,6 +1,6 @@
 # =============================================================================
 # File: statefulset.yaml
-# Version: 5
+# Version: 6
 # Path: infra/k8s/base/c10_minio/statefulset.yaml
 # Description: MinIO single-node StatefulSet (C10). v1 ships single-node;
 #              distributed-mode (4+ nodes) deferred until storage scale
@@ -53,7 +53,44 @@ spec:
     spec:
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          # A THIRD-PARTY REBUILD, chosen after both MinIO-published options
+          # were ruled out on 2026-09-28. Read this before changing it back.
+          #
+          #   1. `quay.io/minio/minio` — the community line this platform ran
+          #      until now. Still pullable at the 2025-09-07 tag, but MinIO
+          #      stopped publishing images for it: RELEASE.2025-10-15 is
+          #      source-only, so the line is frozen at an ageing build and its
+          #      CVE fixes are unobtainable by pinning a newer tag.
+          #
+          #   2. `quay.io/minio/aistor/minio` — the AIStor line. Pulls and
+          #      starts, then denies EVERY S3 operation:
+          #        AccessDenied — "No license is installed. Please install a
+          #        valid license using 'mc license update' to enable service."
+          #      It failed on the integration tier's first `list_buckets`.
+          #      Whatever the capacity terms, a licence is a PREREQUISITE,
+          #      not an optional extra — revisit only once one exists and can
+          #      be mounted into this pod.
+          #
+          # SILO is Pigsty's FORK of MinIO — not a rebuild of it, which is a
+          # sharper distinction than it sounds: a rebuild tracks upstream, a
+          # fork diverges. It serves S3 with no licence gate, verified on the
+          # real credentials + policy path and across the storage-heavy
+          # integration tiers (C7 artifacts, C16 snapshot/restore), and the
+          # `mc` admin surface this platform's init Job depends on still
+          # answers it.
+          #
+          # PINNED BY DIGEST, not by tag. Silo publishes no versioned tag at
+          # the time of writing — only `latest`, which this repository's own
+          # discipline forbids ("bump deliberately, never float"). The digest
+          # keeps the tag readable while making the reference immutable, so a
+          # silent upstream re-push cannot change what runs here. Replace
+          # with a real tag the moment one is published.
+          #
+          # THE TRADE-OFF IS PROVENANCE, and it is worth stating plainly:
+          # this is a third-party fork of the component that holds ALL of the
+          # platform's objects. Its update cadence, and its response to a
+          # CVE, are the Pigsty project's — not MinIO's. Watch it as such.
+          image: pgsty/silo:latest@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46
           imagePullPolicy: IfNotPresent
           args:
             - "server"

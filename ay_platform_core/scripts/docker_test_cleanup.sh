@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: docker_test_cleanup.sh
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/scripts/docker_test_cleanup.sh
 # Description: Stops and removes orphaned Docker containers spawned by
 #              testcontainers (ArangoDB / MinIO / Loki / Elasticsearch /
@@ -45,6 +45,17 @@ fi
 # that switch are still reaped.
 PATTERNS=(
     "arangodb/arangodb"
+    # What this tier actually spawns: Pigsty's `silo` fork. `pgsty/minio`
+    # stays because the 2026-09-28 pass briefly used it and may have left
+    # containers behind.
+    "pgsty/silo"
+    "pgsty/minio"
+    # AIStor. Kept although the platform does NOT use it: the 2026-09-28
+    # attempt to move to it left containers behind before being reverted,
+    # and this list is a PREFIX match — `quay.io/minio/aistor/minio` does
+    # not match `quay.io/minio/minio`, so an entry of its own is the only
+    # way those get reaped.
+    "quay.io/minio/aistor/minio"
     "quay.io/minio/minio"
     "minio/minio"
     "grafana/loki"

@@ -135,6 +135,33 @@ class ResolvedModel(BaseModel):
     model_id: str
     model_alias: str
     model_quality: ModelQuality
+    """The tier the RESOLVED model actually is — which may EXCEED what the
+    caller asked for, since resolution accepts any model at or above the
+    requested floor and a better one is sometimes cheaper. Echoing the
+    request back here would hide that upgrade from the call log."""
     upstream_model: str
     vision: bool
     tool_calling: bool
+    # Defaulted, unlike the two above: these were added in the 2026-09-29
+    # capability wave and every stored/constructed ResolvedModel predating
+    # it is still valid — `False` reads as "not available to this caller",
+    # which is exactly the safe interpretation.
+    structured_output: bool = False
+    streaming: bool = False
+    prompt_caching: bool = False
+    composite_score: float | None = None
+    """What the winner scored over the caller's benchmark profile. `None`
+    when no candidate covered it and price decided. Surfaced so the caller
+    can freeze it into the call ledger — see `RoutingDecision`."""
+    effective_cost: float | None = None
+    """The blended, cache-discounted price the ranking compared on. Not the
+    call's cost; the number the COMPARISON used, which list prices alone no
+    longer yield once weighting or the caching discount changes."""
+    decided_by_benchmark: str | None = None
+    """Which benchmark's score-per-euro selected this model, when one did.
+
+    `None` means the choice was made on price alone — either no benchmark
+    was named, or no candidate carried a score for the one that was. Without
+    this field a resolution is unexplainable after the fact: two runs of the
+    same request can legitimately pick different models as scores are
+    added, and nothing would say why."""

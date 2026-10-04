@@ -1,6 +1,11 @@
 # =============================================================================
 # File: minio_storage.py
-# Version: 1
+# Version: 2
+#              v2: `put_document` takes an explicit `content_type` (default
+#                  unchanged: text/markdown). The method claims to write "a
+#                  document" but baked one media type; the object-grain store
+#                  of 310-SPEC §4.1 writes JSON and gzip through the same
+#                  primitive rather than duplicating the MinIO plumbing.
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/storage/minio_storage.py
 # Description: MinIO source-of-truth storage for C5.
 #              Async wrappers around the sync `minio` client via
@@ -105,7 +110,9 @@ class RequirementsStorage:
         """Read a raw document by absolute object path. Raises FileNotFoundError."""
         return await asyncio.to_thread(self._get_object_sync, path)
 
-    def _put_object_sync(self, path: str, data: bytes) -> None:
+    def _put_object_sync(
+        self, path: str, data: bytes, content_type: str = "text/markdown"
+    ) -> None:
         try:
             stream = io.BytesIO(data)
             self._client.put_object(
@@ -113,14 +120,24 @@ class RequirementsStorage:
                 path,
                 data=stream,
                 length=len(data),
-                content_type="text/markdown",
+                content_type=content_type,
             )
         except S3Error as exc:
             raise StorageError(f"MinIO put failed for {path}: {exc}") from exc
 
-    async def put_document(self, path: str, data: bytes) -> None:
-        """Write (or overwrite) a document at the given path."""
-        await asyncio.to_thread(self._put_object_sync, path, data)
+    async def put_document(
+        self, path: str, data: bytes, content_type: str = "text/markdown"
+    ) -> None:
+        """Write (or overwrite) a document at the given path.
+
+        Args:
+            path: Absolute object path within the bucket.
+            data: Raw payload.
+            content_type: Media type to store. Defaults to Markdown, the
+                corpus format; the object-grain store (310-SPEC §4.1) passes
+                `application/json` and `application/gzip`.
+        """
+        await asyncio.to_thread(self._put_object_sync, path, data, content_type)
 
     def _delete_object_sync(self, path: str) -> None:
         try:

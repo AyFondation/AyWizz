@@ -108,6 +108,13 @@ class LLMRegistryService:
             provider_cost_in_per_1m=body.provider_cost_in_per_1m,
             provider_cost_out_per_1m=body.provider_cost_out_per_1m,
             default_model_quality=body.default_model_quality,
+            # Field-by-field copies are safe against typos and SILENT about
+            # omissions: `quality_scores` was added to `_RegistryFields` and
+            # dropped here at first, so it survived validation, survived the
+            # API, and vanished on the way to storage — resolution then
+            # ranked every model as unscored. Anything added to the shared
+            # base must be added here too.
+            quality_scores=body.quality_scores,
             enabled=body.enabled,
             effective_from=self._clock(),
         )

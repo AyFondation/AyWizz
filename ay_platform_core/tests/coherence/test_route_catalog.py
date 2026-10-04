@@ -32,6 +32,19 @@ from ay_platform_core.c4_orchestrator.router import router as c4_router
 from ay_platform_core.c4_orchestrator.source_router import (
     router as c4_source_router,
 )
+from ay_platform_core.c5_requirements.absorption.router import (
+    router as c5_absorption_router,
+)
+from ay_platform_core.c5_requirements.baseline.router import (
+    router as c5_baseline_router,
+)
+from ay_platform_core.c5_requirements.coverage.router import router as c5_coverage_router
+from ay_platform_core.c5_requirements.execution.router import (
+    router as c5_execution_router,
+)
+from ay_platform_core.c5_requirements.intake.router import router as c5_intake_router
+from ay_platform_core.c5_requirements.objects.router import router as c5_objects_router
+from ay_platform_core.c5_requirements.process.router import router as c5_process_router
 from ay_platform_core.c5_requirements.router import router as c5_router
 from ay_platform_core.c6_validation.router import router as c6_router
 from ay_platform_core.c7_memory.router import router as c7_router
@@ -68,6 +81,13 @@ _ROUTERS: list[tuple[str, object, str]] = [
     ("c4_orchestrator", c4_documents_router, ""),
     ("c4_orchestrator", c4_source_router, ""),
     ("c5_requirements", c5_router, ""),
+    ("c5_requirements", c5_objects_router, ""),
+    ("c5_requirements", c5_process_router, ""),
+    ("c5_requirements", c5_coverage_router, ""),
+    ("c5_requirements", c5_intake_router, ""),
+    ("c5_requirements", c5_absorption_router, ""),
+    ("c5_requirements", c5_execution_router, ""),
+    ("c5_requirements", c5_baseline_router, ""),
     ("c6_validation", c6_router, ""),
     ("c7_memory", c7_router, ""),
     ("c8_admin", c8_admin_router, ""),

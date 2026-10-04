@@ -1,6 +1,10 @@
 # =============================================================================
 # File: config.py
-# Version: 2
+# Version: 4
+#              v4: `draft_iteration_cap` (C5_DRAFT_ITERATION_CAP) for the
+#              negotiation anomaly cap of R-310-206.
+#              v3: `object_lock_lease_seconds` (C5_OBJECT_LOCK_LEASE_SECONDS)
+#              for the object edit lease of R-310-190.
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/config.py
 # Description: Runtime configuration for the C5 Requirements Service.
 #
@@ -65,3 +69,13 @@ class RequirementsConfig(BaseSettings):
 
     # Reconciliation worker (R-300-063): 15-minute default cadence
     reconcile_interval_seconds: int = 900
+
+    # Object edit lease (R-310-190): 15-minute default, renewed by activity.
+    # A lock without expiry is held forever by an actor whose session ended,
+    # so the lease is mandatory rather than a convenience.
+    object_lock_lease_seconds: int = 900
+
+    # Working-draft iteration cap (R-310-206). Iterations cost no storage,
+    # so this is not a quota: it surfaces an agent that rewrites one
+    # paragraph without converging, which costs tokens every attempt.
+    draft_iteration_cap: int = 12

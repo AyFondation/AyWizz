@@ -48,6 +48,7 @@ from ay_platform_core.c8_llm.models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     CostSummary,
+    RoutingDecision,
 )
 from ay_platform_core.c8_llm.registry.key_provider import CallTarget
 from ay_platform_core.observability import make_traced_client
@@ -248,7 +249,15 @@ class LLMGatewayClient:
         key_provider: (
             Callable[[str], Awaitable[CallTarget | None]] | None
         ) = None,
-        model_provider: Callable[..., Awaitable[str | None]] | None = None,
+        # Accepts EITHER resolver shape — the alias-only one, or the
+        # deciding one that also returns why the model was chosen. The
+        # client uses the reason when it is offered and works without it,
+        # so both wirings are valid and neither has to be migrated in
+        # lockstep with the other.
+        model_provider: Callable[
+            ..., Awaitable[str | tuple[str | None, RoutingDecision] | None]
+        ]
+        | None = None,
         quota_guard: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
@@ -334,7 +343,7 @@ class LLMGatewayClient:
         agent_name: str,
         tenant_id: str | None,
         project_id: str | None,
-    ) -> None:
+    ) -> RoutingDecision | None:
         """Provider-INDEPENDENT model selection (D-011). When no model was
         chosen (no explicit `model`, no client-side agent route), resolve one
         from the operator's registry catalogue — scoped to the call's project,
@@ -345,18 +354,34 @@ class LLMGatewayClient:
         Runs BEFORE `_inject_upstream_key`, which rewrites the alias to the
         provider endpoint + key."""
         if self._model_provider is None or body.get("model"):
-            return
+            return None
         try:
-            alias = await self._model_provider(
+            outcome = await self._model_provider(
                 agent_name,
                 tenant_id,
                 project_id,
                 require_tool_calling=bool(body.get("tools")),
             )
         except Exception:  # best-effort, never break a call
-            return
-        if alias:
-            body["model"] = alias
+            return None
+        # Accepts BOTH resolver shapes: the alias-only one and the deciding
+        # one that also returns why. Two consumers with different needs share
+        # this provider slot, and a client that demanded the tuple would
+        # break every existing wiring and stub for a field it can simply do
+        # without.
+        if isinstance(outcome, tuple):
+            alias, decision = outcome
+        else:
+            alias, decision = outcome, None
+        if not alias:
+            return None
+        body["model"] = alias
+        # RETURNED, never stashed on `self`. One client instance serves
+        # concurrent requests, so an attribute holding "the last decision"
+        # would be read by whichever call happened to reach the header
+        # builder next — attributing one request's reasoning to another's
+        # invoice, intermittently and undetectably.
+        return decision
 
     async def _inject_upstream_key(self, body: dict[str, Any]) -> None:
         """Resolve the alias in ``body['model']`` to its registry CallTarget and
@@ -463,9 +488,18 @@ class LLMGatewayClient:
         if reasoning_verbose:
             _apply_adaptive_thinking(body)
         await self._enforce_quota(tenant_id, project_id=project_id, user_id=user_id)
-        await self._resolve_model_alias(
+        decision = await self._resolve_model_alias(
             body, agent_name=agent_name, tenant_id=tenant_id, project_id=project_id
         )
+        if decision is not None:
+            # Frozen onto the call it justifies (R-800-146). Travels as a
+            # header like every other tag, so the cost receiver can write it
+            # into `llm_calls` alongside the materialised cost — the reason
+            # ages exactly like the price it explains, and neither is
+            # recomputed from today's inputs.
+            headers["X-Routing-Decision"] = decision.model_dump_json(
+                exclude_defaults=True
+            )
         await self._inject_upstream_key(body)
         # Cache marker AFTER upstream resolution: the marker is provider-aware
         # and reads the now-rewritten `<wire_format>/<upstream>` model.

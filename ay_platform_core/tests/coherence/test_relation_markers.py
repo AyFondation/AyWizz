@@ -21,9 +21,21 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
+
+# `scripts/checks/` holds the audit scripts, which are not an installed
+# package. Inserted HERE rather than relied upon: this module imported
+# `audit_validation_reachability` with no path setup of its own and worked
+# only when `test_interface_consistency.py` — which does insert it — had
+# already run. Under `pytest-randomly` that is a coin flip, and it lost on
+# 2026-10-04 with a `ModuleNotFoundError` in CI. A test must not depend on
+# another test's side effect.
+_CHECKS_DIR = Path(__file__).resolve().parents[2] / "scripts" / "checks"
+if str(_CHECKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_CHECKS_DIR))
 
 SUB_PROJECT_ROOT = Path(__file__).parent.parent.parent  # ay_platform_core/
 MONOREPO_ROOT = SUB_PROJECT_ROOT.parent  # <repo>/

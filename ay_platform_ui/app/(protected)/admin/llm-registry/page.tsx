@@ -162,6 +162,16 @@ export default function LlmRegistryPage() {
         const measured = Object.fromEntries(
           verdict.capabilities.map((c) => [c.capability, c.supported === true]),
         );
+        const ceiling = verdict.capabilities.find((c) => c.capability === "max_output_tokens");
+        // `unknown` where the probe returned `supported: null`. An
+        // undetermined verdict is NOT a measurement: prompt caching commonly
+        // comes back null because the probe prompt is below the provider's
+        // minimum cacheable length, and stamping that `measured` would
+        // freeze a non-answer as fact.
+        const seen = (name: string): CapabilityEvidence =>
+          verdict.capabilities.some((c) => c.capability === name && c.supported !== null)
+            ? "measured"
+            : "unknown";
         await apiClient.updateLlmRegistryModel(model.model_id, {
           alias: model.alias,
           provider_id: model.provider_id,
@@ -169,16 +179,31 @@ export default function LlmRegistryPage() {
           provider_cost_in_per_1m: model.provider_cost_in_per_1m,
           provider_cost_out_per_1m: model.provider_cost_out_per_1m,
           default_model_quality: model.default_model_quality,
+          quality_scores: model.quality_scores,
           enabled: model.enabled,
           capabilities: {
             vision: measured.vision ?? false,
             tool_calling: measured.tool_calling ?? false,
             thinking: measured.thinking ?? false,
+            structured_output: measured.structured_output ?? false,
+            prompt_caching: measured.prompt_caching ?? false,
+            streaming: measured.streaming ?? false,
+            parallel_tool_calls: measured.parallel_tool_calls ?? false,
             context_window: model.capabilities.context_window,
+            max_output_tokens:
+              ceiling?.measured_value ?? model.capabilities.max_output_tokens ?? null,
             provenance: {
-              vision: "measured",
-              tool_calling: "measured",
-              thinking: "measured",
+              vision: seen("vision"),
+              tool_calling: seen("tool_calling"),
+              thinking: seen("thinking"),
+              structured_output: seen("structured_output"),
+              prompt_caching: seen("prompt_caching"),
+              streaming: seen("streaming"),
+              parallel_tool_calls: seen("parallel_tool_calls"),
+              max_output_tokens:
+                ceiling?.measured_value != null
+                  ? "measured"
+                  : model.capabilities.provenance.max_output_tokens,
               // Untouched: measuring it would cost a maximum-length request.
               context_window: model.capabilities.provenance.context_window,
             },
@@ -524,6 +549,28 @@ function ModelForm({
   const [noVision, setNoVision] = useState(caps?.disabled?.vision ?? false);
   const [noTools, setNoTools] = useState(caps?.disabled?.tool_calling ?? false);
   const [noThinking, setNoThinking] = useState(caps?.disabled?.thinking ?? false);
+  const [noSchema, setNoSchema] = useState(caps?.disabled?.structured_output ?? false);
+  const [noCache, setNoCache] = useState(caps?.disabled?.prompt_caching ?? false);
+  const [noStream, setNoStream] = useState(caps?.disabled?.streaming ?? false);
+  const [noParallel, setNoParallel] = useState(caps?.disabled?.parallel_tool_calls ?? false);
+
+  // BENCHMARK SCORES ARE EDITED HERE, unlike capabilities — and the
+  // difference is the point. A capability is a FACT about the model, so
+  // only a probe may set it. A benchmark score is a figure the operator
+  // brings from outside (a published leaderboard), so it is typed in, and
+  // its provenance says `declared` to keep it distinguishable from what the
+  // eval harness will later measure on the same key.
+  // Each row carries a STABLE id rather than being keyed by its index:
+  // removing a row shifts every later index, and React would then reuse the
+  // wrong input state — the operator would watch a score jump to a
+  // different benchmark.
+  const [scores, setScores] = useState<Array<{ id: string; name: string; value: string }>>(
+    Object.entries(existing?.quality_scores ?? {}).map(([name, s]) => ({
+      id: name,
+      name,
+      value: String(s.score),
+    })),
+  );
 
   const valid = alias.trim() && providerId && upstream.trim();
 
@@ -538,18 +585,52 @@ function ModelForm({
         vision: caps?.vision ?? false,
         tool_calling: caps?.tool_calling ?? false,
         thinking: caps?.thinking ?? false,
+        structured_output: caps?.structured_output ?? false,
+        prompt_caching: caps?.prompt_caching ?? false,
+        streaming: caps?.streaming ?? false,
+        parallel_tool_calls: caps?.parallel_tool_calls ?? false,
+        max_output_tokens: caps?.max_output_tokens ?? null,
         provenance: caps?.provenance ?? {
           vision: "unknown",
           tool_calling: "unknown",
           thinking: "unknown",
+          structured_output: "unknown",
+          prompt_caching: "unknown",
+          streaming: "unknown",
+          parallel_tool_calls: "unknown",
+          max_output_tokens: "unknown",
           context_window: "asserted",
         },
         context_window: Number(ctx) || 1,
-        disabled: { vision: noVision, tool_calling: noTools, thinking: noThinking },
+        disabled: {
+          vision: noVision,
+          tool_calling: noTools,
+          thinking: noThinking,
+          structured_output: noSchema,
+          prompt_caching: noCache,
+          streaming: noStream,
+          parallel_tool_calls: noParallel,
+        },
       },
       provider_cost_in_per_1m: Number(costIn) || 0,
       provider_cost_out_per_1m: Number(costOut) || 0,
       default_model_quality: quality,
+      // Rows with a blank name are dropped rather than saved as `""`: an
+      // empty key is a benchmark nobody can ever ask for by name, so it
+      // would sit in the registry looking like data and never route
+      // anything.
+      quality_scores: Object.fromEntries(
+        scores
+          .filter((s) => s.name.trim() !== "")
+          .map((s) => [
+            s.name.trim(),
+            {
+              score: Math.max(0, Math.min(100, Number(s.value) || 0)),
+              evidence: "declared" as const,
+              measured_at: null,
+            },
+          ]),
+      ),
       enabled,
     });
 
@@ -687,7 +768,49 @@ function ModelForm({
               disabled={noThinking}
               onToggle={setNoThinking}
             />
+            <CapabilityRow
+              name="structured_output"
+              supported={caps?.structured_output ?? false}
+              evidence={caps?.provenance?.structured_output ?? "unknown"}
+              disabled={noSchema}
+              onToggle={setNoSchema}
+            />
+            <CapabilityRow
+              name="prompt_caching"
+              supported={caps?.prompt_caching ?? false}
+              evidence={caps?.provenance?.prompt_caching ?? "unknown"}
+              disabled={noCache}
+              onToggle={setNoCache}
+            />
+            <CapabilityRow
+              name="streaming"
+              supported={caps?.streaming ?? false}
+              evidence={caps?.provenance?.streaming ?? "unknown"}
+              disabled={noStream}
+              onToggle={setNoStream}
+            />
+            <CapabilityRow
+              name="parallel_tool_calls"
+              supported={caps?.parallel_tool_calls ?? false}
+              evidence={caps?.provenance?.parallel_tool_calls ?? "unknown"}
+              disabled={noParallel}
+              onToggle={setNoParallel}
+            />
           </div>
+          {/* A quantity, so it gets a line of its own rather than a row with
+              a meaningless on/off toggle. */}
+          <p className="mt-2 text-[11px] text-neutral-600">
+            max output tokens:{" "}
+            <span className="font-medium">
+              {caps?.max_output_tokens?.toLocaleString() ?? "not measured"}
+            </span>
+            {caps?.max_output_tokens != null ? (
+              <span className="text-neutral-400">
+                {" "}
+                — bounds one completion, not the context window
+              </span>
+            ) : null}
+          </p>
         </div>
       ) : (
         <p className="mt-3 text-[11px] text-neutral-500" data-testid="registry-form-caps-hint">
@@ -695,6 +818,74 @@ function ModelForm({
           <span className="font-medium">Test model</span> to measure them.
         </p>
       )}
+      <div className="mt-4 rounded-md border border-neutral-200 bg-white p-3">
+        <p className="text-xs font-semibold text-neutral-800">Benchmark scores</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-neutral-500">
+          Routing picks the best <strong>quality per euro</strong>, and this is the quality half.
+          Scores are <em>per benchmark</em> because a coding leaderboard says nothing about document
+          synthesis — the caller names which one its work needs, so a model can win for one job and
+          lose for another. Normalise to <strong>0-100</strong>, whatever the benchmark&apos;s
+          native scale. Leave empty and routing falls back to price alone.
+        </p>
+        <div className="mt-2 space-y-1.5" data-testid="registry-form-benchmarks">
+          {scores.map((row, i) => (
+            <div key={row.id} className="flex items-center gap-2">
+              <input
+                className={`${INPUT} flex-1`}
+                placeholder="benchmark name (e.g. swe-bench)"
+                value={row.name}
+                onChange={(e) =>
+                  setScores(
+                    scores.map((s) => (s.id === row.id ? { ...s, name: e.target.value } : s)),
+                  )
+                }
+                data-testid={`registry-form-benchmark-name-${i}`}
+              />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                className={`${INPUT} w-24`}
+                placeholder="0-100"
+                value={row.value}
+                onChange={(e) =>
+                  setScores(
+                    scores.map((s) => (s.id === row.id ? { ...s, value: e.target.value } : s)),
+                  )
+                }
+                data-testid={`registry-form-benchmark-score-${i}`}
+              />
+              <button
+                type="button"
+                onClick={() => setScores(scores.filter((s) => s.id !== row.id))}
+                className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-50"
+                aria-label={`Remove benchmark ${row.name || i + 1}`}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              setScores([
+                ...scores,
+                { id: `new-${Date.now()}-${scores.length}`, name: "", value: "" },
+              ])
+            }
+            className="rounded-md border border-neutral-300 px-2 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+            data-testid="registry-form-benchmark-add"
+          >
+            + Add benchmark
+          </button>
+        </div>
+        <p className="mt-2 text-[11px] text-neutral-400">
+          Saved as <span className="font-medium">declared</span> — a figure you brought from
+          outside. The eval harness will later write <span className="font-medium">measured</span>{" "}
+          scores on the same keys, and the two stay distinguishable.
+        </p>
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-1.5 text-xs text-neutral-700">
           <input

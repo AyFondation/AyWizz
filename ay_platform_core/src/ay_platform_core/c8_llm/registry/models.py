@@ -61,6 +61,30 @@ class CapabilityEvidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class BenchmarkScore(BaseModel):
+    """One benchmark's verdict on one model.
+
+    Carries its PROVENANCE for the same reason the capability flags do
+    (R-800-152): a figure copied from a vendor's leaderboard and a figure
+    produced by this platform's own eval harness are both useful, and
+    confusing them is how a marketing number ends up steering spend.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    score: float = Field(ge=0.0, le=100.0)
+    """Normalised to 0-100 whatever the benchmark's native scale, so two
+    benchmarks are never silently compared on incompatible units. The
+    normalisation is the operator's to do, and it is why `evidence` matters:
+    a rescaled figure is `declared` at best."""
+    evidence: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    measured_at: str | None = None
+    """ISO date. Benchmarks AGE — a score against a two-year-old harness, or
+    for a model version since replaced, is not wrong so much as stale, and
+    an operator comparing two scores needs to see that one predates the
+    other."""
+
+
 class CapabilityProvenance(BaseModel):
     """Per-flag provenance for `ModelCapabilities`.
 
@@ -75,6 +99,11 @@ class CapabilityProvenance(BaseModel):
     tool_calling: CapabilityEvidence = CapabilityEvidence.UNKNOWN
     thinking: CapabilityEvidence = CapabilityEvidence.UNKNOWN
     context_window: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    structured_output: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    prompt_caching: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    streaming: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    parallel_tool_calls: CapabilityEvidence = CapabilityEvidence.UNKNOWN
+    max_output_tokens: CapabilityEvidence = CapabilityEvidence.UNKNOWN
 
 
 class CapabilityOverrides(BaseModel):
@@ -91,6 +120,13 @@ class CapabilityOverrides(BaseModel):
     vision: bool = False
     tool_calling: bool = False
     thinking: bool = False
+    structured_output: bool = False
+    prompt_caching: bool = False
+    streaming: bool = False
+    parallel_tool_calls: bool = False
+    # NO `max_output_tokens` ENTRY, deliberately. The overrides are boolean
+    # "do not use this" switches; a token ceiling is a quantity, and the
+    # operator's lever on it is to lower the number, not to turn it off.
 
 
 class ModelCapabilities(BaseModel):
@@ -119,6 +155,34 @@ class ModelCapabilities(BaseModel):
     """EXEMPT from measurement, per R-800-152: `context_window` can only be
     established empirically with a maximum-length request, whose cost is not
     proportionate to its value. It stays `declared` or `asserted`."""
+
+    # ---- Measured in the second wave (2026-09-29) --------------------------
+    # Each one changes a routing or a cost decision the platform actually
+    # makes; a capability that would change nothing is not worth a billed
+    # call per model.
+    structured_output: bool = False
+    """`response_format: json_schema` honoured. The C4 phases and C6's
+    grading judge consume TYPED artifacts, which today rest on prompt
+    engineering plus defensive parsers. A model that guarantees the schema
+    removes that whole class of parse failures, so it is worth routing on."""
+    prompt_caching: bool = False
+    """Provider-side prompt caching, evidenced by cache counters coming back
+    in `usage`. Not a feature flag but a COST one: the same system prompt
+    costs several times more on a model without it."""
+    streaming: bool = False
+    """Server-sent chunks. C3 streams chat token by token, so a model that
+    cannot stream does not degrade quietly — it breaks a user-visible
+    surface."""
+    parallel_tool_calls: bool = False
+    """More than one `tool_calls` entry in a single turn. Matters to the
+    OpenHands generate engine, whose throughput is bounded by round-trips."""
+    max_output_tokens: int | None = None
+    """Measured ceiling on a single completion, DISTINCT from
+    `context_window` — it bounds what a `generate` phase can emit in one
+    call, and the two differ by an order of magnitude on most models.
+    `None` means never measured; unlike the booleans there is no sensible
+    false value for a quantity."""
+
     provenance: CapabilityProvenance = Field(default_factory=CapabilityProvenance)
     disabled: CapabilityOverrides = Field(default_factory=CapabilityOverrides)
 
@@ -152,6 +216,26 @@ class _RegistryFields(BaseModel):
     provider_cost_in_per_1m: float = Field(ge=0.0)
     provider_cost_out_per_1m: float = Field(ge=0.0)
     default_model_quality: ModelQuality
+    quality_scores: dict[str, BenchmarkScore] = Field(default_factory=dict)
+    """Benchmark scores BY BENCHMARK NAME. The other half of quality/price.
+
+    `default_model_quality` is an operator declaration over three coarse
+    buckets: it can express a floor, never a ratio. These are the numbers
+    that make "best quality per euro" computable — routing maximises
+    `score / effective_cost` among candidates that clear the floor and every
+    capability gate.
+
+    A DICTIONARY AND NOT ONE NUMBER, because there is no such thing as "the"
+    quality of a model. SWE-bench says nothing about document synthesis, and
+    a model that tops a coding leaderboard can be mediocre at summarising.
+    This platform has production DOMAINS (`code`, `documentation`) and
+    agents with different jobs, so the relevant score depends on the work —
+    the caller names which benchmark matters and routing ranks on that one.
+
+    Collapsing these into a single average would be the worst of both: a
+    fabricated aggregate, carrying no benchmark's meaning, deciding real
+    spending. An empty dict means no score, and routing then falls back to
+    price alone rather than inventing one."""
     enabled: bool = True
 
 
@@ -188,6 +272,7 @@ class LLMRegistryEntry(_RegistryFields):
             provider_cost_in_per_1m=self.provider_cost_in_per_1m,
             provider_cost_out_per_1m=self.provider_cost_out_per_1m,
             default_model_quality=self.default_model_quality,
+            quality_scores=self.quality_scores,
             enabled=self.enabled,
             effective_from=self.effective_from,
         )

@@ -47,8 +47,8 @@ from ay_platform_core.c8_llm.config import ClientSettings
 from ay_platform_core.c8_llm.quota.guard import build_quota_guard
 from ay_platform_core.c8_llm.quota.http import register_quota_handler
 from ay_platform_core.c8_llm.registry.key_provider import (
+    build_deciding_model_resolver,
     build_registry_key_provider,
-    build_registry_model_resolver,
 )
 from ay_platform_core.observability import (
     TraceContextMiddleware,
@@ -130,7 +130,10 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
             # D-011 — provider-independent model selection from the registry
             # catalogue (scoped to the conversation's project). No model name
             # in config: registering + associating a model in the HMI is enough.
-            model_provider=build_registry_model_resolver(db),
+            # Deciding variant: the client can attach WHY a model was chosen
+            # to the call it is about to make, so the reason is frozen into
+            # `llm_calls` next to the cost it explains.
+            model_provider=build_deciding_model_resolver(db),
             quota_guard=build_quota_guard(db),
         )
 

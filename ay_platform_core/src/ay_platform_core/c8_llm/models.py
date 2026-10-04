@@ -120,6 +120,54 @@ class ChatCompletionResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RoutingDecision(BaseModel):
+    """WHY this model was chosen, frozen with the call it paid for.
+
+    The ledger records which model served a call and what it cost; without
+    this it never records the reasoning. And the reasoning cannot be
+    reconstructed later, for exactly the reason `cost_usd` is materialised
+    rather than recomputed: benchmark scores get updated, price lists
+    change, and the agent→profile table is edited. Re-deriving "why did this
+    run pick Opus" three months on would answer with TODAY's inputs and
+    present it as the decision that was actually made.
+
+    It is also what makes an invoice defensible. "This request cost that
+    much" becomes a readable line — this tier was asked for, this profile
+    judged it, this model won at this score for this effective cost —
+    instead of an archaeology exercise.
+
+    Every field is OPTIONAL: a call that bypassed catalogue resolution (an
+    explicit model, a legacy agent route) has no decision to record, and an
+    empty object is the honest encoding of that. It is never a claim that
+    price decided.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    quality_requested: str | None = None
+    """The tier the agent asked for."""
+    quality_resolved: str | None = None
+    """The tier of the model actually chosen — MAY EXCEED what was asked,
+    since resolution accepts anything above the floor and a better model is
+    sometimes cheaper. Storing both is what lets a reviewer see the upgrade
+    rather than wonder at a `high` bill on a `medium` request."""
+    benchmarks: dict[str, float] = Field(default_factory=dict)
+    """The weighted profile the agent's work was judged on. Empty = none was
+    established for that agent, and the choice fell to price."""
+    composite_score: float | None = None
+    """What the winner scored over that profile. `None` when no candidate
+    covered it."""
+    effective_cost: float | None = None
+    """The blended, cache-discounted price per 1M tokens the ranking used —
+    NOT the call's actual cost, which is `cost_usd`. Kept because it is the
+    number the comparison was made on, and it is not recoverable from the
+    list prices alone once a caching discount or a weighting changes."""
+    decided_by: Literal["benchmark-ratio", "price"] | None = None
+    """Which rule settled it. Distinguishing these two is the point: a
+    price-only pick on an unscored fleet and a considered quality/price
+    trade-off look identical in the ledger otherwise."""
+
+
 class CallTags(BaseModel):
     """Tag set propagated on every LLM call — matches `llm_calls.tags`
     (E-800-002) exactly. Used by the cost-tracker callback and by cost
@@ -141,6 +189,11 @@ class CallTags(BaseModel):
     # Chat-turn correlation (R-800-146) — one user message → one turn → possibly
     # several LLM calls across different models. Minted by C3 (X-Turn-Id).
     turn_id: str | None = None
+    # Why this model was picked, captured at resolution time. Defaulted so
+    # every row written before this field existed still validates, and so a
+    # call that never went through catalogue resolution carries an empty
+    # decision rather than a fabricated one.
+    routing: RoutingDecision = Field(default_factory=RoutingDecision)
 
 
 class CallRecord(BaseModel):

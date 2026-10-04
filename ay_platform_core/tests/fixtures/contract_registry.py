@@ -1,6 +1,6 @@
 # =============================================================================
 # File: contract_registry.py
-# Version: 10
+# Version: 14
 # Path: ay_platform_core/tests/fixtures/contract_registry.py
 # Description: Central registry of component-exposed contracts (Pydantic
 #              schemas, event schemas, REST request/response types).
@@ -233,6 +233,536 @@ register_contract(
         consumers=("C6_validation", "C7_memory"),
         transport="rest",
         description="Edge in req_relations (derives-from, impacts, tailoring-of, supersedes).",
+    )
+)
+
+# --- Object-grain document model (310-SPEC-DOC-TRACEABILITY §4.1) -----------
+
+# DocObject (the MinIO storage shape, R-310-001) is deliberately NOT
+# registered: it has no cross-component consumer today. It becomes a contract
+# when C6 imports it for coverage checks (increment 3), not before —
+# declaring a consumer that does not exist would make the registry lie.
+from ay_platform_core.c5_requirements.objects.models import (  # noqa: E402
+    DocObjectPublic,
+    ObjectLock,
+    WorkingDraft,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="DocObjectPublic",
+        schema=DocObjectPublic,
+        consumers=("C1_gateway", "C3_conversation", "C4_orchestrator", "C6_validation"),
+        transport="rest",
+        description="Document object as exposed through the REST API (E-310-001).",
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="WorkingDraft",
+        schema=WorkingDraft,
+        consumers=("C3_conversation", "C4_orchestrator"),
+        transport="rest",
+        description=(
+            "Unresolved negotiation draft on one object. Creates no object "
+            "version (R-310-009) and is discarded on resolution (R-310-203)."
+        ),
+    )
+)
+# --- Intake + splitting (310-SPEC §4.4 / §4.5) -----------------------------
+#
+# C1 only, as for the other 310 surfaces. The issuer-facing side of
+# ReworkRequest is a rendering concern (increment 8), not a consumer.
+
+from ay_platform_core.c5_requirements.intake.models import (  # noqa: E402
+    Fragment,
+    QualityFinding,
+    ReworkRequest,
+    SplitProposal,
+    SuppliedRequirement,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="SuppliedRequirement",
+        schema=SuppliedRequirement,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A requirement as received, with its resolvable source anchor and "
+            "confidence class (R-310-060, R-310-062). Never mutated."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="QualityFinding",
+        schema=QualityFinding,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One defect in a supplied requirement, citing the declared "
+            "criterion that found it (R-310-063)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="Fragment",
+        schema=Fragment,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A sub-requirement of a split, anchored on a text interval of the "
+            "untranslated source (R-310-091, R-310-095)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="SplitProposal",
+        schema=SplitProposal,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A proposed split, refused unless justified by a failed atomicity "
+            "check and exhaustive over the source (R-310-092, R-310-093)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ReworkRequest",
+        schema=ReworkRequest,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A defect sent back to the issuing party alongside a split, never "
+            "instead of one (R-310-094)."
+        ),
+    )
+)
+
+# --- Traceability graph: allocation + coverage (310-SPEC §4.4 / §4.7) ------
+#
+# C1 only, again on purpose: C6 will consume coverage findings when the audit
+# activity lands (increment 3 step 3.3 / increment 6) and is added THEN.
+
+from ay_platform_core.c5_requirements.coverage.models import (  # noqa: E402
+    Allocation,
+    ContainerCoverage,
+    CoverageLink,
+    RequirementCoverage,
+    SpeculativeMarking,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="Allocation",
+        schema=Allocation,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A requirement allocated to one container, citing the scope that "
+            "justifies it (R-310-064, R-310-066)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="CoverageLink",
+        schema=CoverageLink,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "An object answering a requirement or an upstream object, pinning "
+            "the target version (R-310-145)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="RequirementCoverage",
+        schema=RequirementCoverage,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "Aggregated coverage of one requirement across every allocation; "
+            "computed, never set (R-310-064, R-310-096)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ContainerCoverage",
+        schema=ContainerCoverage,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "What one container owes and has delivered — the completion "
+            "condition of an authoring activity (R-310-120)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="SpeculativeMarking",
+        schema=SpeculativeMarking,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "Whether an object was built on upstreams nobody has accepted "
+            "(R-310-177 v2). A PROVENANCE marking, orthogonal to the review "
+            "state: an object can be accepted AND speculative. Derived on "
+            "every read, never stored."
+        ),
+    )
+)
+
+# --- Change absorption: impact DAG + tickets (310-SPEC §4.8) ---------------
+#
+# C1 only. Note what is NOT registered and never will be: there is no
+# contract for creating, assigning or prioritising a change ticket, because
+# R-310-149 forbids exposing those operations. The ticket is derived state.
+#
+# ImpactSet / ImpactNode / ImpactEdge live in `traversal.py` rather than in
+# `models.py` so there is exactly one definition of them: they are both the
+# walk's output and the stored, exposed shape, and a Pydantic twin beside
+# the walk is the parallel definition §8.4 exists to catch.
+
+from ay_platform_core.c5_requirements.absorption.models import (  # noqa: E402
+    ChangeTicket,
+    ClosureReport,
+    Disposition,
+    QualificationProposal,
+)
+from ay_platform_core.c5_requirements.absorption.traversal import (  # noqa: E402
+    ImpactEdge,
+    ImpactNode,
+    ImpactSet,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ImpactEdge",
+        schema=ImpactEdge,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One propagation step of an impact set, carrying the version the "
+            "coverage link pinned (R-310-141, R-310-145)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ImpactNode",
+        schema=ImpactNode,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One impacted node with every cause and every path by which it was "
+            "reached, so a reviewer never sees half the reason (R-310-143)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ImpactSet",
+        schema=ImpactSet,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The deterministic traversal result — every reachable node once, "
+            "agent-proof by construction (R-310-141, R-310-144)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="QualificationProposal",
+        schema=QualificationProposal,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "An agent's reading of one node's impact and the human gate that "
+            "must pass before any rework (R-310-148)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="Disposition",
+        schema=Disposition,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "How one impacted node was disposed of. 'confirmed-unchanged' "
+            "carries actor, instant and justification so a closed ticket can "
+            "tell 'examined and unaffected' from 'never looked at' (R-310-150)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ChangeTicket",
+        schema=ChangeTicket,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One supplied change, its impact set and how it was absorbed. Has "
+            "no status, assignee or priority field: R-310-149 forbids manual "
+            "management, and status is derived from closure."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ClosureReport",
+        schema=ClosureReport,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The closure gate's verdict, naming which precondition failed "
+            "rather than refusing opaquely (R-310-146)."
+        ),
+    )
+)
+
+# --- Negotiated piloting: treatment plans (310-SPEC §4.9) ------------------
+#
+# C1 only. `TreatmentReport` is ALSO the document an issuing party receives
+# (E-310-007), but that is a rendering concern of increment 8 — the renderer
+# is not a consumer of the Python type, and declaring it as one would make
+# the registry assert a relationship that does not exist (DV-04).
+
+from ay_platform_core.c5_requirements.execution.models import (  # noqa: E402
+    PlanStep,
+    Ratification,
+    StepEstimate,
+    TreatmentPlan,
+    TreatmentReport,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="StepEstimate",
+        schema=StepEstimate,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The four figures a step must declare before ratification. "
+            "`review_items` has no default because reviewer capacity binds "
+            "before budget does (R-310-171)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="PlanStep",
+        schema=PlanStep,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One step of a treatment plan: its scope, effort class, execution "
+            "mode and estimate (R-310-171, R-310-172)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="Ratification",
+        schema=Ratification,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The record that a human approved a SPECIFIC plan version, "
+            "independent of the conversation that produced it (R-310-175)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="TreatmentPlan",
+        schema=TreatmentPlan,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A proposed or ratified plan of work. `is_ratified` compares "
+            "versions, so an amendment cannot inherit its predecessor's "
+            "approval (R-310-170, R-310-173)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="TreatmentReport",
+        schema=TreatmentReport,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "What a completed plan did: requirements processed, containers "
+            "modified, review outcomes kept separate per state, coverage delta "
+            "and what remains (R-310-176, E-310-007)."
+        ),
+    )
+)
+
+# --- Baselines and rendering (310-SPEC §4.11) ------------------------------
+#
+# WHY `ManifestObject` AND `ManifestLink` ARE NOT PARALLEL DEFINITIONS of
+# `DocObjectPublic` and `CoverageLink`, which they overlap heavily with.
+#
+# A manifest is an IMMUTABLE HISTORICAL RECORD (R-310-204). If it embedded
+# the live models, a future field added to `CoverageLink` would change how
+# baselines taken YEARS EARLIER deserialise — which is precisely what
+# baselining exists to prevent. An audit record needs a schema that evolves
+# independently of the domain model it photographed.
+#
+# The two also answer different questions. `CoverageLink.is_stale(current)`
+# asks about NOW; a frozen pin cannot be stale, so the method would be
+# meaningless on an entry. And `ManifestObject` deliberately OMITS content,
+# which is the substance of R-310-200 rather than an oversight.
+
+from ay_platform_core.c5_requirements.baseline.models import (  # noqa: E402
+    BaselineManifest,
+    BaselineReadiness,
+    ManifestLink,
+    ManifestObject,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ManifestObject",
+        schema=ManifestObject,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One object version named by a baseline: id, version, review "
+            "state and content HASH. Carries no content — R-310-200 forbids "
+            "duplicating it, and a second copy would be a second answer to "
+            "'what did this baseline contain?'."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ManifestLink",
+        schema=ManifestLink,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "One coverage pin frozen into a baseline. Distinct from "
+            "CoverageLink on purpose: a historical record needs a schema "
+            "independent of the live model it photographed (R-310-204)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="BaselineManifest",
+        schema=BaselineManifest,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A named, immutable photograph of the corpus: object versions, "
+            "coverage pins and hashes (R-310-200). Write-once; the renderer "
+            "of R-310-207 reads this and never the live corpus."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="BaselineReadiness",
+        schema=BaselineReadiness,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The R-310-201 gate's verdict, naming EVERY outstanding "
+            "precondition rather than the first one found."
+        ),
+    )
+)
+
+# --- Engineering process: cycle + workflow (310-SPEC §4.2 / §4.3) ----------
+#
+# Consumers are deliberately limited to C1: the authoring surface
+# (R-310-047) is routed through the gateway, and that is the only
+# consumption relationship that exists. C4 will read a published workflow
+# when the runner lands (R-310-025, increment 6) and is added THEN — the
+# registry states relationships that exist, not ones that are planned.
+
+from ay_platform_core.c5_requirements.process.models import (  # noqa: E402
+    CyclePublic,
+    WorkflowPublic,
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="CyclePublic",
+        schema=CyclePublic,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "The engineering cycle: containers, their scope statements and "
+            "permitted links (E-310-002)."
+        ),
+    )
+)
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="WorkflowPublic",
+        schema=WorkflowPublic,
+        consumers=("C1_gateway",),
+        transport="rest",
+        description=(
+            "A workflow definition: typed steps plus the machine-checkable "
+            "acceptance criteria that make it verifiable (E-310-003)."
+        ),
+    )
+)
+
+register_contract(
+    ExposedContract(
+        producer="C5_requirements",
+        name="ObjectLock",
+        schema=ObjectLock,
+        consumers=("C1_gateway", "C3_conversation", "C4_orchestrator"),
+        transport="rest",
+        description=(
+            "Exclusive lease held on one object, by a human or an agent alike "
+            "(R-310-190, R-310-191)."
+        ),
     )
 )
 

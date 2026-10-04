@@ -1,6 +1,6 @@
 # =============================================================================
 # File: docker-compose.yml
-# Version: 11
+# Version: 13
 # Path: ay_platform_core/tests/docker-compose.yml
 # Description: End-to-end local stack for system tests. Brings up:
 #              v10 (LLM governance): adds the `c8` service (C8 admin app,
@@ -270,7 +270,9 @@ services:
   # is shipped in the official MinIO image. Idempotent: `mc admin user add`
   # is replaced by an `info`-then-`add` guard, same for the policy.
   minio_init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    # Same rebuild and same tag as the `minio` service above — see
+    # infra/k8s/base/_init/minio-init.yaml.
+    image: pgsty/mc:RELEASE.2026-08-04T00-00-00Z
     container_name: ay-minio-init
     depends_on:
       minio:
@@ -325,7 +327,12 @@ services:
     restart: "no"
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # Silo — Pigsty's MinIO fork, pinned by digest (it publishes no
+    # versioned tag). The MinIO-published options were both ruled out: the
+    # community line is frozen at 2025-09-07, the AIStor line denies every
+    # S3 call without a licence. Full rationale, including the provenance
+    # trade-off, in infra/k8s/base/c10_minio/statefulset.yaml.
+    image: pgsty/silo:latest@sha256:635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46
     container_name: ay-minio
     # No --console-address: MinIO removed the embedded web console in
     # RELEASE.2025-05-24 (moved to `object-browser`). See

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: containers.py
-# Version: 6
+# Version: 7
 # Path: ay_platform_core/tests/fixtures/containers.py
 # Description: Testcontainers fixtures for ArangoDB, MinIO, and Ollama.
 #              Session-scoped by default; function-scoped variants available
@@ -54,7 +54,13 @@ except ImportError:  # pragma: no cover - version-dependent import
     from testcontainers.minio import MinioContainer
 
 ARANGO_IMAGE = "arangodb/arangodb:3.12.4.3"
-MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+# Silo, Pigsty's MinIO FORK — see infra/k8s/base/c10_minio/statefulset.yaml
+# for why neither `quay.io/minio/minio` nor the AIStor line is used, and why
+# this is pinned by digest rather than by tag.
+MINIO_IMAGE = (
+    "pgsty/silo:latest@sha256:"
+    "635197cb9f36d01bee221d34d1c7d7960f6a95c48b0b6c01d99cd13bdae51a46"
+)
 OLLAMA_IMAGE = "ollama/ollama:0.34.0"
 OLLAMA_MODEL_ID = "qwen2.5:0.5b"
 # Small 384-dim embedding model (~46 MB). Chosen to keep the pull time

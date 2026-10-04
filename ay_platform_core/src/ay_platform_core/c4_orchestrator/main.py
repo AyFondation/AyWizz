@@ -90,6 +90,7 @@ from ay_platform_core.c8_llm.config import ClientSettings
 from ay_platform_core.c8_llm.quota.guard import build_quota_guard
 from ay_platform_core.c8_llm.quota.http import register_quota_handler
 from ay_platform_core.c8_llm.registry.key_provider import (
+    build_deciding_model_resolver,
     build_registry_key_provider,
     build_registry_model_resolver,
 )
@@ -171,7 +172,10 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + servi
         key_provider=build_registry_key_provider(db),
         # D-011 — provider-independent model selection from the registry
         # catalogue (scoped to the run's project). No model name in config.
-        model_provider=build_registry_model_resolver(db),
+        # Deciding variant — see c3_conversation/main.py. The generate
+        # engine below keeps the alias-only resolver: it needs a name, not
+        # a justification, and has nowhere to record one.
+        model_provider=build_deciding_model_resolver(db),
         quota_guard=build_quota_guard(db),
     )
 

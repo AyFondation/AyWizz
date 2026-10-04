@@ -1,6 +1,6 @@
 ---
 document: 500-SPEC-UI-UX
-version: 6
+version: 7
 path: requirements/500-SPEC-UI-UX.md
 language: en
 status: draft
@@ -9,6 +9,10 @@ derives-from: [D-008, R-100-114, R-200-200, R-200-160, R-200-170, R-200-180]
 
 # UI & UX Specification
 
+> **v7 (2026-10-01).** Adds `R-500-015`..`R-500-021`, realising the
+> workbench surface `310-SPEC` §4.12 requires (`R-310-220`..`226`).
+> This is the amendment `310-SPEC` §8.2 asked for.
+>
 > **STATUS: v3 (2026-05-20).** v2 baseline (Phases A-F) unchanged. Adds R-500-008..014 covering the Tranche B UX surface introduced by `200-SPEC` §4.10 / §5.17 / §5.18 / §5.19 : Pipeline blocked Retry/Abort, live trace timeline + steer composer, tree right-click menus for live-docs and source-files (mkdir / rename / move), source-file metadata panel, and prompt-attached references (file + excerpt).
 
 ---
@@ -401,6 +405,148 @@ menu at the node's bounding box. Menu items SHALL be navigable via
 ArrowUp / ArrowDown and triggered with Enter, dismissible with ESC.
 This is a baseline-accessibility requirement (WAI-ARIA tree +
 menu patterns) ; touch-screen long-press is a v2 concern.
+
+#### R-500-015
+
+```yaml
+id: R-500-015
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-220]
+```
+
+The traceability workbench SHALL be a single route,
+`/projects/<pid>/workbench`, rendering five regions concurrently in one
+viewport: a container navigator, the open container's objects, a
+coverage region, a findings region, and the conversation. Changing the
+active container, the selected object or the active findings filter
+SHALL NOT navigate: the route and the five regions persist.
+
+**Rationale.** `R-310-220` forbids navigation between separate pages
+because the activity is a loop — read a requirement, read what answers
+it, judge, move on — and a page transition between any two of those
+steps costs the reader their place. The existing per-section pages
+(`/requirements`, `/validation`) remain: the workbench is an additional
+surface for the review loop, not a replacement for browsing.
+
+#### R-500-016
+
+```yaml
+id: R-500-016
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-221]
+```
+
+The workbench SHALL hold the active container, the selected object and
+the selected requirement in a single client-side selection context
+shared by all five regions and by the conversation composer. Selecting
+an object in any region SHALL select it in all of them, and the
+composer SHALL submit the selection alongside the message so the user
+never restates an identifier already on screen.
+
+**Rationale.** `R-310-221`'s cost argument. Independent per-panel state
+is the default a component tree produces, so the shared context has to
+be a stated requirement rather than an implementation preference.
+
+#### R-500-017
+
+```yaml
+id: R-500-017
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-222]
+```
+
+A coverage link rendered on an object SHALL expand in place — within
+the object's own row, without scrolling the container or opening a
+dialog — to reveal the target's text, its source anchor, its review
+state and its allocations.
+
+#### R-500-018
+
+```yaml
+id: R-500-018
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-223, R-310-224]
+```
+
+The findings region SHALL be permanently mounted, SHALL list coverage
+gaps, suspect links, weak coverage, speculative objects and failed
+checks with each item citing its criterion identifier and its location,
+and SHALL, while a container is open, additionally list the
+requirements allocated to that container that are not yet covered.
+
+**Rationale.** "Permanently mounted" rather than "available": a panel
+reachable through a tab is a panel nobody opens, and the gap list is
+the one thing a reviewer must not be able to work without seeing.
+
+#### R-500-019
+
+```yaml
+id: R-500-019
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-225, R-310-007]
+```
+
+Every coverage figure the UI renders — count, percentage, or bar —
+SHALL render immediately alongside it the share of that figure derived
+from `auto-accepted` links, and SHALL NOT present a total that merges
+the two without that breakdown.
+
+**Rationale.** `auto-accepted` means granted by cluster review without
+individual examination (`R-310-007`). A coverage figure that hides its
+auto-accepted share reads as a review result and is not one. The
+prohibition is on the merged total specifically, because that is the
+figure a dashboard naturally shows.
+
+#### R-500-020
+
+```yaml
+id: R-500-020
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-226, R-310-300]
+```
+
+The coverage region SHALL open grouped by cluster when the project's
+requirement count exceeds a configured threshold, SHALL state the
+threshold and the count when it does, and SHALL allow any cluster to be
+expanded to its individual requirements.
+
+**Rationale.** At the 30 000 requirements of `R-310-300` an ungrouped
+matrix is unreadable and expensive to render. Stating the threshold is
+what stops the grouping being mistaken for missing data.
+
+#### R-500-021
+
+```yaml
+id: R-500-021
+version: 1
+status: draft
+category: ux
+derives-from: [R-310-010, R-310-190]
+```
+
+Every agent-produced object the workbench renders SHALL be visibly
+distinguishable from an accepted one, and SHALL carry its review
+affordances at the point of reading rather than in a separate review
+queue.
+
+**Rationale.** The operating model is that the LLM produces and humans
+vet systematically. A proposal that looks like accepted content gets
+read as settled, and a review queue separate from the document makes
+reviewing a second activity people defer. Both failures are of the UI,
+not of the backend, which already refuses to advance a version without
+a review record.
 
 ---
 

@@ -24,6 +24,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple
 
+from ay_platform_core.c8_llm.models import RoutingDecision
 from ay_platform_core.c8_llm.registry.catalog_repository import TenantCatalogRepository
 from ay_platform_core.c8_llm.registry.catalog_service import TenantCatalogService
 from ay_platform_core.c8_llm.registry.models import ModelQuality
@@ -139,6 +140,45 @@ _AGENT_QUALITY_ORDER: dict[str, tuple[ModelQuality, ...]] = {
     "image_analyzer": _LOW_FIRST,
 }
 
+# Agent → the BENCHMARKS its work is judged on, and their relative weight.
+#
+# This is the other half of "route on quality per euro". The quality TIER
+# above says how good a model must be; this says good AT WHAT. They answer
+# different questions and neither substitutes for the other: a model can sit
+# in the `high` tier and be the wrong buy for extraction work.
+#
+# WHY THE MAP LIVES HERE. The agent name is the platform's one honest signal
+# of intent — it is what the orchestrator already declares, and the only
+# place that knows both the work and its name. C8 must not learn about
+# pipeline phases, and C4 must not learn how models are ranked; this table is
+# the seam that keeps both true, exactly as `_AGENT_QUALITY_ORDER` does.
+#
+# EMPTY IS A VALID AND HONEST ENTRY. An agent with no profile resolves on
+# price among everything that already clears its tier and capability gates —
+# which is right when nobody has established what "good" means for that
+# work. Inventing a profile so the feature looks used would route real
+# spending on a guess.
+_AGENT_BENCHMARKS: dict[str, dict[str, float]] = {
+    # Design and code-shaped reasoning: the coding leaderboards are the ones
+    # that track it, weighted toward the agentic one since these agents work
+    # in a tool loop rather than emitting a single snippet.
+    "architect": {"swe-bench": 0.7, "gpqa": 0.3},
+    "sub-agent": {"swe-bench": 1.0},
+    # Judging a diff is a reasoning task about code, not a coding task.
+    "c6-judge": {"gpqa": 0.6, "swe-bench": 0.4},
+    # Ingestion work is language work: faithfulness to a source text, not
+    # problem solving. Scored on whatever the operator uses to measure that.
+    "c7-kg-extractor": {"doc-synthesis": 1.0},
+    "c7-contextualizer": {"doc-synthesis": 1.0},
+    "summarizer": {"doc-synthesis": 1.0},
+    "decontextualizer": {"doc-synthesis": 1.0},
+    "densifier": {"doc-synthesis": 1.0},
+    # Deliberately absent: `image_analyzer`. Vision quality is gated by the
+    # `vision` CAPABILITY, and no benchmark in this platform's registry
+    # measures how WELL a model reads an image. A profile here would be a
+    # number with nothing behind it.
+}
+
 # `(agent_name, tenant_id, project_id, *, require_tool_calling) -> alias | None`
 ModelResolver = Callable[..., Awaitable[str | None]]
 
@@ -162,6 +202,9 @@ async def _resolve_model_via_catalog(
                 quality,
                 project_id=project_id,
                 require_tool_calling=require_tool_calling,
+                # What this agent's work is judged on. Empty for an agent
+                # with no established profile, which resolves on price.
+                benchmarks=_AGENT_BENCHMARKS.get(agent_name, {}),
             )
         except Exception as exc:  # best-effort, never break a call
             _log.warning("model resolution failed for %s: %s", agent_name, exc)
@@ -169,6 +212,59 @@ async def _resolve_model_via_catalog(
         if resolved is not None:
             return str(resolved.model_alias)
     return None
+
+
+async def _resolve_with_decision(
+    catalog: Any,
+    agent_name: str,
+    tenant_id: str | None,
+    project_id: str | None,
+    *,
+    require_tool_calling: bool,
+) -> tuple[str | None, RoutingDecision]:
+    """As `_resolve_model_via_catalog`, plus WHY — for the call ledger.
+
+    Kept as a second function rather than widening the first: the alias-only
+    form is what several callers and a good deal of test surface already
+    depend on, and the decision is additive. The two share the loop below
+    only in shape, which is deliberate — a resolver that returned a tuple
+    everywhere would push the decision through code paths that have no use
+    for it and no way to store it.
+
+    A failure yields `(None, empty decision)`, never a decision claiming
+    price decided. Nothing was decided: nothing resolved.
+    """
+    profile = _AGENT_BENCHMARKS.get(agent_name, {})
+    if not tenant_id:
+        return None, RoutingDecision()
+    for quality in _AGENT_QUALITY_ORDER.get(agent_name, _MEDIUM_FIRST):
+        try:
+            resolved = await catalog.resolve(
+                tenant_id,
+                quality,
+                project_id=project_id,
+                require_tool_calling=require_tool_calling,
+                benchmarks=profile,
+            )
+        except Exception as exc:  # best-effort, never break a call
+            _log.warning("model resolution failed for %s: %s", agent_name, exc)
+            return None, RoutingDecision()
+        if resolved is not None:
+            return str(resolved.model_alias), RoutingDecision(
+                quality_requested=str(quality),
+                # The tier actually obtained, which may be higher than the
+                # one this iteration asked for.
+                quality_resolved=str(resolved.model_quality),
+                benchmarks=profile,
+                composite_score=resolved.composite_score,
+                effective_cost=resolved.effective_cost,
+                decided_by=(
+                    "benchmark-ratio"
+                    if resolved.decided_by_benchmark
+                    else "price"
+                ),
+            )
+    return None, RoutingDecision()
 
 
 def build_registry_model_resolver(db: Any) -> ModelResolver:
@@ -191,6 +287,43 @@ def build_registry_model_resolver(db: Any) -> ModelResolver:
         require_tool_calling: bool = False,
     ) -> str | None:
         return await _resolve_model_via_catalog(
+            catalog,
+            agent_name,
+            tenant_id,
+            project_id,
+            require_tool_calling=require_tool_calling,
+        )
+
+    return resolve
+
+
+# `(agent, tenant, project, *, require_tool_calling) -> (alias, decision)`
+DecidingModelResolver = Callable[..., Awaitable[tuple[str | None, RoutingDecision]]]
+
+
+def build_deciding_model_resolver(db: Any) -> DecidingModelResolver:
+    """As `build_registry_model_resolver`, but also returns WHY.
+
+    A SECOND BUILDER RATHER THAN A WIDER CONTRACT. The alias-only resolver
+    has two consumers with different needs: the LLM client, which can
+    attach the reason to the call it is about to make, and the generate
+    engine, which only needs a name. Widening the shared return type would
+    push a tuple through a caller that has nowhere to put the second half,
+    and every test that stubs it. Both builders wrap the same catalogue, so
+    the choice costs nothing but clarity at the wiring site.
+    """
+    catalog = TenantCatalogService(
+        TenantCatalogRepository(db), LLMRegistryService(LLMRegistryRepository(db))
+    )
+
+    async def resolve(
+        agent_name: str,
+        tenant_id: str | None,
+        project_id: str | None,
+        *,
+        require_tool_calling: bool = False,
+    ) -> tuple[str | None, RoutingDecision]:
+        return await _resolve_with_decision(
             catalog,
             agent_name,
             tenant_id,

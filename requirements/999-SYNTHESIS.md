@@ -1,6 +1,6 @@
 ---
 document: 999-SYNTHESIS
-version: 9
+version: 11
 path: requirements/999-SYNTHESIS.md
 language: en
 status: draft
@@ -1074,6 +1074,186 @@ in-place overwrite of live data) from v1 while still serving the primary uses
   source modulo remapped ids + excluded secrets) exercised across every DataMap
   entry, at unit / contract / integration / e2e tiers.
 
+### D-023 — Object-grain document model (documents are containers of objects)
+
+```yaml
+id: D-023
+version: 1
+status: draft
+category: architecture
+impacts: [R-310-*, R-300-013, R-100-020]
+```
+
+**Decision.** A produced document SHALL be a container of **objects** — the
+smallest addressable, individually reviewable unit (heading, paragraph, list,
+table, figure). Each object SHALL be persisted as **one JSON document in
+MinIO** (source of truth), indexed into a **derived, fully rebuildable
+ArangoDB graph**. Markdown, DOCX, PDF and SVG SHALL be **renderings**, never
+authoritative. Object identifiers SHALL be stable across edits.
+
+**Versioning is decision-triggered.** A negotiation between a reviewer and an
+agent SHALL write a **working draft** that creates **no** object version; a
+version SHALL be created **only** when a review decision accepts the draft or
+confirms no change is required. Every version therefore carries an actor, a
+timestamp and a decision. Consequently retention is **full and uncompacted**,
+stored compressed rather than delta-encoded.
+
+**Rationale.** Object grain is imposed twice over: an agent reworks one
+paragraph, not a document, and a human reviews one object, not forty pages —
+review throughput, not generation throughput, is the binding constraint. Keeping
+MinIO authoritative preserves `R-100-020` with no loss of property, since
+granular JSON gives the same stable identity and atomic write an
+Arango-authoritative model would. Decision-triggered versioning makes the
+version chain a history of **decisions rather than of machine attempts**, which
+is what an audit reconstructs — and it removes the retention/compaction
+mechanism entirely instead of managing it.
+
+**Consequences.**
+- New spec `310-SPEC-DOC-TRACEABILITY.md`.
+- Agents authoring cycle containers SHALL be given object-grain tools
+  (`create_object`, `update_object`, `review_object`) **alongside** the existing
+  free-text DocGen tool-loop, which is NOT replaced. The two serve different
+  surfaces: DocGen writes free-form project documents (D-015,
+  `R-200-150..156`), while the object tools write documents that belong to a
+  published cycle container, carry allocated requirements, and move through a
+  review lifecycle. Nothing in `310-SPEC` requires free-form documents to pass
+  through a cycle container, and forcing them to would regress the use cases
+  live-docs exists for.
+- `Q-300-002` (full snapshot vs entity diff) resolves to full compressed
+  snapshots.
+
+### D-024 — Engineering cycle and workflow catalogue as versioned publishable entities
+
+```yaml
+id: D-024
+version: 1
+status: draft
+category: methodology
+derives-from: [D-005, D-012]
+impacts: [R-310-*]
+```
+
+**Decision.** The engineering process SHALL be expressed as **data**, not code:
+a **cycle** (`C-`) declaring containers, permitted inter-layer links, coverage
+obligations and a **scope statement per container**; and a **workflow** (`WF-`)
+declaring `intent`, `inputs`, `steps`, `constraints`, `outputs`, `checks` and
+`examples`. Both SHALL be published at **tenant** scope, **tailorable per
+project** with mandatory rationale, editable through a platform authoring
+surface, and **immutable once published** — editing creates a new draft version.
+A workflow with an empty `checks` list SHALL NOT be publishable. Workflow
+control flow SHALL be an ordered sequence of `agent` / `check` / `human-gate`
+steps plus a return target on a gate; no conditionals, loops or variables. An
+activity SHALL NOT start unless a published workflow is bound to its phase.
+
+**Rationale.** This is the platform's own operating pattern (`CLAUDE.md`,
+`.claude/learned/`) exposed to users. It makes document engineering a **second
+production domain expressed as data**, honouring D-012 without new backbone code
+paths. The mandatory `checks` list is what separates a workflow from a named
+prompt: without machine-checkable acceptance criteria an activity is neither
+verifiable nor capitalisable, and it degrades silently. Immutability is what
+gives meaning to the `produced_by: WF-nnn@vN` stamp each object carries, and
+hence to the question *"the method changed — which artefacts were produced under
+the old one?"*. Banning conditionals prevents the drift into an unauditable
+workflow language nobody authors.
+
+### D-025 — Supplied requirements: multi-container allocation, non-destructive splitting, cluster review
+
+```yaml
+id: D-025
+version: 1
+status: draft
+category: regulatory
+impacts: [R-310-*, R-300-080]
+```
+
+**Decision.** A supplied requirement SHALL be allocatable to **several**
+containers, its coverage being satisfied only when **every** allocation is
+covered. A requirement found non-atomic SHALL be **split without mutation**:
+fragments live in a visibly distinct namespace, are anchored on **text
+intervals of the untranslated source**, and are rejected unless their intervals
+cover the source exactly and without overlap. Splitting SHALL NOT replace the
+rework request sent to the issuer. At corpus scale, review SHALL be grantable by
+**cluster**, recorded as an `auto-accepted` state **distinct from `accepted`**
+in storage, in every API response and in every displayed coverage figure;
+individual review SHALL remain mandatory for criticality-rated requirements,
+failed checks, and OCR-derived sources.
+
+**Rationale.** Single-container allocation cannot express a criticality-rated
+requirement owned jointly by the architecture and the security analysis, and it
+is the degenerate case of the general model, so the general model costs nothing.
+Non-destructive splitting protects a **contractual artefact**: rewriting a
+customer requirement destroys the ability to show, at a contract review, what
+was received versus what was interpreted. The interval-exhaustiveness check is
+the only guard against silently losing a clause — the failure is otherwise
+invisible, because the coverage matrix would show every surviving fragment as
+covered — and expressed as interval arithmetic it needs no model judgement.
+Cluster review exists because exhaustive individual review of tens of thousands
+of supplied requirements is not physically achievable; demanding it produces
+mass acceptance, which eliminates supervision altogether. It stays honest only
+because `auto-accepted` is a distinct, revisitable state.
+
+### D-026 — Change absorption is traceability machinery, not a work-item tracker
+
+```yaml
+id: D-026
+version: 1
+status: draft
+category: regulatory
+derives-from: [R-200-012]
+impacts: [R-310-*]
+```
+
+**Decision.** A modification of a supplied requirement SHALL open a **change
+ticket** created, propagated and closed **by the traceability mechanism
+itself**; the platform SHALL NOT expose creation, assignment, prioritisation or
+manual status mutation of a ticket. The impact set SHALL be computed by
+**deterministic graph traversal** and SHALL NOT be produced, extended or
+filtered by an agent — agents **qualify** impact, they do not discover it. The
+impact set is a **DAG, not a tree**: a node reachable by several paths appears
+once, displays every path, and the closure counter counts **distinct** nodes.
+Each node SHALL carry a disposition of `modified-and-accepted` or
+`confirmed-unchanged`, the latter recording actor, timestamp and justification.
+A ticket SHALL be closable only when every node is dispositioned, no coverage
+link remains suspect, and no requirement became uncovered.
+
+**Rationale.** Determining what is impacted is graph arithmetic; an agent asked
+to do it returns a plausible, incomplete set whose omissions are undetectable —
+the same failure `R-200-012` forbids and that the 2026-09-10 Gate C removal
+corrected. Multi-allocation (D-025) makes branches converge, so counting paths
+instead of nodes yields a gate that can never close. Deciding a node needs no
+change is a review **outcome**, not the absence of one, and it is the most
+frequent outcome: recorded as positively as a modification, it is what lets a
+closed ticket distinguish *"examined and unaffected"* from *"never looked at"* —
+which is the entire evidentiary value of closing it. Exposing the ticket as a
+hand-managed work item would create a second, divergent source of truth about
+remaining work and would allow closure without the evidence closure is meant to
+constitute.
+
+### D-027 — Object editing is serialised by a lease-based lock held by humans and agents alike
+
+```yaml
+id: D-027
+version: 1
+status: draft
+category: architecture
+impacts: [R-310-*, R-300-060]
+```
+
+**Decision.** Editing an object SHALL require an **exclusive lease-based lock**
+on that object, with finite expiry renewed by activity, visible to other actors
+with holder and expiry, and force-releasable by the container owner. An **agent
+SHALL acquire the same lock as a human** and be identified as the holder. The
+existing optimistic version check SHALL be retained on write and SHALL reject a
+mismatch **even when a lock was held**.
+
+**Rationale.** The concurrent-edit hazard is not human-to-human only: an agent
+redrafting an object while a reviewer edits it produces the same lost update. A
+lock without expiry is held forever by an actor whose session ended, so the
+lease is mandatory — and because leases expire, the optimistic check is what
+preserves correctness. The lock prevents wasted work; the version check
+preserves the data. Making the lock visible is not cosmetic: an invisible lock
+is experienced as a malfunction.
+
 ---
 
 ## 6. Document Mapping
@@ -1083,6 +1263,7 @@ in-place overwrite of live data) from v1 while still serving the primary uses
 | Infrastructure | `100-SPEC-ARCHITECTURE.md` | K8s topology, sandboxing, Python/Rust component split, deployment targets, domain-agnostic backbone, env-file architecture (§10) | **v3 delivered** |
 | Pipeline | `200-SPEC-PIPELINE-AGENT.md` | Five-phase pipeline, hard gates, sub-agents, escalation, LLM feature requirements per agent, domain plug-in contract | **v2 delivered** |
 | Requirements mgmt | `300-SPEC-REQUIREMENTS-MGMT.md` | Markdown+YAML storage, StrictDoc tooling, CRUD API, versioning, tailoring enforcement, import/export | **v1 delivered** |
+| Document traceability | `310-SPEC-DOC-TRACEABILITY.md` | Object-grain documents, engineering cycle (`C-`) and workflow (`WF-`) catalogues, supplied-requirement intake / review / splitting / allocation, change absorption through an impact DAG, negotiated treatment plans, baselines and DOCX/PDF rendering (D-023…D-027) | **v1 draft (spec)** |
 | Memory / RAG | `400-SPEC-MEMORY-RAG.md` | Graph-backed embeddings, short/long-term memory, external source ingestion, federated retrieval; layered knowledge representation + iterative retrieval (D-016) | **v3 (in progress)** |
 | UI / UX | `500-SPEC-UI-UX.md` | Conversational UI, expert mode, structured elicitation, requirements surface, source upload UX | planned (scaffold) |
 | Artifact quality | `600-SPEC-CODE-QUALITY.md` | Domain-specific quality enforcement (TDD for `code`, equivalent per-domain gates), dual review, evidence-based verification | planned (scaffold) |

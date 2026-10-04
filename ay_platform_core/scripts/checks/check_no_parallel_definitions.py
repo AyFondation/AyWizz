@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: check_no_parallel_definitions.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/scripts/checks/check_no_parallel_definitions.py
 # Description: Coherence check — AST scan of src/ to detect classes that shadow
 #              a registered contract name or share >= OVERLAP_THRESHOLD field names
 #              with a registered contract (potential copy-paste drift).
 #              Run from ay_platform_core/: python scripts/checks/check_no_parallel_definitions.py
+#              v3: conventional scoping and audit columns are excluded from
+#                  the field-overlap count. Every persisted entity in this
+#                  platform carries project_id / tenant_id / created_at /
+#                  created_by / updated_at / updated_by / version by
+#                  convention, so their co-occurrence is guaranteed and
+#                  carries NO information about copy-paste. Counting them
+#                  made every new model module fail the build until one of
+#                  its models was registered as a contract — which pushed
+#                  contract registration ahead of the route that serves it.
+#                  Detection power is unchanged on domain fields: a real
+#                  duplicate shares entity_id / status / category / title /
+#                  body, none of which are excluded.
 #              v2: dataclasses decorated with @dataclass (even frozen) are
 #                  excluded from field-overlap detection. They are by
 #                  construction internal value objects (dispatch envelopes,
@@ -25,7 +37,40 @@ from pydantic import BaseModel
 
 SRC_ROOT = Path(__file__).parent.parent.parent / "src"
 MONOREPO_ROOT = Path(__file__).parent.parent.parent
-OVERLAP_THRESHOLD = 3  # ≥ this many shared field names is suspicious
+OVERLAP_THRESHOLD = 3  # ≥ this many shared DOMAIN field names is suspicious
+
+#: Fields every persisted entity carries by platform convention. Sharing
+#: them is evidence of following the convention, not of copying a contract,
+#: so they are removed before the overlap is counted. Keep this list short
+#: and justified: each entry is a field the codebase attaches structurally
+#: (tenant/project scoping, the audit quartet, the version counter), never a
+#: domain concept.
+CONVENTIONAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "project_id",
+        "tenant_id",
+        "created_at",
+        "created_by",
+        "updated_at",
+        "updated_by",
+        "version",
+    }
+)
+
+
+def significant_overlap(
+    class_fields: set[str], contract_fields: set[str]
+) -> set[str]:
+    """Return the shared fields that actually suggest a parallel definition.
+
+    Args:
+        class_fields: Annotated fields of the class under inspection.
+        contract_fields: Fields of a registered contract.
+
+    Returns:
+        The intersection, minus the conventional scoping and audit columns.
+    """
+    return (class_fields & contract_fields) - CONVENTIONAL_FIELDS
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tests.fixtures.contract_registry import get_registry
@@ -126,7 +171,7 @@ def check() -> list[str]:
                 continue
 
             for contract_name, reg_fields in contract_fields.items():
-                overlap = cls_fields & reg_fields
+                overlap = significant_overlap(cls_fields, reg_fields)
                 if len(overlap) >= OVERLAP_THRESHOLD:
                     issues.append(
                         f"  {rel_path}:{node.lineno} class '{cls_name}' shares "
