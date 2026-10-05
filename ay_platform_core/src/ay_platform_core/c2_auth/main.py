@@ -69,11 +69,52 @@ from ay_platform_core.observability.config import LoggingSettings
 _log = logging.getLogger("c2_auth.bootstrap")
 
 
+#: The tenant every locally-bootstrapped identity belongs to. A constant
+#: rather than three string literals: the user doc, the tenant doc and the
+#: platform-manager bootstrap must agree, and they drifted once already.
+_BOOTSTRAP_TENANT = "default"
+
+
+async def _ensure_bootstrap_tenant(repo: AuthRepository, cfg: AuthConfig) -> None:
+    """Create the `default` TENANT document if it is absent.
+
+    WHY THIS EXISTS. `_ensure_local_admin` has always inserted a user
+    carrying `tenant_id="default"` without creating that tenant, so a
+    freshly bootstrapped stack held a user belonging to a tenant that did
+    not exist as a record. Nothing noticed while no code looked the tenant
+    up — then `seed_e2e.py` began creating a project (v0.1.0-beta.14.19),
+    `create_project` checked `get_tenant()` as it has since
+    v0.1.0-beta.1, and the system-tests workflow went red with
+    `tenant 'default' not found; create it first`.
+
+    The repair belongs HERE and not in the seeder: creating a tenant is a
+    `platform_manager` power (E-100-002), and the seeder authenticates as
+    `admin` — it could not create one however it tried. More to the point,
+    a bootstrap that mints a user into a tenant is the thing that owes that
+    tenant's existence.
+
+    Idempotent, and ordered BEFORE the user bootstraps so the tenant is
+    never the missing half of a half-built stack.
+    """
+    if cfg.auth_mode != "local":
+        return
+    if await repo.get_tenant(_BOOTSTRAP_TENANT) is not None:
+        _log.info("bootstrap tenant %r already present", _BOOTSTRAP_TENANT)
+        return
+    await repo.insert_tenant(
+        _BOOTSTRAP_TENANT, "Default tenant", datetime.now(UTC)
+    )
+    _log.info("bootstrapped tenant %r", _BOOTSTRAP_TENANT)
+
+
 async def _ensure_local_admin(repo: AuthRepository, cfg: AuthConfig) -> None:
     """Create the bootstrap admin user if `auth_mode == "local"` and absent.
 
     Idempotent: silently skips if a user with the configured username
     already exists. Roles default to global ADMIN.
+
+    Assumes `_ensure_bootstrap_tenant` ran first — the user it writes
+    belongs to that tenant.
     """
     if cfg.auth_mode != "local":
         return
@@ -84,7 +125,7 @@ async def _ensure_local_admin(repo: AuthRepository, cfg: AuthConfig) -> None:
     user = UserInternal(
         user_id=f"admin-{cfg.local_admin_username}",
         username=cfg.local_admin_username,
-        tenant_id="default",
+        tenant_id=_BOOTSTRAP_TENANT,
         roles=[RBACGlobalRole.ADMIN],
         status=UserStatus.ACTIVE,
         created_at=datetime.now(UTC),
@@ -409,6 +450,10 @@ def create_app(config: AuthConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await repo.ensure_collections()
+        # The tenant FIRST: both user bootstraps below mint identities into
+        # it, and a user in a non-existent tenant is the half-built state
+        # that took the system-tests workflow red.
+        await _ensure_bootstrap_tenant(repo, cfg)
         await _ensure_local_admin(repo, cfg)
         await _ensure_local_platform_manager(repo, cfg)
         await _ensure_demo_seed(repo, cfg, gitea=gitea)

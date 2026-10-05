@@ -1,8 +1,20 @@
 # =============================================================================
 # File: docker-compose.yml
-# Version: 13
+# Version: 14
 # Path: ay_platform_core/tests/docker-compose.yml
-# Description: End-to-end local stack for system tests. Brings up:
+# Description: End-to-end local stack for system tests.
+#
+#              v14 (2026-10-05): the c12 workflow seed publishes each
+#              workflow BY ID. n8n 2.x removed
+#              `update:workflow --all --active=true`; the old command
+#              failed with a deprecation notice that `|| true` swallowed,
+#              so every webhook stayed unregistered and the uploads system
+#              tests failed on a 404 that read as a routing fault. The
+#              `|| true` is gone: a seed that cannot register webhooks must
+#              fail the stack. `infra/k8s/base/c12_workflow/deployment.yaml`
+#              already did this; compose was the half left behind.
+#
+#              Brings up:
 #              v10 (LLM governance): adds the `c8` service (C8 admin app,
 #              COMPONENT_MODULE=c8_admin) hosting the platform LLM registry +
 #              tenant catalogue + quality resolver behind forward-auth.
@@ -967,8 +979,31 @@ services:
         # form expects an ARRAY in n8n 1.x and rejects single-object files
         # with `workflows.map is not a function`).
         n8n import:workflow --separate --input=/workflows
-        echo "Activating imported workflows"
-        n8n update:workflow --all --active=true || true
+        # n8n 2.x REMOVED `update:workflow --all --active=true`, and
+        # `import:workflow` deactivates what it imports — so publishing is
+        # per id now. The old command printed its own deprecation notice
+        # and exited non-zero; `|| true` swallowed that, leaving every
+        # webhook unregistered and the uploads path answering
+        # `Cannot POST /uploads/ingest-text`. The system tests failed on a
+        # 404 that looked like a routing fault and was a seeding fault.
+        #
+        # No `|| true`: a seed that cannot register the webhooks must fail
+        # the stack, not hand the tests a silent 404. Same shape as
+        # `infra/k8s/base/c12_workflow/deployment.yaml`, which already did
+        # this — the compose path was the half of that migration left
+        # behind.
+        # `$$` escapes compose's OWN variable substitution: a bare `${wf}`
+        # here is expanded by docker compose (to the empty string, since no
+        # such env var exists) BEFORE the shell ever sees it, which made
+        # `require('')` throw. The K8s manifest needs no escaping because
+        # kustomize does not substitute. Same convention as
+        # `$$ARANGO_ROOT_PASSWORD` in the arangodb healthcheck.
+        echo "Publishing each workflow by id"
+        for wf in /workflows/*.json; do
+          wf_id="$$(node -p "require('$$wf').id")"
+          echo "  publishing $$wf_id"
+          n8n publish:workflow --id="$$wf_id"
+        done
         echo "Seeding done."
     networks:
       - platform

@@ -27,12 +27,16 @@ from pathlib import Path
 import pytest
 
 # `scripts/checks/` holds the audit scripts, which are not an installed
-# package. Inserted HERE rather than relied upon: this module imported
-# `audit_validation_reachability` with no path setup of its own and worked
-# only when `test_interface_consistency.py` — which does insert it — had
-# already run. Under `pytest-randomly` that is a coin flip, and it lost on
-# 2026-10-04 with a `ModuleNotFoundError` in CI. A test must not depend on
-# another test's side effect.
+# package. Inserted HERE rather than relied upon: this module imports
+# `audit_validation_reachability` INSIDE its test, with no path setup of its
+# own, and worked only because collecting the suite also imports
+# `test_interface_consistency.py`, which inserts the path at module level.
+# Run this file ALONE — as anyone debugging it would —
+# and it died with `ModuleNotFoundError` (observed 2026-10-04).
+#
+# A test must not depend on another test module having been imported. The
+# coupling was invisible precisely because the full-suite path always
+# worked.
 _CHECKS_DIR = Path(__file__).resolve().parents[2] / "scripts" / "checks"
 if str(_CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(_CHECKS_DIR))

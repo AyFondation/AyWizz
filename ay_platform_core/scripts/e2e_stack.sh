@@ -306,11 +306,44 @@ cmd_system() {
     python -m pytest tests/system -v --no-cov)
 }
 
+# ---------------------------------------------------------------------------
+# Activate the freshly-imported n8n workflows.
+#
+# `c12_workflow_seed` publishes them into n8n's SQLite, but n8n itself prints
+# "Changes will not take effect if n8n is running — please restart n8n": the
+# seed is a SIBLING service that starts only once c12 is healthy, so the
+# running process keeps serving the pre-import routing table and every
+# `/uploads/*` webhook answers `Cannot POST`. The K8s deployment avoids this
+# by importing in an INIT container, before n8n starts; compose cannot order
+# it that way because the import needs n8n's migrations to have run.
+#
+# `cmd_dev` has restarted c12 for this reason since v10. `up`/`full` did NOT,
+# which is why the system-tests workflow failed on a 404 that read as a
+# routing fault: the asymmetry, not the routing.
+# ---------------------------------------------------------------------------
+cmd_activate_workflows() {
+  _require_docker
+  echo "==> Restarting C12 (n8n) to activate the published workflows"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    --profile test restart c12 \
+    || echo "==> WARNING: c12 restart failed ; uploads will use a stale workflow"
+  # n8n re-runs its startup before the webhooks answer; the seed container
+  # waits on health, this does not, so give it the same grace.
+  echo "==> Waiting for C12 to report healthy again"
+  for _ in $(seq 1 30); do
+    state="$(docker inspect -f '{{.State.Health.Status}}' ay-c12-workflow 2>/dev/null || echo unknown)"
+    [ "$state" = "healthy" ] && break
+    sleep 2
+  done
+  echo "    c12 health: ${state:-unknown}"
+}
+
 cmd_full() {
   cmd_up
   echo "==> Waiting 5 s for images to settle..."
   sleep 5
   cmd_seed
+  cmd_activate_workflows
   cmd_system
 }
 
@@ -326,9 +359,10 @@ main() {
     logs)   shift; cmd_logs "$@" ;;
     seed)   cmd_seed ;;
     system) cmd_system ;;
+    activate-workflows) cmd_activate_workflows ;;
     full)   cmd_full ;;
     "")
-      echo "usage: $0 {build|up|dev|restart-llm|down|status|logs <svc>|seed|system|full}" >&2
+      echo "usage: $0 {build|up|dev|restart-llm|down|status|logs <svc>|seed|activate-workflows|system|full}" >&2
       exit 2
       ;;
     *)

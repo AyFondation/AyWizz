@@ -24,7 +24,12 @@ from fastapi import FastAPI
 
 from ay_platform_core.c2_auth.config import AuthConfig
 from ay_platform_core.c2_auth.db.repository import AuthRepository
-from ay_platform_core.c2_auth.main import _ensure_local_admin
+from ay_platform_core.c2_auth.main import (
+    _BOOTSTRAP_TENANT,
+    _ensure_bootstrap_tenant,
+    _ensure_local_admin,
+)
+from ay_platform_core.c2_auth.models import ProjectCreate
 from ay_platform_core.c2_auth.router import router
 from ay_platform_core.c2_auth.service import AuthService, get_service
 from tests.fixtures.containers import ArangoEndpoint, cleanup_arango_database
@@ -169,3 +174,111 @@ async def test_admin_can_login_after_bootstrap(
             json={"username": _ADMIN_USER, "password": "wrong"},
         )
         assert bad.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# The bootstrap TENANT — the half that was missing
+#
+# `_ensure_local_admin` has always written a user carrying
+# `tenant_id="default"` without creating that tenant. Nothing noticed while
+# no code looked it up; then `seed_e2e.py` began creating a project and the
+# system-tests workflow went red with
+# `tenant 'default' not found; create it first`. The last test below is the
+# one that would have caught it: it drives the real `create_project` after
+# the real bootstrap, which is exactly what the seeder does.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_bootstrap_tenant_is_created(
+    admin_repo: AuthRepository,
+) -> None:
+    cfg = _build_local_config()
+    assert await admin_repo.get_tenant(_BOOTSTRAP_TENANT) is None
+
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+
+    tenant = await admin_repo.get_tenant(_BOOTSTRAP_TENANT)
+    assert tenant is not None
+    assert tenant["_key"] == _BOOTSTRAP_TENANT
+
+
+@pytest.mark.asyncio
+async def test_the_tenant_bootstrap_is_idempotent(
+    admin_repo: AuthRepository,
+) -> None:
+    """A restart must not reset the tenant record."""
+    cfg = _build_local_config()
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+    first = await admin_repo.get_tenant(_BOOTSTRAP_TENANT)
+
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+    second = await admin_repo.get_tenant(_BOOTSTRAP_TENANT)
+
+    assert first is not None
+    assert second is not None
+    assert first["created_at"] == second["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_no_tenant_is_created_outside_local_mode(
+    admin_repo: AuthRepository,
+) -> None:
+    """Outside `local`, tenants come from the identity provider's estate.
+
+    Matched on the modes that actually exist — `none | local | sso`. An
+    earlier draft of this test invented `entraid` from the docstrings and
+    the config literal refused it, correctly.
+    """
+    cfg = AuthConfig.model_validate(
+        {
+            "auth_mode": "sso",
+            "jwt_secret_key": _JWT_SECRET,
+            "platform_environment": "testing",
+        }
+    )
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+    assert await admin_repo.get_tenant(_BOOTSTRAP_TENANT) is None
+
+
+@pytest.mark.asyncio
+async def test_the_admin_belongs_to_the_tenant_that_was_created(
+    admin_repo: AuthRepository,
+) -> None:
+    """A user in a non-existent tenant is the incoherent state to prevent."""
+    cfg = _build_local_config()
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+    await _ensure_local_admin(admin_repo, cfg)
+
+    user = await admin_repo.get_user_by_username(_ADMIN_USER)
+    assert user is not None
+    assert await admin_repo.get_tenant(user.tenant_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_project_can_be_created_after_the_bootstrap(
+    admin_repo: AuthRepository,
+) -> None:
+    """THE REGRESSION TEST. This is what `seed_e2e.py` does.
+
+    `create_project` has guarded on `get_tenant()` since v0.1.0-beta.1. The
+    seeder started calling it in v0.1.0-beta.14.19 and the workflow failed
+    with `tenant 'default' not found; create it first` — a bootstrap that
+    minted a user into a tenant it never created. Driving the real service
+    method here is the only form of this test that would have caught it:
+    asserting the tenant doc exists proves the fix, but not that the path
+    the seeder takes now works.
+    """
+    cfg = _build_local_config()
+    await _ensure_bootstrap_tenant(admin_repo, cfg)
+    await _ensure_local_admin(admin_repo, cfg)
+    admin = await admin_repo.get_user_by_username(_ADMIN_USER)
+    assert admin is not None
+
+    service = AuthService(cfg, repo=admin_repo)
+    project = await service.create_project(
+        ProjectCreate(project_id="seed-demo", name="Seed demo project"),
+        tenant_id=_BOOTSTRAP_TENANT,
+        actor_id=admin.user_id,
+    )
+    assert project.project_id == "seed-demo"
