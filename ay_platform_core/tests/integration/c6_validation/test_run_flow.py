@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_run_flow.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/integration/c6_validation/test_run_flow.py
 # Description: Integration tests for the C6 validation run lifecycle. Uses
 #              REAL ArangoDB (findings/runs collections) and REAL MinIO
@@ -263,7 +263,7 @@ async def test_trigger_run_returns_202_and_findings_accessible(
 ) -> None:
     async with _client(c6_app) as client:
         resp = await client.post(
-            "/api/v1/validation/runs",
+            "/api/v1/projects/demo/validation/runs",
             json={
                 "domain": "code",
                 "project_id": "demo",
@@ -315,7 +315,7 @@ async def test_trigger_run_returns_202_and_findings_accessible(
 async def test_trigger_run_unknown_domain_returns_404(c6_app: FastAPI) -> None:
     async with _client(c6_app) as client:
         resp = await client.post(
-            "/api/v1/validation/runs",
+            "/api/v1/projects/demo/validation/runs",
             json={"domain": "presentation", "project_id": "demo"},
             headers=_HEADERS,
         )
@@ -344,11 +344,56 @@ async def test_findings_requires_authentication(c6_app: FastAPI) -> None:
 async def test_trigger_requires_editor_role(c6_app: FastAPI) -> None:
     async with _client(c6_app) as client:
         resp = await client.post(
-            "/api/v1/validation/runs",
+            "/api/v1/projects/demo/validation/runs",
             json={"domain": "code", "project_id": "demo"},
             headers={"X-User-Id": "alice", "X-User-Roles": "viewer"},
         )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_refuses_a_body_project_id_differing_from_the_path(
+    c6_app: FastAPI,
+) -> None:
+    """A body `project_id` that disagrees with the path SHALL be refused.
+
+    This is the confused-deputy guard. The authorization gate is applied to
+    the PATH project — that is the only id C2 can see when it derives the
+    caller's project role into `X-User-Roles`. If the service then acted on
+    the body's id, a caller holding `project_editor` on `demo` could have a
+    run executed against `victim`, having proved nothing about `victim`.
+
+    The caller here is fully authorized on the path project, so a 403 would
+    not explain this response: only the mismatch does.
+    """
+    async with _client(c6_app) as client:
+        resp = await client.post(
+            "/api/v1/projects/demo/validation/runs",
+            json={"domain": "code", "project_id": "victim"},
+            headers=_HEADERS,
+        )
+    assert resp.status_code == 422, resp.text
+    # The refusal names both ids, so the caller can see which one was gated.
+    assert "victim" in resp.text
+    assert "demo" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_trigger_accepts_a_body_project_id_matching_the_path(
+    c6_app: FastAPI,
+) -> None:
+    """The guard SHALL NOT reject the agreeing case.
+
+    Pins the discriminating half: without this, the test above would also
+    pass against an implementation that refuses every request.
+    """
+    async with _client(c6_app) as client:
+        resp = await client.post(
+            "/api/v1/projects/demo/validation/runs",
+            json={"domain": "code", "project_id": "demo"},
+            headers=_HEADERS,
+        )
+    assert resp.status_code == 202, resp.text
 
 
 @pytest.mark.asyncio

@@ -1407,6 +1407,12 @@
       "auth": "authenticated"
     },
     {
+      "method": "POST",
+      "path": "/api/v1/projects/{project_id}/validation/runs",
+      "component": "c6_validation",
+      "auth": "role_gated"
+    },
+    {
       "method": "GET",
       "path": "/api/v1/quota/me",
       "component": "c8_admin",
@@ -1477,12 +1483,6 @@
       "path": "/api/v1/validation/plugins",
       "component": "c6_validation",
       "auth": "authenticated"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/validation/runs",
-      "component": "c6_validation",
-      "auth": "role_gated"
     },
     {
       "method": "GET",

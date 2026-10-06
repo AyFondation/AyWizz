@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_schemas.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/contract/c6_validation/test_schemas.py
 # Description: Contract tests for C6 — registry registration, endpoint roster,
 #              Pydantic schema validity of public models.
@@ -96,7 +96,7 @@ class TestEndpointRoster:
     EXPECTED: ClassVar[list[tuple[str, str]]] = [
         ("GET", "/api/v1/validation/plugins"),
         ("GET", "/api/v1/validation/domains"),
-        ("POST", "/api/v1/validation/runs"),
+        ("POST", "/api/v1/projects/{project_id}/validation/runs"),
         ("GET", "/api/v1/validation/runs/{run_id}"),
         ("GET", "/api/v1/validation/runs/{run_id}/findings"),
         ("GET", "/api/v1/validation/findings/{finding_id}"),
@@ -115,7 +115,7 @@ class TestEndpointRoster:
         target = next(
             r for r in iter_api_routes(_app())
             if isinstance(r, APIRoute)
-            and r.path == "/api/v1/validation/runs"
+            and r.path == "/api/v1/projects/{project_id}/validation/runs"
             and "POST" in (r.methods or set())
         )
         assert target.status_code == 202

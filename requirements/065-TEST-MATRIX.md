@@ -231,7 +231,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 |---|---|---|---|---|---|---|---|
 | `GET` | `/api/v1/validation/plugins` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/domains` | authenticated | — | any authenticated | — | — | 200 |
-| `POST` | `/api/v1/validation/runs` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | — | 202 |
+| `POST` | `/api/v1/projects/{project_id}/validation/runs` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | — | 202 |
 | `GET` | `/api/v1/validation/runs/{run_id}` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/runs/{run_id}/findings` | authenticated | — | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/validation/findings/{finding_id}` | authenticated | — | any authenticated | — | — | 200 |

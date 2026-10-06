@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_tcp_layer.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/test_tcp_layer.py
 # Description: System-tier tests that specifically target the TCP/HTTP
 #              transport layer (not exercised by ASGITransport-backed
@@ -136,14 +136,40 @@ async def test_empty_post_body_accepted(
 
 
 @pytest.mark.asyncio
-async def test_unknown_path_returns_traefik_404_not_connection_error(
+async def test_unknown_path_returns_404_not_connection_error(
     gateway_client: httpx.AsyncClient,
+    auth_headers: dict[str, str],
 ) -> None:
-    """A path no router matches SHALL return HTTP 404 from the gateway
-    (Traefik's default when no rule matches), NOT a TCP connection
-    error. Ensures the socket is actually listening."""
-    resp = await gateway_client.get("/does-not-exist/nowhere")
-    assert resp.status_code == 404
+    """An unknown path under a ROUTED prefix SHALL return HTTP 404, not a
+    TCP error. Ensures the socket listens, the rule matches, and the
+    backend answers.
+
+    **WHY NOT A PATH NO ROUTER MATCHES.** That was the original assertion,
+    and it cannot hold: `ui-catchall` is `PathPrefix(`/`)`, so EVERY path
+    matches a router. The comment above that rule in `routers.yml` claimed
+    "Traefik returns 502 only if `/` is hit", which misread its own rule —
+    a `/` prefix matches every path, not just `/`. So `/does-not-exist/nowhere`
+    reached the `ui` service, which the compose `up` profile does not run,
+    and Traefik answered 502. The old assertion was testing a topology the
+    platform does not have.
+
+    Pointing at an unmatched path under `/api/v1/validation` keeps the
+    test's stated purpose — prove the socket is live rather than refusing —
+    and strengthens it: a 404 here means C1 matched its rule AND
+    forward-auth cleared AND C6 received the request AND replied. A dead
+    backend yields 502, a dead socket yields a connect error, a broken
+    forward-auth yields 401 — all three still fail this test. The request
+    is authenticated for that reason: without credentials C2 would answer
+    401 and the backend would never be reached.
+    """
+    resp = await gateway_client.get(
+        "/api/v1/validation/does-not-exist", headers=auth_headers
+    )
+    assert resp.status_code == 404, (
+        f"expected 404 from C6 behind the gateway, got {resp.status_code}. "
+        "502 means the rule matched but the backend is down; a connect "
+        f"error means the gateway socket is not listening. Body: {resp.text}"
+    )
 
 
 # ---------------------------------------------------------------------------

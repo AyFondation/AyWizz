@@ -1,6 +1,6 @@
 // =============================================================================
 // File: apiClient.ts
-// Version: 13
+// Version: 14
 // Path: ay_platform_ui/lib/apiClient.ts
 // Description: Thin wrapper over `fetch` that prepends the runtime-config
 //              `apiBaseUrl` to every call and (optionally) attaches the
@@ -1383,18 +1383,25 @@ export class ApiClient {
     });
   }
 
-  /** POST /api/v1/validation/runs — trigger a new run. Project-scoped
-   *  via the `project_id` payload. Returns the queued run id. */
+  /** POST /api/v1/projects/{project_id}/validation/runs — trigger a new run.
+   *
+   *  The project id travels in the PATH, not only in the payload: the
+   *  gateway's forward-auth can only resolve the caller's role on a project
+   *  it can see in the URI. The id stays in the body too, where C6 asserts
+   *  the two agree (a mismatch is a 422, never a silent override). */
   async triggerValidationRun(payload: {
     project_id: string;
     domain: string;
     requirements?: unknown[];
     artifacts?: unknown[];
   }): Promise<{ run_id: string }> {
-    return this.request<{ run_id: string }>("/api/v1/validation/runs", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return this.request<{ run_id: string }>(
+      `/api/v1/projects/${encodeURIComponent(payload.project_id)}/validation/runs`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   /** GET /api/v1/validation/runs/{run_id}. */

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_gateway_paths.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/test_gateway_paths.py
 # Description: System tests that run against the running docker-compose
 #              stack through Traefik (http://localhost). These tests
@@ -151,19 +151,48 @@ async def test_c6_plugins_endpoint(
 async def test_c6_trigger_stub_run_and_poll(
     gateway_client: httpx.AsyncClient, auth_headers: dict[str, str]
 ) -> None:
-    """Triggers a pure-stub run (interface-signature-drift: always one info
-    finding) and polls until it reaches `completed`. Exercises the async
+    """Triggers an `interface-signature-drift` run and polls until it reaches
+    `completed`, then asserts the check actually reported. Exercises the async
     execution path inside a real C6 container + real ArangoDB + real MinIO
     snapshot write.
+
+    **THE PAYLOAD CARRIES A REAL CORPUS, AND MUST.** The docstring used to
+    call this a "pure-stub run (always one info finding)" and sent neither
+    `artifacts` nor `baseline_artifacts`. That is not what the check does:
+    per R-700-022 it compares the public signatures of the submitted
+    artifacts against the SAME artifacts at their previous version, and an
+    empty baseline makes it a documented no-op. So the run completed with
+    zero findings and the assertion below could never hold.
+
+    Nobody saw this, because the test failed earlier — at the trigger, with
+    the 403 that `/api/v1/validation/runs` returned to every caller before
+    the route became project-scoped. One defect was hiding another.
+
+    `f` loses its second parameter between the two versions, which is the
+    drift the check exists to catch.
     """
     import asyncio  # noqa: PLC0415 — local only
 
     trigger = await gateway_client.post(
-        "/api/v1/validation/runs",
+        "/api/v1/projects/demo/validation/runs",
         json={
             "domain": "code",
             "project_id": "demo",
             "check_ids": ["interface-signature-drift"],
+            "artifacts": [
+                {
+                    "path": "src/drifted.py",
+                    "content": "def f(a):\n    return a\n",
+                    "is_test": False,
+                }
+            ],
+            "baseline_artifacts": [
+                {
+                    "path": "src/drifted.py",
+                    "content": "def f(a, b):\n    return a + b\n",
+                    "is_test": False,
+                }
+            ],
         },
         headers=auth_headers,
     )

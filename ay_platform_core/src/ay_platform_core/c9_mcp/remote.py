@@ -1,6 +1,6 @@
 # =============================================================================
 # File: remote.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/remote.py
 # Description: Thin HTTP adapters that expose the C5 + C6 service facades
 #              that C9 tools call. In tests we pass real in-process services;
@@ -187,8 +187,14 @@ class RemoteValidationService:
             headers["X-User-Id"] = user_id
         if tenant_id:
             headers["X-Tenant-Id"] = tenant_id
+        # Project-scoped URI (C6 router v2): the id MUST be in the path, or
+        # C2's forward-auth cannot resolve the caller's role on it and the
+        # upstream gate refuses with 403. `payload.project_id` is also kept
+        # in the body, where C6 asserts the two agree.
         resp = await self._client.post(
-            f"{self._base}/api/v1/validation/runs", json=body, headers=headers or None
+            f"{self._base}/api/v1/projects/{payload.project_id}/validation/runs",
+            json=body,
+            headers=headers or None,
         )
         if resp.status_code not in (200, 202):
             _raise_for_http(resp)

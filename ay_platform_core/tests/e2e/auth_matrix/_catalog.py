@@ -1,6 +1,6 @@
 # =============================================================================
 # File: _catalog.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/e2e/auth_matrix/_catalog.py
 # Description: SINGLE SOURCE OF TRUTH for the auth x role x scope test matrix.
 #              Every HTTP route exposed by any platform component SHALL be
@@ -2236,7 +2236,13 @@ _C6_VALIDATION: list[EndpointSpec] = [
     EndpointSpec(
         component="c6_validation",
         method="POST",
-        path="/api/v1/validation/runs",
+        # Project-scoped in the URI (C6 router v2). It used to be
+        # `/api/v1/validation/runs` with the id in the body only, which made
+        # the endpoint unreachable: this row already said
+        # `accept_global_roles=()`, and no project role could ever reach the
+        # gate because C2 derives it from the URI. The catalogue was right and
+        # the route was wrong.
+        path="/api/v1/projects/{project_id}/validation/runs",
         auth=Auth.ROLE_GATED,
         scope=Scope.PROJECT,
         success_status=202,

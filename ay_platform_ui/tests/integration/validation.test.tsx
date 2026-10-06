@@ -34,7 +34,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 const PLUGINS = "/api/v1/validation/plugins";
-const RUNS = "/api/v1/validation/runs";
+// Project-scoped trigger URI. `pid` is "p1" per the useParams mock above.
+// If apiClient regressed to the old `/api/v1/validation/runs`, MSW would see
+// an unhandled request and these tests would fail — which is the point.
+const RUNS = "/api/v1/projects/p1/validation/runs";
 
 beforeEach(() => {
   mockRouter.push.mockClear();

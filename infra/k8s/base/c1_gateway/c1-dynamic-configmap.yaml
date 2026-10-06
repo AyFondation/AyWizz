@@ -23,9 +23,29 @@ data:
   routers.yml: |-
     # =============================================================================
     # File: routers.yml
-    # Version: 13
+    # Version: 15
     # Path: infra/c1_gateway/dynamic/routers.yml
-    # Description: Traefik HTTP router definitions. v11 adds `c8-admin-storage`
+    # Description: Traefik HTTP router definitions.
+    #
+    #              v15 (2026-10-05) closes an 83-endpoint routing hole found by
+    #              auditing the route catalogue against these rules. Adds
+    #              `c5-project-surfaces` (ten C5 project prefixes that were
+    #              being delivered to C2 → 404), `c5-process-tenant`
+    #              (`/api/v1/process`, which had no router at all → ui-catchall
+    #              → 502) and `c4-source` (6 endpoints, same 404 as the C5
+    #              ones). Essentially the whole 310-SPEC traceability capability
+    #              was unreachable through the gateway while every backend test
+    #              tier stayed green. `tests/coherence/
+    #              test_gateway_route_coverage.py` now fails the build on any
+    #              catalogued route that is unrouted, misrouted, or missing its
+    #              auth middleware.
+    #
+    #              v14 adds `c6-validation-project`
+    #              (`^/api/v1/projects/[^/]+/validation(/.*)?$`, priority 100) —
+    #              the C6 run-trigger moved into the project-scoped URI shape
+    #              because forward-auth-c2 can only append a project role when
+    #              the id is IN THE URI. In its old body-only form the endpoint
+    #              returned 403 to every caller. v11 adds `c8-admin-storage`
     #              (`/admin/v1/storage`, priority 100) — the storage metering +
     #              snapshot API that was missing (fell through to c2 → 404).
     #              v10 adds `ui-admin-embedding`
@@ -56,6 +76,7 @@ data:
     #     /api/v1/orchestrator/*           → C4 [forward-auth-c2, secure-hdrs]
     #     /api/v1/projects/*/requirements/* → C5 [forward-auth-c2, secure-hdrs]
     #     /api/v1/validation/*             → C6 [forward-auth-c2, secure-hdrs]
+    #     /api/v1/projects/*/validation/*  → C6 [forward-auth-c2, secure-hdrs]
     #     /api/v1/memory/*                 → C7 [forward-auth-c2, secure-hdrs]
     #     /api/v1/mcp, /api/v1/mcp/*       → C9 [forward-auth-c2, secure-hdrs]
     #     /uploads/*                       → C12 [forward-auth-c2, secure-hdrs]
@@ -173,6 +194,20 @@ data:
             - secure-headers
           priority: 100
 
+        # C4 — Project source browser (tree / mkdir / rename / move / file meta
+        # + delete). Same precedence (100) and the same reason as c4-artifacts:
+        # without it these 6 endpoints matched `c2-projects` at priority 50 and
+        # were delivered to C2, which 404s them.
+        c4-source:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/source(/.*)?$`)"
+          service: c4
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
         # C4 — Admin seed endpoint (dev-only). Different path prefix
         # `/api/v1/admin/projects/*` so it doesn't collide with
         # c4-artifacts above. Gated to admin/tenant_admin in-app.
@@ -275,6 +310,48 @@ data:
             - secure-headers
           priority: 100
 
+        # -------------------------------------------------------------------------
+        # C5 — the REST of the project-scoped traceability surface (310-SPEC).
+        #
+        # WHY THIS EXISTS. Only `/requirements` was ever routed. Every other C5
+        # project surface — 67 endpoints across ten prefixes — matched the
+        # generic `c2-projects` (`PathPrefix(/api/v1/projects)`, priority 50)
+        # and was delivered to C2, which does not implement them: the gateway
+        # answered 404 for the whole capability. It was built, unit/contract/
+        # integration-tested green, and dead in the deployed product, because
+        # nothing in the suite checked that a catalogued route is routable to
+        # its OWN component. `tests/coherence/test_gateway_route_coverage.py`
+        # now refuses that.
+        #
+        # Alternation rather than ten routers: the list is the contract, and
+        # keeping it in one place is what makes the next addition noticeable.
+        # A new C5 project prefix MUST be added here.
+        # -------------------------------------------------------------------------
+        c5-project-surfaces:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/(absorb|baseline-readiness|baselines|changes|containers|coverage|impact|intake|plans|process)(/.*)?$`)"
+          service: c5
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
+
+        # C5 — tenant-level process surface (cycles + workflows as data, D-024).
+        # No `{project_id}` segment, so it collided with nothing and simply had
+        # no router at all: it fell through to `ui-catchall` and answered 502
+        # (or the UI's 404). Priority 50 is enough — `/api/v1/process` is a
+        # distinct string from every other prefix.
+        c5-process-tenant:
+          rule: "PathPrefix(`/api/v1/process`)"
+          service: c5
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 50
+
         # C16 Backup/Restore — the `/backups` subpath, priority 100 (beats the
         # generic /api/v1/projects → c2 at 50). Forward-auth so C2 resolves the
         # caller's role ON {project_id} (R-900-011 / D-022).
@@ -311,6 +388,28 @@ data:
             - forward-auth-c2
             - secure-headers
           priority: 50
+
+        # C6 — run trigger, project-scoped in the URI. Priority 100 beats the
+        # generic `/api/v1/projects` → c2 (50), exactly like c4-artifacts,
+        # c4-git, c4-documents, c5-requirements and c16-backup.
+        #
+        # The id MUST be in the URI: forward-auth-c2 appends the caller's
+        # project-scoped role to `X-User-Roles` only when the forwarded URI
+        # matches `…/projects/{pid}/…`. While the id travelled in the request
+        # BODY (`/api/v1/validation/runs`), C2 could not see it, no project role
+        # was ever appended, and C6's gate — which strips content-blind global
+        # roles per E-100-002 v7 — refused every caller with 403. This router is
+        # what makes the endpoint reachable at all; it also brings it under C2's
+        # project lifecycle freeze, which the old shape escaped.
+        c6-validation-project:
+          rule: "PathRegexp(`^/api/v1/projects/[^/]+/validation(/.*)?$`)"
+          service: c6
+          entryPoints:
+            - web
+          middlewares:
+            - forward-auth-c2
+            - secure-headers
+          priority: 100
 
         # -------------------------------------------------------------------------
         # C7 — Memory Service
@@ -423,9 +522,17 @@ data:
         # -------------------------------------------------------------------------
         # UI catch-all (priority 1). Routes EVERYTHING not claimed above to
         # the Next.js standalone server. Priority 1 = lowest, so any backend
-        # route wins. In `e2e_stack.sh up` (without dev override) the `ui`
-        # service doesn't exist ; Traefik returns 502 only if `/` is hit,
-        # which the pytest e2e tier never does.
+        # route wins.
+        #
+        # CONSEQUENCE, stated correctly: `PathPrefix(`/`)` matches EVERY path,
+        # so there is no such thing as an unrouted path on this gateway. In
+        # `e2e_stack.sh up` (without the dev override) the `ui` service does not
+        # exist, so ANY path not claimed by a backend router above answers 502 —
+        # not only `/`. An earlier version of this comment said "only if `/` is
+        # hit", which misread this very rule and sent
+        # `tests/system/test_tcp_layer.py` hunting for a Traefik 404 that can
+        # never occur. If you want a real 404, ask a backend prefix for a path
+        # it does not serve.
         # -------------------------------------------------------------------------
         ui-catchall:
           rule: "PathPrefix(`/`)"

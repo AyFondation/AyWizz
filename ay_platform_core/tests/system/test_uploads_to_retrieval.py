@@ -1,20 +1,37 @@
 # =============================================================================
 # File: test_uploads_to_retrieval.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/test_uploads_to_retrieval.py
-# Description: End-to-end system test that exercises the C12 -> C7
-#              ingestion pipeline through Traefik:
-#                 POST /uploads/ingest-text (seeded n8n workflow)
-#                 → n8n webhook handler
-#                 → HTTP POST to c7:8000/api/v1/memory/projects/<p>/sources
-#                 → C7 embeds, writes to Arango + MinIO
+# Description: End-to-end system test that exercises the ingestion pipeline
+#              through Traefik, as the UI actually drives it (D-020 /
+#              R-100-081 v3):
+#                 POST /api/v1/memory/projects/<p>/sources/upload (multipart)
+#                 → C7 writes the raw bytes to MinIO
+#                 → C7 triggers the C12 (n8n) `extract-and-ingest` workflow
+#                 → C13 extractor /analyze, polled to a terminal status
+#                 → C12 POSTs the chunks back to C7 /ingest-chunks
+#                 → C7 embeds, writes to Arango
 #                 → POST /api/v1/memory/retrieve returns the chunk.
 #
-#              This is the first system-tier test that crosses the
-#              C12 boundary into the RAG index. Requires:
-#                - the docker-compose stack up (scripts/e2e_stack.sh up)
-#                - the n8n workflow imported by the c12_workflow_seed
-#                  one-shot container (runs automatically at `compose up`)
+#              v2 (2026-10-05): rewritten off `POST /uploads/ingest-text`.
+#              That webhook is declared by NO workflow in the repository —
+#              n8n answered `unknown webhook "POST ingest-text"` — and the
+#              client-facing entry point moved off the n8n webhook entirely
+#              in apiClient v9: byte custody is C7's, and C7 triggers C12
+#              with metadata only. So the old test encoded a contract that
+#              had been retired twice over, and no redirect to
+#              `/uploads/extract-and-ingest` would have been right either:
+#              that webhook now expects a `raw_object_key` for bytes ALREADY
+#              in MinIO, which only C7 can produce.
+#
+#              The functional assertion is unchanged, and is the whole point
+#              of the test: a source uploaded by a user comes back out of
+#              retrieval. Only the door it knocks on changed.
+#
+#              Requires the docker-compose stack up
+#              (scripts/e2e_stack.sh up) with c12 AND c13-extractor, plus
+#              the workflow imported+published by the c12_workflow_seed
+#              one-shot container.
 #
 # @relation validates:R-100-080
 # @relation validates:R-100-081
@@ -23,12 +40,22 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 
 import httpx
 import pytest
 
 pytestmark = pytest.mark.system
+
+#: Opt in to the retrieval half of the chain. OFF by default because the
+#: compose `test` profile CANNOT satisfy it: C13's embedding pass 404s
+#: against mock_llm by operator decision, so chunks never carry vectors and
+#: nothing lands in the index. The skip below names that decision rather
+#: than hiding behind a bare `pytest.skip` (§10.2 #4) — and the WIRING half
+#: of this test still runs unconditionally, so a regression in byte custody,
+#: the source record, or the multipart contract still fails CI.
+_FULL_EXTRACTION = os.environ.get("AY_SYSTEM_FULL_EXTRACTION") == "1"
 
 
 # THE `xfail` THAT USED TO SIT HERE IS GONE (2026-09-20). Its reason was that
@@ -53,11 +80,10 @@ async def test_upload_text_source_ends_up_retrievable(
     gateway_client: httpx.AsyncClient,
     auth_headers: dict[str, str],
 ) -> None:
-    """Push a unique text sentence through `/uploads/ingest-text`, wait
-    for the ingestion to complete, then retrieve it back through C7's
-    `/api/v1/memory/retrieve`. The retrieved top result SHALL contain
-    a substring unique to the just-uploaded source — proving the
-    C12→C7→Arango→retrieval chain is intact."""
+    """Upload a text file carrying a unique marker the way the UI does —
+    multipart to C7 — then retrieve it back through
+    `/api/v1/memory/retrieve`. At least one hit SHALL contain the marker,
+    proving the C7→MinIO→C12→C13→C7→Arango→retrieval chain is intact."""
     unique_phrase = f"kzrl-marker-{uuid.uuid4().hex[:12]}"
     source_id = f"sys-test-{uuid.uuid4().hex[:8]}"
     body = (
@@ -66,32 +92,60 @@ async def test_upload_text_source_ends_up_retrievable(
         "retrievable after the upload workflow fires."
     )
 
-    upload_payload = {
-        "source_id": source_id,
-        "project_id": "demo",
-        "tenant_id": "t-demo",
-        "uploaded_by": "alice",
-        "content": body,
-    }
-    # The webhook uses `responseMode: responseNode` + an explicit
-    # `respond-to-caller` node, so this POST returns once C7 has persisted
-    # the chunks.
+    # Multipart, exactly as `apiClient.uploadSource` builds it: `format` is
+    # the lowercased file extension, and C7 derives the object key itself.
     upload_resp = await gateway_client.post(
-        "/uploads/ingest-text",
-        json=upload_payload,
+        "/api/v1/memory/projects/demo/sources/upload",
+        files={"file": (f"{source_id}.txt", body.encode(), "text/plain")},
+        data={
+            "source_id": source_id,
+            "mime_type": "text/plain",
+            "format": "txt",
+        },
         headers=auth_headers,
     )
-    assert upload_resp.status_code == 200, (
-        f"upload via n8n webhook failed: {upload_resp.status_code} "
-        f"{upload_resp.text}. If it's 404, the workflow was not seeded — "
-        f"check the c12_workflow_seed container logs."
+    # 202: C7 has taken byte custody and fired the C12 workflow. The
+    # extraction that follows is asynchronous — hence the poll below.
+    assert upload_resp.status_code == 202, (
+        f"multipart upload to C7 failed: {upload_resp.status_code} "
+        f"{upload_resp.text}. A 403 means forward-auth did not resolve a "
+        "project role on `demo` (check the seeder's grant); a 422 means the "
+        "multipart contract drifted."
     )
     accept = upload_resp.json()
-    assert accept.get("accepted") is True
-    assert accept.get("source_id") == source_id
+    assert accept.get("source_id") == source_id, accept
 
-    # Give the stack a moment to finalise write + index (bounded).
-    for _ in range(20):
+    # The source record SHALL be visible immediately: C7 creates it in the
+    # same request that takes byte custody. This half holds in every profile
+    # and is what proves the wiring — C7 wrote to MinIO, recorded the source,
+    # and accepted responsibility for triggering C12.
+    listing = await gateway_client.get(
+        "/api/v1/memory/projects/demo/sources", headers=auth_headers
+    )
+    assert listing.status_code == 200, listing.text
+    ids = {s["source_id"] for s in listing.json()["sources"]}
+    assert source_id in ids, (
+        f"{source_id!r} was accepted with 202 but does not appear in C7's "
+        f"source listing. Present: {sorted(ids)[:10]}"
+    )
+
+    if not _FULL_EXTRACTION:
+        pytest.skip(
+            "Retrieval half requires a real embedding provider. The compose "
+            "`test` profile points C13 at mock_llm, which serves only "
+            "/v1/chat/completions and 404s /v1/embeddings — an explicit "
+            "operator decision (2026-05-29, see the CAVEAT above the "
+            "c13-extractor service in tests/docker-compose.yml): that stack "
+            "proves the WIRING, not real extraction. The wiring half above "
+            "DID run and passed. Set AY_SYSTEM_FULL_EXTRACTION=1 against the "
+            "`litellm` profile with a real key to exercise the rest."
+        )
+
+    # Bounded poll. The budget is 60s, not the 10s this test used while the
+    # chain was synchronous: it now crosses C13, whose n8n status poll alone
+    # waits 5s per iteration. A shorter budget would make this test fail on
+    # timing rather than on the behaviour it validates.
+    for _ in range(60):
         retrieve = await gateway_client.post(
             "/api/v1/memory/retrieve",
             json={
@@ -104,10 +158,13 @@ async def test_upload_text_source_ends_up_retrievable(
         )
         if retrieve.status_code == 200 and retrieve.json().get("hits"):
             break
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.0)
     else:
         pytest.fail(
-            f"retrieval never returned hits for {unique_phrase!r} within 10s"
+            f"retrieval never returned hits for {unique_phrase!r} within 60s. "
+            "The upload was accepted (202), so the break is downstream: "
+            "check the n8n execution list for `extract-and-ingest`, then "
+            "c13-extractor's /analyze, then C7's /ingest-chunks."
         )
 
     hits = retrieve.json()["hits"]

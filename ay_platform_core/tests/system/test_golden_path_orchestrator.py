@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_golden_path_orchestrator.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/test_golden_path_orchestrator.py
 # Description: Golden-path system test — exercises the 5-phase orchestrator
 #              pipeline end-to-end against the running docker-compose stack:
@@ -267,7 +267,7 @@ async def test_c6_validation_blocking_finding_visible_via_traefik(
     finding SHALL be reachable through the Traefik-fronted C6 API.
     """
     trigger = await gateway_client.post(
-        "/api/v1/validation/runs",
+        "/api/v1/projects/demo/validation/runs",
         json={
             "domain": "code",
             "project_id": "demo",
