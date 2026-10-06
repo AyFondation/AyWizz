@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 9
+# Version: 11
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/service.py
 # Description: Facade for the C7 Memory Service. Wires ingestion (parse +
 #              chunk + embed + index), federated retrieval, entity-event
@@ -35,6 +35,7 @@
 # @relation implements:R-400-071
 # @relation implements:R-400-207
 # @relation implements:R-400-208
+# @relation implements:R-400-222
 # @relation implements:R-400-227
 # @relation implements:R-400-228
 # @relation implements:R-400-230
@@ -459,6 +460,45 @@ class MemoryService:
             index_kind=IndexKind.CONVERSATIONS,
         )
 
+    async def _mark_source_failed(
+        self, *, tenant_id: str, project_id: str, source_id: str, reason: str
+    ) -> None:
+        """Record a terminal ingestion failure ON THE SOURCE ROW.
+
+        Called before raising, on the chunk hand-off rejections. The HTTP
+        error goes to C12 (n8n), which logs it and stops — so without this
+        the only trace of a failed ingestion is a line in a container log,
+        and the user sees a source stuck at `PENDING` with no explanation
+        after an upload that answered `202 Accepted`.
+
+        BEST-EFFORT BY DESIGN, and that is a deliberate trade, not an
+        oversight: this runs on an error path, and if the status write itself
+        fails the caller SHALL still receive the original 4xx describing the
+        real problem. Swallowing the secondary failure keeps the primary
+        diagnosis intact; it is logged at ERROR so the double fault is not
+        lost.
+        """
+        try:
+            row = await self._repo.get_source(tenant_id, project_id, source_id)
+            if row is None:
+                _log.error(
+                    "cannot mark source %s failed — no row for %s/%s",
+                    source_id,
+                    tenant_id,
+                    project_id,
+                )
+                return
+            row["parse_status"] = ParseStatus.FAILED.value
+            row["parse_error"] = reason
+            await self._repo.upsert_source(row)
+            _log.error("source %s marked FAILED: %s", source_id, reason)
+        except Exception:
+            _log.exception(
+                "failed to record the ingestion failure on source %s; the "
+                "original error is still raised to the caller",
+                source_id,
+            )
+
     async def _load_c13_artifacts(
         self, *, tenant_id: str, project_id: str, source_id: str, run_id: str
     ) -> tuple[list[ChunkRich], str, int]:
@@ -558,20 +598,52 @@ class MemoryService:
         # 2. Cross-validate embedding dimension. Every chunk SHALL carry a
         #    vector of the manifest dimension (R-400-222 v2 — embeddings are
         #    produced by C13, not by C7 on this path).
+        #    A rejection here SHALL be recorded on the source before it is
+        #    raised. The caller is C12 (n8n), not a human: it logs the
+        #    `AxiosError 422` into a container log and gives up, so raising
+        #    alone left the source at PENDING forever with nothing to explain
+        #    it — while the user's upload had been answered `202 Accepted`.
+        #    `FAILED` + `parse_error` is what makes it visible in the sources
+        #    list. This is the common case when C13's embedding provider is
+        #    unreachable: its pass is best-effort (it logs `Embedding pass
+        #    failed — chunks will carry no vectors`) and reports the run as a
+        #    success, so the artifacts arrive complete except for vectors.
         missing = [c.chunk_id for c in chunks if c.embedding is None]
         if missing:
+            detail = (
+                f"chunks missing embedding (R-400-222 v2): {missing[:5]}"
+                f"{'…' if len(missing) > 5 else ''} — {len(missing)} of "
+                f"{len(chunks)} chunks. The extractor (C13) reported run "
+                f"{payload.extraction_run_id} as successful but produced no "
+                f"vectors; check its log for 'Embedding pass failed' and "
+                f"confirm the embedding provider for {embedding_model!r} is "
+                f"reachable, then re-upload."
+            )
+            await self._mark_source_failed(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                source_id=source_id,
+                reason=detail,
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"chunks missing embedding (R-400-222 v2): {missing[:5]}",
+                detail=detail,
             )
         dims = {len(c.embedding) for c in chunks}  # type: ignore[arg-type]
         if dims != {embedding_dimension}:
+            detail = (
+                f"embedding_dimension mismatch: manifest "
+                f"{embedding_dimension}, vectors carry {sorted(dims)}"
+            )
+            await self._mark_source_failed(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                source_id=source_id,
+                reason=detail,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"embedding_dimension mismatch: manifest "
-                    f"{embedding_dimension}, vectors carry {sorted(dims)}"
-                ),
+                detail=detail,
             )
 
         # 3. Quota enforcement on cumulative token_count
@@ -689,11 +761,31 @@ class MemoryService:
             and self._kg_repo is not None
             and self._llm is not None
         ):
-            with contextlib.suppress(Exception):
+            try:
                 await self.extract_kg(
                     tenant_id=tenant_id,
                     project_id=project_id,
                     source_id=source_id,
+                )
+            except Exception:
+                # Best-effort stays best-effort — the upload is already
+                # durable and MUST NOT be failed by an enrichment step. But
+                # this was a `contextlib.suppress(Exception)`, which wrote
+                # NOTHING anywhere: a source whose knowledge graph silently
+                # failed to extract was indistinguishable from one with
+                # nothing to extract. That matters because the graph is not
+                # decoration — `retrieve()` uses it for pool widening and a
+                # 1.3 ranking boost (Phase F.2), so a project whose KG
+                # quietly never populated gets measurably worse answers with
+                # no signal at all. Logged with the traceback at ERROR so the
+                # failure is at least findable; making it observable on the
+                # SOURCE ROW is the open follow-up.
+                _log.exception(
+                    "auto KG extraction failed for source %s in project %s; "
+                    "the source is indexed and retrievable, but graph "
+                    "expansion will not see it until re-extracted",
+                    source_id,
+                    project_id,
                 )
         return public
 
@@ -2133,6 +2225,31 @@ class MemoryService:
         filtered = [
             r for r in rows if _row_matches_filters(r, payload)
         ]
+        # Drop rows whose vector cannot be compared, BEFORE scoring.
+        # `cosine` raises ValueError on a length mismatch (deliberately —
+        # R-400-002 forbids comparing embeddings from different models), and
+        # a chunk stored with an empty vector has length 0. Such a row is
+        # reachable: C13's embedding pass is best-effort, so an upload
+        # performed while its provider was down writes vector-less chunks
+        # under a model_id the scan happily selects. Without this guard ONE
+        # such chunk turns every retrieval for the project into a 500 —
+        # the defect is in the ingested row, but the blast radius was the
+        # whole project. The source is now marked DEGRADED at ingestion
+        # (see `ParseStatus.DEGRADED`); this is the second line of defence,
+        # for rows written before that check existed.
+        dim = len(query_vector)
+        comparable = [r for r in filtered if _vector_is_comparable(r, dim)]
+        if len(comparable) != len(filtered):
+            _log.error(
+                "retrieval dropped %d/%d chunk(s) in project %s with an "
+                "unusable embedding (expected dim %d) — the owning source(s) "
+                "need reprocessing",
+                len(filtered) - len(comparable),
+                len(filtered),
+                payload.project_id,
+                dim,
+            )
+        filtered = comparable
 
         weights = payload.weights or {}
 
@@ -2166,6 +2283,7 @@ class MemoryService:
                 tenant_id=tenant_id,
                 cosine_fn=_cosine_weighted,
                 model_id=embedder.model_id,
+                query_dim=dim,
             )
 
         # R-400-202 — hybrid retrieval : fuse the dense (cosine + KG) ranking
@@ -2246,6 +2364,7 @@ class MemoryService:
         tenant_id: str,
         cosine_fn: Any,
         model_id: str,
+        query_dim: int,
     ) -> list[tuple[dict[str, Any], float]]:
         """Phase F.2 hybrid expansion. Returns a re-sorted scored list
         with (A) extra chunks pulled from graph-neighbour source_ids
@@ -2289,7 +2408,17 @@ class MemoryService:
                 include_deprecated=payload.include_deprecated,
                 include_history=payload.include_history,
             )
-            extra_filtered = [r for r in extra_rows if _row_matches_filters(r, payload)]
+            # Same unusable-vector guard as the dense arm: these rows are
+            # fetched by source_id, bypassing the scan the guard sits on, and
+            # `cosine_fn` would raise on a vector-less chunk. A graph
+            # neighbour is exactly the kind of row that can be degraded
+            # independently of the seed.
+            extra_filtered = [
+                r
+                for r in extra_rows
+                if _row_matches_filters(r, payload)
+                and _vector_is_comparable(r, query_dim)
+            ]
             scored = scored + [(row, cosine_fn(row)) for row in extra_filtered]
 
         # Proposition B: boost any chunk whose source_id is in the graph-
@@ -2424,6 +2553,22 @@ def _chunk_public(row: dict[str, Any]) -> ChunkPublic:
         status=ChunkStatus(row["status"]),
         metadata=dict(row.get("metadata", {})),
     )
+
+
+def _vector_is_comparable(row: dict[str, Any], query_dim: int) -> bool:
+    """True when `row`'s stored vector can be cosine-compared.
+
+    False for a missing, null or empty `vector`, and for one whose
+    dimensionality does not match the query embedder's. `cosine` raises on a
+    mismatch rather than returning a score — which is the right call for
+    R-400-002 (never silently compare two models' embeddings) but means an
+    un-vetted row aborts the entire retrieval request, not just its own
+    scoring. Callers filter with this first.
+    """
+    vector = row.get("vector")
+    if not vector:
+        return False
+    return len(vector) == query_dim
 
 
 def _row_matches_filters(row: dict[str, Any], payload: RetrievalRequest) -> bool:

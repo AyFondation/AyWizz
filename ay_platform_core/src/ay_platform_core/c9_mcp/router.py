@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/router.py
 # Description: FastAPI APIRouter for C9. Exposes the JSON-RPC endpoint plus
 #              two convenience/admin endpoints (tools listing, health).
@@ -43,6 +43,7 @@ async def jsonrpc(
     request: Request,
     _user: str = Depends(_require_actor),
     x_tenant_id: str | None = Header(default=None),
+    x_project_scopes: str | None = Header(default=None),
     server: MCPServer = Depends(get_server),
 ) -> JSONRPCResponse:
     """JSON-RPC 2.0 endpoint for MCP clients.
@@ -52,8 +53,12 @@ async def jsonrpc(
     which FastAPI's default 422 behaviour would prevent.
     """
     # Record the caller identity in the request context so tools acting on the
-    # user's behalf (e.g. c6_trigger_validation) attribute their LLM usage.
-    set_actor(_user, x_tenant_id or "")
+    # user's behalf (e.g. c6_trigger_validation) attribute their LLM usage —
+    # and, since inc3b, so they can forward the caller's PROVEN role on the
+    # project a tool argument names. `X-Project-Scopes` is derived by C2 from
+    # the verified JWT and overwritten by Traefik, so it is not caller input;
+    # see `c2_auth.forward_auth` for why that matters.
+    set_actor(_user, x_tenant_id or "", x_project_scopes or "")
     body = await request.body()
     return await server.handle_raw(body)
 

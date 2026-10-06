@@ -1,15 +1,29 @@
 # =============================================================================
 # File: locks.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/objects/locks.py
 # Description: Lease-based exclusive locks on document objects
 #              (310-SPEC-DOC-TRACEABILITY §4.10).
 #
 #              Held in ArangoDB rather than MinIO because acquisition needs an
 #              atomic compare-and-set, which object storage does not offer.
-#              One AQL UPSERT performs the whole decision — read, expiry
-#              check, and write — so two callers racing for a free lock cannot
-#              both win.
+#
+#              v2 (2026-10-06) replaced the single AQL `UPSERT` with an
+#              `INSERT` followed, only on conflict, by a conditional `UPDATE`.
+#              The UPSERT's own comment claimed "one statement decides
+#              everything, so two callers racing for a free lock cannot both
+#              win"; ArangoDB documents UPSERT as a lookup THEN an
+#              insert-or-update, so that was never the guarantee. What
+#              actually happened under real concurrency is sharper and was
+#              only reproducible with EIGHT INDEPENDENT LockManagers against
+#              one database (`LockManager._run` serialises per instance, so
+#              a single manager can never race itself — a test built on one
+#              manager exercises nothing): Arango answered
+#              `[ERR 1200] write-write conflict [node: UpsertNode]`, and
+#              nothing caught it. The contender that lost the race received a
+#              database error instead of `LockHeldError` — a 500 for
+#              behaving correctly, on the path whose whole job is telling a
+#              user who holds the lease (R-310-193).
 #
 #              Expiry is enforced in code, NOT by the TTL index. Arango's TTL
 #              collector runs periodically, so an expired row survives for an
@@ -39,6 +53,37 @@ _T = TypeVar("_T")
 COLL_LOCKS = "req_object_locks"
 
 DEFAULT_LEASE_SECONDS = 900
+
+#: Arango error numbers that mean "somebody else got there first".
+#:
+#: 1210 is the unique-`_key` violation — the insert found the document
+#: already committed. 1200 is a write-write conflict: two transactions
+#: touched the same document concurrently and this one was rolled back.
+#:
+#: BOTH are needed, and 1200 was found the hard way. The first version of
+#: this helper matched only 1210, which looked right and passed every test —
+#: until `test_exactly_one_winner_across_independent_replicas` drove eight
+#: INDEPENDENT LockManagers at one document and Arango answered
+#: `[HTTP 409][ERR 1200] AQL: write-write conflict [node #3: InsertNode]`.
+#: Which of the two a given contender receives depends on how far the
+#: winner's transaction had progressed, so a lock that handles only one of
+#: them raises a 500 to roughly half the losers instead of refusing them.
+_ACQUISITION_CONFLICT_ERRORS = frozenset({1200, 1210})
+
+
+def _is_acquisition_conflict(exc: BaseException) -> bool:
+    """True when `exc` is Arango saying the lease was taken concurrently.
+
+    Matched on the server's error NUMBER rather than the exception class or
+    its message: python-arango wraps server errors in several types
+    (`DocumentInsertError`, `AQLQueryExecuteError`) depending on the call
+    path, and the message is localisable.
+
+    A conflict here is the EXPECTED outcome of a lost acquisition race, not
+    a fault — which is why it is identified precisely instead of being
+    swallowed by a bare `except`.
+    """
+    return getattr(exc, "error_code", None) in _ACQUISITION_CONFLICT_ERRORS
 
 
 class LockHeldError(RuntimeError):
@@ -140,40 +185,89 @@ class LockManager:
             "expires_at": expires.isoformat(),
             "expires_at_ts": expires.timestamp(),
         }
-        # One statement decides everything, so two callers racing for a free
-        # lock cannot both observe it as free. A lapsed lease is taken over;
-        # the current holder re-acquiring extends its own lease.
-        # The whole conditional is parenthesised on purpose: AQL's `IN` is
-        # also the array-membership operator, so an unparenthesised
-        # `… : {} IN req_object_locks` parses as a membership test and the
-        # UPSERT loses its target collection.
-        aql = """
-        UPSERT { _key: @key }
-        INSERT @doc
-        UPDATE (
-            (OLD.expires_at_ts <= @now_ts OR OLD.holder == @holder) ? @doc : {}
-        )
-        IN req_object_locks
-        RETURN {
-            row: NEW,
-            granted: (OLD == null
-                      OR OLD.expires_at_ts <= @now_ts
-                      OR OLD.holder == @holder)
-        }
+        # ------------------------------------------------------------------
+        # Acquisition is TWO atomic primitives, not one UPSERT.
+        #
+        # The previous implementation was a single `UPSERT … INSERT … UPDATE`
+        # and its comment claimed "one statement decides everything, so two
+        # callers racing for a free lock cannot both observe it as free".
+        # That is not what UPSERT guarantees. ArangoDB documents UPSERT as a
+        # LOOKUP followed by an insert-or-update, and warns that concurrent
+        # UPSERTs on the same key can both find no document. Two contenders
+        # could therefore both be told `granted: true` for a free lock.
+        #
+        # It was not theoretical: `test_concurrent_acquisition_has_exactly_
+        # one_winner` (8 contenders via `asyncio.gather`) failed with "2
+        # holders granted the same lease" on 2026-10-06. It passed most runs,
+        # because the window is small — which is the worst property for a
+        # lock whose entire purpose is preventing the lost updates of
+        # R-310-191.
+        #
+        # What IS atomic is a single-document operation. So:
+        #   1. INSERT. The unique `_key` makes exactly one concurrent insert
+        #      succeed; every other contender gets a unique-constraint
+        #      violation. That decides the free-lock race in the database,
+        #      not in a read-then-write window.
+        #   2. If the key already existed, a conditional UPDATE whose FILTER
+        #      and write are one statement on one document: it takes the
+        #      lease over only if the stored row is still expired, or still
+        #      ours. Returning no row means somebody else holds it.
+        # ------------------------------------------------------------------
+        try:
+            cursor = self._db.aql.execute(
+                "INSERT @doc IN req_object_locks RETURN NEW",
+                bind_vars={"doc": doc},
+            )
+            return cast(dict[str, Any], next(iter(cursor))), True
+        except Exception as exc:
+            if not _is_acquisition_conflict(exc):
+                raise
+
+        # The key exists. Take it over iff it is lapsed or already ours. The
+        # FILTER is re-evaluated against the stored document inside this
+        # statement, so a holder who renewed in the meantime is not displaced.
+        takeover = """
+        FOR l IN req_object_locks
+            FILTER l._key == @key
+            FILTER l.expires_at_ts <= @now_ts OR l.holder == @holder
+            UPDATE l WITH @doc IN req_object_locks
+            RETURN NEW
         """
-        cursor = self._db.aql.execute(
-            aql,
-            bind_vars={
-                "key": doc["_key"],
-                "doc": doc,
-                "holder": holder,
-                "now_ts": now.timestamp(),
-            },
-        )
-        # The UPSERT always returns exactly one row, so consuming the first is
-        # total — an empty cursor here would mean Arango broke its contract.
-        result = next(iter(cursor))
-        return cast(dict[str, Any], result["row"]), bool(result["granted"])
+        try:
+            cursor = self._db.aql.execute(
+                takeover,
+                bind_vars={
+                    "key": doc["_key"],
+                    "doc": doc,
+                    "holder": holder,
+                    "now_ts": now.timestamp(),
+                },
+            )
+            rows = list(cursor)
+        except Exception as exc:
+            # Two contenders can both match the FILTER (a lapsed lease is
+            # fair game to either) and then collide on the write. Losing
+            # that collision is a refusal, not a fault — the same reasoning
+            # as the INSERT path above. Without this the loser would get a
+            # 500 for behaving correctly.
+            if not _is_acquisition_conflict(exc):
+                raise
+            rows = []
+        if rows:
+            return cast(dict[str, Any], rows[0]), True
+
+        # Refused: report the CURRENT holder so the caller can say who to ask
+        # (R-310-193) rather than failing anonymously.
+        current = self._db.collection(COLL_LOCKS).get(doc["_key"])
+        if current is None:
+            # Released between the conflict and this read. Retry once: the
+            # lock is free again and the INSERT path can decide cleanly.
+            cursor = self._db.aql.execute(
+                "INSERT @doc IN req_object_locks RETURN NEW",
+                bind_vars={"doc": doc},
+            )
+            return cast(dict[str, Any], next(iter(cursor))), True
+        return cast(dict[str, Any], current), False
 
     async def acquire(
         self,

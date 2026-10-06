@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c6_validation/service.py
 # Description: ValidationService — the C6 facade. Orchestrates:
 #              - plugin discovery (via the registry)
@@ -168,12 +168,23 @@ class ValidationService:
         artifacts: list[CodeArtifact],
         tenant_id: str = "",
         user_id: str = "",
+        project_scopes: str = "",
     ) -> RunTriggerResponse:
         """Create a run row (status=pending) and kick off in-process execution.
 
         Returns as soon as the run row is persisted; actual work proceeds in
         the background via ``asyncio.create_task`` (R-700-011).
+
+        `project_scopes` is accepted and IGNORED here on purpose. The two
+        wirings of this method share one signature so a C9 tool handler does
+        not branch on which one it got (see `c9_mcp.remote`). In-process,
+        the authorization gate has already run in the router that called us,
+        so there is nothing left to resolve; over HTTP, the remote adapter
+        needs the value to derive the `X-User-Roles` it must send, because
+        that call does not pass through the gateway. Dropping the parameter
+        from this side would push a `hasattr` check into the tool.
         """
+        del project_scopes
         plugins = self._plugins_for_domain(payload.domain)
         if not plugins:
             raise HTTPException(

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: Dockerfile.ui
-# Version: 3
+# Version: 4
 # Path: infra/docker/Dockerfile.ui
 # Description: Production image for the Next.js UI (`ay_platform_ui/`).
 #              Multi-stage build leveraging Next.js 16's `output:
@@ -82,6 +82,11 @@ WORKDIR /app
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Same reason as Dockerfile.api: AGPL-3.0-or-later requires the licence to
+# accompany the conveyed work, and the standalone bundle carries none.
+# Copied from the build context (monorepo root), not from the builder stage,
+# because the builder only ever sees `ay_platform_ui/`.
+COPY LICENSE ./LICENSE
 
 # `node` user (uid=1000) ships in node:alpine ; use it instead of root.
 USER node

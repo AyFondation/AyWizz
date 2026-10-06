@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_object_locks_verified.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c5_requirements/test_object_locks_verified.py
 # Description: Integration tests for the object edit lease (310-SPEC §4.10)
 #              against a real ArangoDB. Nothing here is meaningful without a
@@ -246,3 +246,92 @@ async def test_assert_can_write_blocks_a_foreign_writer(locks: LockManager) -> N
 async def test_assert_can_write_ignores_a_lapsed_lease(locks: LockManager) -> None:
     await locks.acquire(PID, OID, AGENT, HolderKind.AGENT, now=NOW)
     await locks.assert_can_write(PID, OID, HUMAN, now=NOW + timedelta(seconds=901))
+
+
+@pytest.fixture
+def lock_replicas(
+    arango_container: ArangoEndpoint,
+) -> Iterator[list[LockManager]]:
+    """Eight INDEPENDENT LockManagers sharing one database.
+
+    **WHY INDEPENDENT INSTANCES AND NOT ONE.** `LockManager._run` wraps every
+    database call in `async with self._get_lock()` — a per-instance
+    `asyncio.Lock` that python-arango's thread-unsafe `Database` requires. So
+    `asyncio.gather` over ONE manager executes its calls strictly one after
+    another, and a test built that way exercises no contention whatsoever,
+    whatever it asserts. (That is exactly the mistake the first version of
+    the contention test below made: 320 acquisitions, all sequential, passing
+    identically against an implementation known to be racy.)
+
+    Production runs N C5 replicas, each with its own process, its own
+    `Database` and therefore its own `asyncio.Lock`. Only the DATABASE
+    serialises them. Eight managers over one database is that topology, and
+    it is the only shape in which acquisition atomicity means anything.
+    """
+    db_name = f"c5_lock_race_{uuid.uuid4().hex[:8]}"
+    client = ArangoClient(hosts=arango_container.url)
+    sys_db = client.db("_system", username="root", password=arango_container.password)
+    sys_db.create_database(db_name)
+    try:
+        managers = [
+            LockManager(
+                client.db(
+                    db_name, username="root", password=arango_container.password
+                ),
+                lease_seconds=900,
+            )
+            for _ in range(8)
+        ]
+        managers[0]._ensure_collections_sync()
+        yield managers
+    finally:
+        cleanup_arango_database(arango_container, db_name)
+
+
+@pytest.mark.asyncio
+async def test_exactly_one_winner_across_independent_replicas(
+    lock_replicas: list[LockManager],
+) -> None:
+    """Eight replicas race for one free lease, ten times over.
+
+    This is the property the whole design rests on and the only test that can
+    establish it: each replica has its own `asyncio.Lock`, so the eight
+    `acquire` calls really do reach ArangoDB concurrently. A double grant
+    here means two editors both believe they hold the lease, which is
+    R-310-191's lost-update scenario live.
+
+    Ten rounds on fresh object ids, because re-acquiring one's own lease is
+    legal and would mask a double grant if rounds shared an id.
+    """
+    for round_no in range(10):
+        object_id = f"OBJ-RACE-{round_no}-{uuid.uuid4().hex[:6]}"
+        results = await asyncio.gather(
+            *(
+                mgr.acquire(
+                    PID, object_id, f"replica-{i}", HolderKind.HUMAN, now=NOW
+                )
+                for i, mgr in enumerate(lock_replicas)
+            ),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if not isinstance(r, BaseException)]
+        refusals = [r for r in results if isinstance(r, LockHeldError)]
+        unexpected = [
+            r
+            for r in results
+            if isinstance(r, BaseException) and not isinstance(r, LockHeldError)
+        ]
+        assert not unexpected, (
+            f"round {round_no}: a lost race SHALL surface as LockHeldError, "
+            f"not as a database error: {unexpected!r}"
+        )
+        assert len(winners) == 1, (
+            f"round {round_no}: {len(winners)} replicas were granted the same "
+            f"lease on {object_id} "
+            f"({sorted(w.holder for w in winners)}). Acquisition is not "
+            "atomic across replicas."
+        )
+        assert len(refusals) == len(lock_replicas) - 1
+        held = await lock_replicas[0].get(PID, object_id, now=NOW)
+        assert held is not None
+        assert held.holder == winners[0].holder

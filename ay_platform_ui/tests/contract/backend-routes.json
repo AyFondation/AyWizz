@@ -1320,7 +1320,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",

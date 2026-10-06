@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 6
+# Version: 8
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/router.py
 # Description: FastAPI APIRouter for C2 Auth Service. 12 endpoints covering
 #              authentication, token verification, logout, user management,
@@ -21,6 +21,20 @@
 #              (read-only freeze), independently of role. Governance URIs
 #              (admin, project metadata, ACL) are exempt. Record-derived
 #              project scoping (C3/C4 by-id) is out of scope here (inc3b).
+#              v8 (E-100-002 v8, 2026-10-06): `/verify` now REFUSES a
+#              project-CONTENT request from a caller holding no grant on the
+#              project named in the URI. This closed 70 endpoints across C4,
+#              C5 and C7 that were catalogued `AUTHENTICATED` +
+#              `Scope.PROJECT` — a project scope promised with nothing
+#              enforcing it. Verified live: a caller with `project_owner` on
+#              `demo` alone had been getting 200 from
+#              `/api/v1/projects/not-mine/requirements/entities`. Enforced
+#              here rather than in 69 routes because the gateway is the only
+#              layer holding both the target project and the caller's scope
+#              map, so future routes are covered too, and because
+#              service-to-service callers never traverse C1 and so cannot be
+#              broken by it. Governance, ACL and the D-022 `/backups`
+#              operator surface are exempt (`_role_gated_project_id`).
 #              v6 (E-100-002 v7): per-user CRUD (`/users` create + `/users/{id}`
 #              get/update/delete/reset-password) is TENANT-ISOLATED — an
 #              `admin`/`tenant_admin` is confined to its own tenant. Create
@@ -41,6 +55,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
 
+from ay_platform_core.c2_auth.forward_auth import serialize_project_scopes
 from ay_platform_core.c2_auth.models import (
     AuthConfigResponse,
     JWTClaims,
@@ -191,6 +206,119 @@ def _content_project_id(uri: str) -> str | None:
     return unquote(match.group(1))
 
 
+#: Sub-resources of a project that are an OPERATOR surface, not content.
+#: `/backups` is the only one: D-022 deliberately grants `admin`,
+#: `tenant_admin` and `platform_manager` access to a project's backups
+#: without requiring a project grant (it is about the project AS AN ARTIFACT,
+#: not about reading its requirements). Verified against the route catalogue:
+#: these five endpoints are the ONLY project-scoped rows with a non-empty
+#: `accept_global_roles`, every other such row being `/members` which
+#: `_content_project_id` already treats as governance.
+_OPERATOR_SUBRESOURCES = ("/backups",)
+
+
+def _role_gated_project_id(uri: str) -> str | None:
+    """Project id of a request that SHALL require a project role, else None.
+
+    **WHY THIS EXISTS — THE DEFECT IT CLOSES.** An audit on 2026-10-06
+    counted **70 endpoints** catalogued `Auth.AUTHENTICATED` +
+    `Scope.PROJECT`: a project scope promised, with no role gate behind it.
+    C5's whole read surface (`list_entities`, `get_entity`, `get_document`,
+    `get_entity_version`, `get_history`), C7's 14 source reads and C4's
+    documents surface — `POST`, `PUT`, `DELETE`, `mkdir`, `rename`, `move`
+    included — checked only that SOME user was authenticated. Verified live:
+    a caller holding `project_owner` on `demo` and nothing else received
+    **200** from `/api/v1/projects/not-mine/requirements/entities`. The body
+    was empty only because that project had no data; the authorization
+    decision was ALLOW. C5 compounds it by keying entities
+    `project_id:entity_id` with no tenant component, so the exposure there
+    crosses tenants too.
+    (`tests/coherence/test_project_role_gate_ratchet.py` enumerated them.)
+
+    **WHY HERE AND NOT IN 69 ROUTES.** The gateway is the only place that
+    knows BOTH the target project (from the URI) and the caller's full scope
+    map (from the verified JWT), so one check covers every current and
+    FUTURE project-content route — a new endpoint is gated by default
+    instead of gated if its author remembered. Per-route edits would have
+    left the next one exposed, which is exactly how these 70 accumulated.
+
+    It also leaves service-to-service callers untouched: C3's tools, C4's
+    live-docs client, C12's n8n workflow and C9's MCP adapters all call
+    components DIRECTLY over the internal network and never traverse C1,
+    so none of them can be broken by a decision taken at the gateway. That
+    is what makes this a safe single point of enforcement rather than a
+    coordinated 3-component migration.
+
+    **WHAT IT DELIBERATELY DOES NOT GATE**, reusing the E-100-002 v4
+    content/governance split that `_content_project_id` already documents:
+      * `/admin/…` — the platform-operator surface;
+      * `/api/v1/projects/{pid}` — the project's own metadata;
+      * `…/members…` — its ACL, so an owner can still fix access;
+      * `…/backups…` — see `_OPERATOR_SUBRESOURCES`.
+
+    Refusing a global-only `admin` or `tenant_admin` here is CORRECT, not
+    collateral damage: E-100-002 v7 made those roles content-blind, and
+    every in-app content gate already strips them. This makes the boundary
+    agree with the gates behind it.
+    """
+    path = uri.split("?", 1)[0].split("#", 1)[0]
+    if "/admin/" in path:
+        return None
+    match = _PROJECT_URI_RE.search(path)
+    if match is None:
+        return None
+    remainder = path[match.end() :]
+    if remainder in ("", "/"):
+        return None
+    if remainder.startswith("/members"):
+        return None
+    if remainder.startswith(_OPERATOR_SUBRESOURCES):
+        return None
+    return unquote(match.group(1))
+
+
+def _forward_auth_project_scopes(claims: JWTClaims) -> str:
+    """Serialise the caller's FULL project-role map for `X-Project-Scopes`.
+
+    Format: `pid=role,role;pid2=role` — `;` between projects, `,` between
+    roles, deterministic order (sorted) so the header is stable and
+    comparable in tests. Empty string when the caller holds no project
+    scope, which is the common case for a `tenant_manager` or a brand-new
+    user.
+
+    **WHY A SECOND HEADER EXISTS.** `X-User-Roles` carries the caller's
+    global roles plus their role on ONE project — the one C2 can read out of
+    `X-Forwarded-Uri`. That covers every endpoint whose URI contains
+    `…/projects/{pid}/…`, and nothing else. Three real surfaces learn their
+    project id elsewhere:
+
+      - C9 (MCP): the project lives in a TOOL ARGUMENT. The original URI is
+        `/api/v1/mcp/...`, so no project role was ever derived, and every
+        MCP tool that writes project content failed with 403 — regardless
+        of who called it.
+      - C3 conversations and C4 run-by-id: the project is a property of the
+        RECORD being addressed, resolved only after a database read.
+
+      This is the gap the `/auth/verify` docstring has been calling "inc3b".
+      A component that learns its project id from a body, an argument, or a
+      record can resolve the caller's role on it from this header, without
+      C2 needing to understand that component's payload shape.
+
+    **IT IS STILL NOT CLIENT-SUPPLIED.** Like the other four, this header is
+    listed in the `forward-auth-c2` middleware's `authResponseHeaders`, so
+    Traefik OVERWRITES whatever the caller sent with what C2 derived from
+    the verified JWT. `tests/system/test_header_forgery.py` proves that for
+    the header set; the matching case for this one lives there too.
+
+    **IT GRANTS NOTHING BY ITSELF.** It reports scopes, so a consumer SHALL
+    look up the project it is about to act on and use THAT project's roles.
+    Treating a role held on project A as authority over project B is the
+    confused-deputy mistake; C6's run trigger refuses a body/path mismatch
+    for the same reason.
+    """
+    return serialize_project_scopes(claims.project_scopes)
+
+
 def _forward_auth_roles(claims: JWTClaims, request: Request) -> str:
     """Build the `X-User-Roles` forward-auth value (E-100-002).
 
@@ -237,7 +365,23 @@ async def verify(
     Record-derived project scoping (C3 conversations, C4 run-by-id — no
     `{project_id}` in the URL) is NOT covered here; it is tracked as inc3b.
     """
-    content_pid = _content_project_id(request.headers.get("X-Forwarded-Uri", ""))
+    forwarded_uri = request.headers.get("X-Forwarded-Uri", "")
+
+    # E-100-002 v8 — a project-content request SHALL carry a project grant on
+    # THAT project. Checked before the lifecycle gate so a caller with no
+    # business seeing the project cannot learn its status from the error.
+    # See `_role_gated_project_id` for what this closes and why it lives here.
+    gated_pid = _role_gated_project_id(forwarded_uri)
+    if gated_pid is not None and not claims.project_scopes.get(gated_pid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "requires a project role on this project "
+                "(project_viewer, project_editor or project_owner)"
+            ),
+        )
+
+    content_pid = _content_project_id(forwarded_uri)
     if content_pid is not None:
         project_status = await service.get_project_status(content_pid)
         if project_status is not None and project_status is not ProjectStatus.ACTIVE:
@@ -254,6 +398,10 @@ async def verify(
 
     response.headers["X-User-Id"] = claims.sub
     response.headers["X-User-Roles"] = _forward_auth_roles(claims, request)
+    # Always emitted, even empty: a header that is sometimes absent would let
+    # a caller's forged value survive for callers who hold no project scope,
+    # since Traefik can only overwrite what the auth response actually sets.
+    response.headers["X-Project-Scopes"] = _forward_auth_project_scopes(claims)
     response.headers["X-Platform-Auth-Mode"] = claims.auth_mode
     if claims.tenant_id:
         response.headers["X-Tenant-Id"] = claims.tenant_id

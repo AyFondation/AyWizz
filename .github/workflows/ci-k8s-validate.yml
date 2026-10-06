@@ -1,4 +1,4 @@
-# Version: 3
+# Version: 4
 # Path: .github/workflows/ci-k8s-validate.yml
 #
 # CI - validate the K8s manifests under `infra/k8s/`. Four levels:
@@ -30,6 +30,20 @@ on:
       - "ay_platform_core/scripts/run_k8s_system_tests.sh"
       - "ay_platform_core/tests/system/k8s/**"
       - ".github/workflows/ci-k8s-validate.yml"
+      # `.dockerignore` decides what the api image CONTAINS. Its absence
+      # from this filter is how `**/coverage` shipped: the pattern was
+      # written for vitest's report directory, it also matched the Python
+      # package `c5_requirements/coverage/`, and C5 was un-deployable with
+      # `ModuleNotFoundError` from increment 3 of 310-SPEC onward. The
+      # image built, 3953 tests stayed green, and this workflow — the only
+      # thing that would have caught it — did not run, because a build
+      # exclusion file is not under `infra/`.
+      - ".dockerignore"
+      # The SOURCE of the Traefik dynamic config. `infra/k8s/**` only
+      # matches the GENERATED configmap, so an edit here that was not
+      # regenerated would skip validation precisely when the two diverge
+      # — which is the one case worth catching.
+      - "infra/c1_gateway/**"
   pull_request:
     paths:
       - "infra/k8s/**"
@@ -38,6 +52,20 @@ on:
       - "ay_platform_core/scripts/run_k8s_system_tests.sh"
       - "ay_platform_core/tests/system/k8s/**"
       - ".github/workflows/ci-k8s-validate.yml"
+      # `.dockerignore` decides what the api image CONTAINS. Its absence
+      # from this filter is how `**/coverage` shipped: the pattern was
+      # written for vitest's report directory, it also matched the Python
+      # package `c5_requirements/coverage/`, and C5 was un-deployable with
+      # `ModuleNotFoundError` from increment 3 of 310-SPEC onward. The
+      # image built, 3953 tests stayed green, and this workflow — the only
+      # thing that would have caught it — did not run, because a build
+      # exclusion file is not under `infra/`.
+      - ".dockerignore"
+      # The SOURCE of the Traefik dynamic config. `infra/k8s/**` only
+      # matches the GENERATED configmap, so an edit here that was not
+      # regenerated would skip validation precisely when the two diverge
+      # — which is the one case worth catching.
+      - "infra/c1_gateway/**"
 
 permissions:
   contents: read

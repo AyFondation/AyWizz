@@ -41,12 +41,12 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | [200-SPEC-PIPELINE-AGENT](./200-SPEC-PIPELINE-AGENT.md) | 73 | 27 | 27 | 0 | 0 | 19 |
 | [300-SPEC-REQUIREMENTS-MGMT](./300-SPEC-REQUIREMENTS-MGMT.md) | 52 | 0 | 29 | 5 | 0 | 18 |
 | [310](./310.md) | 97 | 63 | 8 | 11 | 0 | 15 |
-| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 54 | 16 | 13 | 1 | 0 | 24 |
+| [400-SPEC-MEMORY-RAG](./400-SPEC-MEMORY-RAG.md) | 54 | 19 | 11 | 1 | 0 | 23 |
 | [500-SPEC-UI-UX](./500-SPEC-UI-UX.md) | 21 | 0 | 16 | 0 | 0 | 5 |
 | [700-SPEC-VERTICAL-COHERENCE](./700-SPEC-VERTICAL-COHERENCE.md) | 24 | 3 | 21 | 0 | 0 | 0 |
 | [800-SPEC-LLM-ABSTRACTION](./800-SPEC-LLM-ABSTRACTION.md) | 65 | 13 | 12 | 1 | 0 | 39 |
 | [900](./900.md) | 13 | 10 | 1 | 1 | 0 | 1 |
-| **Total** | **482** | **142** | **152** | **23** | **0** | **165** |
+| **Total** | **482** | **145** | **150** | **23** | **0** | **164** |
 
 ## R-100-* — [100-SPEC-ARCHITECTURE](./100-SPEC-ARCHITECTURE.md)
 
@@ -378,14 +378,14 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | ID | v | status | overall | implementing | validating |
 |---|---|---|---|---|---|
 | `R-400-001` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/deterministic.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py` (+1 more) | — |
-| `R-400-002` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/openai.py` | — |
+| `R-400-002` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/base.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/ollama.py`, `ay_platform_core/src/ay_platform_core/c7_memory/embedding/openai.py` | `ay_platform_core/tests/unit/c7_memory/test_vector_guard.py` |
 | `R-400-003` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/embedding/deterministic.py` | — |
 | `R-400-004` | v1 | draft | **not-yet** | — | — |
 | `R-400-010` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/db/repository.py`, `ay_platform_core/src/ay_platform_core/c7_memory/models.py` | — |
 | `R-400-011` | v1 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/db/repository.py`, `ay_platform_core/src/ay_platform_core/c7_memory/retrieval/similarity.py` | — |
 | `R-400-012` | v1 | draft | **not-yet** | — | — |
 | `R-400-013` | v1 | draft | **not-yet** | — | — |
-| `R-400-020` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | — |
+| `R-400-020` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_ingest_failure_is_recorded.py` |
 | `R-400-021` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/parser.py` | `ay_platform_core/tests/integration/c7_memory/test_auto_kg_extraction.py`, `ay_platform_core/tests/integration/c7_memory/test_kg_extraction.py` |
 | `R-400-022` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/ingestion/chunker.py` | — |
 | `R-400-023` | v1 | draft | **not-yet** | — | — |
@@ -419,7 +419,7 @@ generated-by: ay_platform_core/scripts/checks/audit_implementation_status.py
 | `R-400-209` | v1 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/kg/repository.py` | `ay_platform_core/tests/integration/c7_memory/test_bitemporal.py` |
 | `R-400-220` | v2 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py` | — |
 | `R-400-221` | v2 | draft | **not-yet** | — | — |
-| `R-400-222` | v2 | draft | **not-yet** | — | — |
+| `R-400-222` | v2 | draft | **tested** | `ay_platform_core/src/ay_platform_core/c7_memory/service.py` | `ay_platform_core/tests/integration/c7_memory/test_ingest_failure_is_recorded.py` |
 | `R-400-223` | v3 | draft | **implemented** | `ay_platform_core/src/ay_platform_core/c7_memory/router.py`, `infra/c12_workflow/workflows/extract_and_ingest.json`, `infra/k8s/base/c12_workflow/c12-workflow-configmap.yaml` | — |
 | `R-400-224` | v1 | draft | **not-yet** | — | — |
 | `R-400-225` | v1 | draft | **not-yet** | — | — |

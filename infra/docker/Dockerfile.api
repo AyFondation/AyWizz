@@ -1,6 +1,6 @@
 # =============================================================================
 # File: Dockerfile.api
-# Version: 5
+# Version: 6
 # Path: infra/docker/Dockerfile.api
 # Description: Shared image for the platform's Python API tier.
 #
@@ -63,6 +63,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY ay_platform_core/pyproject.toml /app/ay_platform_core/pyproject.toml
 COPY ay_platform_core/src /app/ay_platform_core/src
+# The licence travels WITH the work. AGPL-3.0-or-later obliges whoever
+# conveys the software to accompany it with the licence text, and an image
+# is a conveyance. Nothing here shipped one before the relicensing, because
+# `.dockerignore` drops `*.md` and `requirements/` and the COPY list named
+# only code — so the obligation would have been breached by the build, not
+# by an operator's mistake.
+COPY LICENSE /app/LICENSE
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"

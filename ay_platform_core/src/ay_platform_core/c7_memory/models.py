@@ -1,6 +1,6 @@
 # =============================================================================
 # File: models.py
-# Version: 6
+# Version: 7
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/models.py
 # Description: Pydantic v2 models for the C7 Memory Service. Mirrors the
 #              contract-critical entities E-400-001..005 from
@@ -63,6 +63,15 @@ class ParseStatus(StrEnum):
     PARSED = "parsed"
     INDEXED = "indexed"
     FAILED = "failed"
+    """Terminal failure. `parse_error` SHALL carry the reason.
+
+    Reached both by a parse failure and — since 2026-10-06 — by a rejected
+    chunk hand-off: when C13's artifacts carry no embeddings, C7 refuses
+    them with 422, and it now stamps the source FAILED with that reason
+    before raising. Previously it only raised: C12 (n8n) logged an
+    `AxiosError 422` into a container log nobody reads, and the source sat
+    at `PENDING` forever with nothing to explain it, even though the user's
+    upload had been answered `202 Accepted`."""
 
 
 class RefreshJobStatus(StrEnum):

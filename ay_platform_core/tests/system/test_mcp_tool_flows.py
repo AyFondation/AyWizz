@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_mcp_tool_flows.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/system/test_mcp_tool_flows.py
 # Description: System-tier coverage of the 8 MCP tools through Traefik. Each
 #              test hits `POST /api/v1/mcp` with a realistic tools/call
@@ -204,6 +204,18 @@ async def test_tool_c6_trigger_and_findings_roundtrip(
     """c6_trigger_validation + c6_list_findings used together: the trigger
     returns a run_id, the caller polls until completion, then lists the
     findings. Exercises both tools in a realistic sequence.
+
+    **THE CORPUS IS REQUIRED, NOT DECORATION.** `interface-signature-drift`
+    compares the submitted artifacts against the SAME artifacts at their
+    previous version (R-700-022); with no `artifacts`/`baseline_artifacts`
+    it is a documented no-op and the run completes with zero findings, so
+    the final assertion could never hold. This test used to send neither,
+    and nobody noticed because it failed earlier — on the 403 that every
+    MCP caller got before inc3b gave C9 the caller's project role. The
+    same latent defect sat in `test_gateway_paths.py`, hidden behind the
+    same 403.
+
+    `f` loses a parameter between the two versions: that is the drift.
     """
     trigger_body = await _call(
         gateway_client,
@@ -213,6 +225,20 @@ async def test_tool_c6_trigger_and_findings_roundtrip(
             "domain": "code",
             "project_id": "demo",
             "check_ids": ["interface-signature-drift"],
+            "artifacts": [
+                {
+                    "path": "src/drifted.py",
+                    "content": "def f(a):\n    return a\n",
+                    "is_test": False,
+                }
+            ],
+            "baseline_artifacts": [
+                {
+                    "path": "src/drifted.py",
+                    "content": "def f(a, b):\n    return a + b\n",
+                    "is_test": False,
+                }
+            ],
         },
     )
     trigger_content = _assert_success(trigger_body, "c6_trigger_validation")

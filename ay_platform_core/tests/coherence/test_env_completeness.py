@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_env_completeness.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/coherence/test_env_completeness.py
 # Description: Coherence checks that tie the application's Pydantic-settings
 #              classes to the canonical env files (`.env.example` at the
@@ -305,9 +305,11 @@ class TestEnvFileSharedShape:
         if not _ENV_EXAMPLE.is_file():
             pytest.skip(".env.example missing — separately flagged by completeness")
         example_keys = set(_parse_env_file(_ENV_EXAMPLE).keys())
+        compared = 0
         for path in _TESTS_DIR.glob(".env*"):
             if not path.is_file():
                 continue
+            compared += 1
             test_keys = set(_parse_env_file(path).keys())
             only_example = example_keys - test_keys
             only_test = test_keys - example_keys
@@ -319,6 +321,14 @@ class TestEnvFileSharedShape:
                 f"{path.name} declares keys absent from .env.example: "
                 f"{sorted(only_test)}"
             )
+        # Without this the test passes having compared NOTHING whenever the
+        # glob matches no file — a rename of `tests/.env.test`, or a move of
+        # `_TESTS_DIR`, would silently retire the whole check.
+        assert compared > 0, (
+            f"no `.env*` file found under {_TESTS_DIR} — this test compared "
+            "nothing and would have reported success. Either the files moved "
+            "or `_TESTS_DIR` is wrong."
+        )
 
 
 def _consume_any(_: Any) -> None:

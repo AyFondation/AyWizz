@@ -1,6 +1,6 @@
 # =============================================================================
 # File: remote.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/remote.py
 # Description: Thin HTTP adapters that expose the C5 + C6 service facades
 #              that C9 tools call. In tests we pass real in-process services;
@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, status
 
+from ay_platform_core.c2_auth.forward_auth import roles_for_project
 from ay_platform_core.c5_requirements.models import (
     DocumentPublic,
     EntityPublic,
@@ -174,6 +175,7 @@ class RemoteValidationService:
         artifacts: list[CodeArtifact],
         tenant_id: str = "",
         user_id: str = "",
+        project_scopes: str = "",
     ) -> RunTriggerResponse:
         body = payload.model_dump(mode="json")
         # requirements/artifacts already live inside payload; upstream C6 consumes them
@@ -187,6 +189,24 @@ class RemoteValidationService:
             headers["X-User-Id"] = user_id
         if tenant_id:
             headers["X-Tenant-Id"] = tenant_id
+        # inc3b — forward the caller's role ON THIS PROJECT as X-User-Roles.
+        #
+        # This call does NOT pass through C1, so no forward-auth runs on it
+        # and C6 sees only what we send. C6's gate strips the content-blind
+        # global roles (E-100-002 v7) and needs a `project_*` role, which
+        # `X-User-Roles` could never carry here: C2 derives that from
+        # `…/projects/{pid}/…` in the ORIGINAL uri, and the original uri was
+        # `/api/v1/mcp`. Hence 403 for every caller of this tool.
+        #
+        # The roles come from `X-Project-Scopes`, which C2 derived from the
+        # verified JWT, keyed by the project THIS run targets. Nothing is
+        # invented: a caller with no scope on `payload.project_id` sends an
+        # empty role list and C6 refuses them, correctly. Sending a constant
+        # like "project_editor" here would have made the tests pass and
+        # handed every MCP caller write access to every project.
+        granted = roles_for_project(project_scopes, payload.project_id)
+        if granted:
+            headers["X-User-Roles"] = ",".join(sorted(granted))
         # Project-scoped URI (C6 router v2): the id MUST be in the path, or
         # C2's forward-auth cannot resolve the caller's role on it and the
         # upstream gate refuses with 403. `payload.project_id` is also kept

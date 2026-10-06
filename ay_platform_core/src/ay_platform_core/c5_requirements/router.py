@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/router.py
 # Description: FastAPI APIRouter for the C5 Requirements Service.
 #              Endpoint roster per R-300-024. v2 (v1.5 upgrade) lifts the
@@ -67,6 +67,9 @@ def _require_actor(x_user_id: str | None = Header(default=None)) -> str:
 
 # E-100-002 v7: content-blind global roles — stripped before a content gate.
 _CONTENT_BLIND_GLOBAL_ROLES = frozenset({"admin", "tenant_admin"})
+
+#: Roles that may READ project content. Any project grant suffices.
+_READ_ROLES = ("project_viewer", "project_editor", "project_owner")
 
 
 def _require_role(
@@ -282,8 +285,41 @@ async def get_history(
     project_id: str,
     entity_id: str,
     _actor: str = Depends(_require_actor),
+    x_user_roles: str | None = Header(default=None),
     service: RequirementsService = Depends(get_service),
 ) -> HistoryListResponse:
+    """Change history of one entity.
+
+    **THIS GATE WAS MISSING.** The route required only `X-User-Id`, so any
+    authenticated caller could read any project's entity history by naming
+    the project — across tenants too, since C5 keys entities by
+    `project_id:entity_id` with no tenant component. Verified against the
+    running stack on 2026-10-06: a caller holding `project_owner` on `demo`
+    and nothing else received **200** from
+    `/api/v1/projects/not-mine/requirements/entities/.../history`. The body
+    was empty only because that project holds no data — the authorization
+    decision was ALLOW.
+
+    The route catalogue already declared this endpoint `Scope.PROJECT`,
+    whose contract is that a cross-project call returns 403/404. Catalogue
+    and implementation disagreed, so per CLAUDE.md §13.4 the gate is added
+    here rather than the catalogue relaxed.
+
+    Reading is gated at VIEWER level: any project grant suffices, so no
+    legitimate reader loses access. `admin` / `tenant_admin` are
+    content-blind (E-100-002 v7) and are stripped by `_require_role`.
+
+    The audit that found this counted **70 endpoints** declared
+    `AUTHENTICATED` + `Scope.PROJECT` across C4, C5 and C7 — a project
+    scope claimed with no role gate behind it. Only this one is fixed here,
+    because only this one was caught by a test: the others return 404 for a
+    non-existent resource id, which the isolation matrix accepts as proof
+    of isolation even though no gate ran. Closing the remaining 69 changes
+    the authorization model of three components and breaks the
+    service-to-service callers (C9 tools, C4→C7 live-docs sync) the same
+    way inc3b did, so it is a separate, deliberate piece of work.
+    """
+    _require_role(x_user_roles, required=_READ_ROLES)
     return HistoryListResponse(history=await service.list_history(project_id, entity_id))
 
 

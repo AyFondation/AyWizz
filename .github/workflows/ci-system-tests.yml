@@ -1,4 +1,4 @@
-# Version: 1
+# Version: 2
 # Path: .github/workflows/ci-system-tests.yml
 #
 # CI — run the COMPOSE system tier (`tests/system/`, excluding `tests/system/
@@ -36,10 +36,19 @@ on:
   # Manual re-run, so this workflow can be iterated on without pushing a
   # commit — it is new and its first runs are expected to need adjustment.
   workflow_dispatch:
-  # NO `pull_request` trigger while this is unproven. A workflow that fails
-  # for its own reasons on every PR trains people to ignore CI, which costs
-  # more than the coverage it was added to provide. Restore it once a run
-  # has gone green.
+  # RESTORED 2026-10-06. The condition this trigger was withheld under —
+  # "restore it once a run has gone green" — is met: the compose suite is
+  # 49 passed / 1 skipped / 0 failed, after fixing the three defects that
+  # kept it red (the C6 run-trigger's unreachable 403, a Traefik 404 test
+  # asserting a topology the gateway does not have, and an upload test
+  # pointed at a webhook no workflow declares).
+  #
+  # Restoring it matters more than it looks. This is the ONLY tier that
+  # exercises the platform as deployed, and it was the tier that found an
+  # 83-endpoint routing hole, a project-wide retrieval outage and an
+  # un-deployable image — none of which any in-process tier can see. With
+  # `push: [main]` alone, every defect it catches is caught AFTER merge.
+  pull_request:
 
 permissions:
   contents: read

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: base.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/tools/base.py
 # Description: Tool dataclass + dispatch helpers. Every C9 tool is a small
 #              record (name, description, input schema, async handler). The
@@ -26,18 +26,35 @@ class ActorContext:
     """The forward-auth identity of the MCP caller. Propagated to tool handlers
     via a contextvar (set by the router per request) so tools that act on the
     user's behalf — e.g. triggering a C6 validation run — can attribute the work
-    for per-user/tenant quota."""
+    for per-user/tenant quota.
+
+    `project_scopes` is the raw `X-Project-Scopes` header value (inc3b).
+    It is here because an MCP tool learns its project from a TOOL ARGUMENT,
+    not from the request URI: the forwarded URI is always
+    `/api/v1/mcp/...`, so C2 can derive no project role into
+    `X-User-Roles`, and every downstream call to a project-scoped endpoint
+    was refused with 403 for every caller. The tool resolves the role for
+    the project it was asked about and forwards THAT — authority the caller
+    actually proved, never a role C9 invents for itself.
+    """
 
     user_id: str = ""
     tenant_id: str = ""
+    project_scopes: str = ""
 
 
 _actor: ContextVar[ActorContext | None] = ContextVar("mcp_actor", default=None)
 
 
-def set_actor(user_id: str, tenant_id: str) -> None:
+def set_actor(user_id: str, tenant_id: str, project_scopes: str = "") -> None:
     """Record the caller identity for the current request context (router)."""
-    _actor.set(ActorContext(user_id=user_id, tenant_id=tenant_id))
+    _actor.set(
+        ActorContext(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            project_scopes=project_scopes,
+        )
+    )
 
 
 def current_actor() -> ActorContext:

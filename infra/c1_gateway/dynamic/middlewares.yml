@@ -1,6 +1,6 @@
 # =============================================================================
 # File: middlewares.yml
-# Version: 1
+# Version: 2
 # Path: infra/c1_gateway/dynamic/middlewares.yml
 # Description: Traefik middleware definitions.
 #   - rate-limit-auth   : brute-force protection on /auth/login + /auth/token
@@ -44,6 +44,14 @@ http:
           - "X-User-Roles"
           - "X-Platform-Auth-Mode"
           - "X-Tenant-Id"
+          # Full project→roles map (inc3b). Needed by components whose
+          # project id is NOT in the URI and so cannot appear in
+          # X-User-Roles: C9/MCP (project in a tool argument), C3
+          # conversations and C4 run-by-id (project derived from the
+          # record). Listing it here is also what makes it SAFE: Traefik
+          # overwrites the caller's own value with C2's derivation. Remove
+          # it from this list and it silently becomes attacker-controlled.
+          - "X-Project-Scopes"
         trustForwardHeader: false
 
     # -------------------------------------------------------------------------

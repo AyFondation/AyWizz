@@ -139,7 +139,7 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | authenticated | project | any authenticated | — | arango · `c5_entities` | 200 |
 | `PATCH` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 200 |
 | `DELETE` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 204 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}` | authenticated | project | any authenticated | — | — | 501 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/relations` | authenticated | project | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/tailorings` | authenticated | project | any authenticated | — | — | 200 |

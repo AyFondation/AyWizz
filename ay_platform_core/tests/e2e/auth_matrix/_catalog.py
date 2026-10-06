@@ -1,6 +1,6 @@
 # =============================================================================
 # File: _catalog.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/e2e/auth_matrix/_catalog.py
 # Description: SINGLE SOURCE OF TRUTH for the auth x role x scope test matrix.
 #              Every HTTP route exposed by any platform component SHALL be
@@ -660,9 +660,16 @@ _C5_REQUIREMENTS: list[EndpointSpec] = [
         component="c5_requirements",
         method="GET",
         path="/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history",
-        auth=Auth.AUTHENTICATED,
+        # Was AUTHENTICATED with no gate in the route, which contradicted the
+        # Scope.PROJECT contract it already declared — any authenticated
+        # caller could read any project's history (verified live 2026-10-06).
+        # Read access is viewer-level: any project grant suffices.
+        auth=Auth.ROLE_GATED,
         scope=Scope.PROJECT,
         success_status=200,
+        accept_roles=("project_viewer", "project_editor", "project_owner"),
+        accept_global_roles=(),
+        excluded_global_roles=("platform_manager",),
     ),
     EndpointSpec(
         component="c5_requirements",

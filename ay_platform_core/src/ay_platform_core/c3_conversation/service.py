@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 17
+# Version: 18
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/service.py
 # Description: C3 Conversation Service facade.
 #              Orchestrates CRUD and the SSE message-send flow.
@@ -109,7 +109,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -862,7 +861,7 @@ class ConversationService:
                 # Conversation memory loop is opportunistic; quota /
                 # embedder hiccups SHALL NOT propagate to the caller
                 # whose SSE stream has already closed with [DONE].
-                with contextlib.suppress(Exception):
+                try:
                     await self._memory.ingest_conversation_turn(
                         tenant_id=tenant_id,
                         project_id=project_id,
@@ -871,11 +870,38 @@ class ConversationService:
                         user_message=user_message,
                         assistant_reply=full_reply,
                         actor_id=str(conversation_id),
-                        # Remote variant raises NotImplementedError here
-                        # in v1; the suppress() catches it so chat
-                        # streaming is unaffected.
+                        # The remote variant raises NotImplementedError here
+                        # in v1; it is caught below so chat streaming is
+                        # unaffected.
                         user_id=user_id,
                         user_roles=user_roles,
+                    )
+                except NotImplementedError:
+                    # Expected on the remote wiring in v1 — not a fault, and
+                    # logging a traceback per turn would be noise.
+                    _log.debug(
+                        "conversation-turn ingestion not implemented on this "
+                        "memory wiring; skipping the memory loop"
+                    )
+                except Exception:
+                    # Still opportunistic: the SSE stream has already closed
+                    # with [DONE] and the reply is delivered, so this cannot
+                    # be allowed to surface. But it was a
+                    # `contextlib.suppress(Exception)` that recorded nothing,
+                    # and the thing being dropped is the CONVERSATIONS index
+                    # — one of the three indexes `_rag_stream` queries. A
+                    # persistent failure here degrades every follow-up
+                    # question in the project (the assistant stops
+                    # remembering prior turns) while every test and every
+                    # dashboard stays green. Logged with the traceback at
+                    # ERROR, keyed by conversation, so a recurring failure is
+                    # findable instead of merely invisible.
+                    _log.exception(
+                        "conversation-turn ingestion failed for conversation "
+                        "%s turn %s; the reply was delivered but this turn "
+                        "will not be retrievable as memory",
+                        conversation_id,
+                        turn_id,
                     )
 
         return _generate()

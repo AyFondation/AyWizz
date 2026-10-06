@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_retrieval_quality.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/tests/eval/test_retrieval_quality.py
 # Description: Retrieval-quality eval harness (D-017 T2 reference-based slice /
 #              Q-400-011). Ingests the held-out golden corpus into a REAL C7
@@ -208,5 +208,74 @@ async def test_retrieval_quality_dense_vs_hybrid(
     for q, r1 in exact_token_r1["hybrid"].items():
         assert r1 == 1.0, f"hybrid missed exact-token query {q!r}"
         assert r1 >= exact_token_r1["dense"][q]
-    # NOTE: the multi-hop row is the D-010 signal — read it from the report,
-    # don't assert a floor (flat top-k is expected to struggle there).
+
+    # ---- Quality FLOORS on the semantic arm (added 2026-10-06) ----
+    #
+    # Until now this test asserted nothing about semantic retrieval: the
+    # only enforced property was that the LEXICAL arm finds exact tokens,
+    # and the comment below the multi-hop note said "don't assert a floor".
+    # The consequence was that the platform's central capability — finding
+    # the right chunk for a question — had no regression guard at all. A
+    # change that halved semantic recall shipped green, and the metrics were
+    # computed, printed, and thrown away.
+    #
+    # The floors are DERIVED FROM MEASUREMENT, not aspiration. Baseline on
+    # golden v2 / all-minilm, both modes, 2026-10-06:
+    #
+    #     overall   recall@1=0.938  recall@3=1.000  mrr=1.000  ndcg@5=0.990
+    #     near-dup  recall@1=1.000  recall@3=1.000
+    #     multi-hop recall@1=0.500  recall@3=1.000
+    #
+    # Each floor sits well below its measured value so embedder nondeterminism
+    # and a golden-set addition do not redden the build, while a real
+    # regression does. They are a RATCHET: raise them when the measured
+    # baseline improves, never lower them to accommodate a regression
+    # (CLAUDE.md §11.2 #4 applies to these the same way it applies to the
+    # coverage gate).
+    for label in ("dense", "hybrid"):
+        m = overall[label]
+        assert m["recall@3"] >= 0.90, (
+            f"[{label}] overall recall@3 fell to {m['recall@3']:.3f} "
+            "(floor 0.90, baseline 1.000). The relevant chunk is no longer "
+            "reliably in the top 3 — the RAG prompt is being built from the "
+            "wrong context."
+        )
+        assert m["mrr"] >= 0.85, (
+            f"[{label}] MRR fell to {m['mrr']:.3f} (floor 0.85, baseline "
+            "1.000): the relevant chunk is ranked materially lower."
+        )
+        assert m["ndcg@5"] >= 0.85, (
+            f"[{label}] nDCG@5 fell to {m['ndcg@5']:.3f} (floor 0.85, "
+            "baseline 0.990)."
+        )
+        # Near-duplicate discrimination is the property most sensitive to an
+        # embedding-model or chunking change, which makes it the best early
+        # warning of either.
+        assert by_kind[label]["near-dup"]["recall@1"] >= 0.80, (
+            f"[{label}] near-dup recall@1 fell to "
+            f"{by_kind[label]['near-dup']['recall@1']:.3f} (floor 0.80, "
+            "baseline 1.000) — near-identical chunks are no longer being "
+            "told apart. Suspect the embedder or the chunk window."
+        )
+        # Multi-hop recall@1 is legitimately ~0.5 (flat top-k, D-010), so the
+        # floor is on recall@3, where the baseline IS 1.000. This is the row
+        # the graph arm is expected to improve; see the note below.
+        assert by_kind[label]["multi-hop"]["recall@3"] >= 0.80, (
+            f"[{label}] multi-hop recall@3 fell to "
+            f"{by_kind[label]['multi-hop']['recall@3']:.3f} (floor 0.80, "
+            "baseline 1.000)."
+        )
+
+    # ---- KNOWN GAP: the graph arm is not evaluated here ----
+    #
+    # The modes compared are `dense` and `hybrid` (dense + BM25 via RRF).
+    # The KG expansion — pool widening plus a 1.3 ranking boost over an
+    # `ANY 1..depth` traversal — is NOT exercised, because the golden corpus
+    # has no extracted knowledge graph: `extract_kg` needs an LLM, so
+    # building one for the golden set is a fixture, not a flag.
+    #
+    # Stated here rather than left implicit because it is a precondition for
+    # the graph work: with no graph arm in this harness there is no baseline
+    # to measure a graph investment against, and "it feels better" is not a
+    # result. The multi-hop row above (recall@1 ≈ 0.5) is precisely the
+    # number a working graph arm should move.

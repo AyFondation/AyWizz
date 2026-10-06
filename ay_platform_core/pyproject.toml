@@ -1,10 +1,32 @@
 # =============================================================================
 # File: pyproject.toml
-# Version: 13
+# Version: 16
 # Path: ay_platform_core/pyproject.toml
 # Description: Python project configuration for the ay_platform_core
 #              sub-project of the monorepo. Targets Python 3.13.
 #              Dependency versions pinned to Sept 2026 latest stable releases.
+#              v16 (2026-10-06): relicensed to AGPL-3.0-or-later (was
+#                   `Proprietary`). NOTE: both tier Dockerfiles already
+#                   carried `org.opencontainers.image.licenses=
+#                   "AGPL-3.0-or-later"` in their OCI labels, so the images
+#                   had been advertising AGPL while this file said
+#                   Proprietary — the two declarations now agree. Also adds
+#                   `pytest-randomly` (declared, disabled by default — see
+#                   the addopts comment).
+#              v15 (2026-10-06): two TEST-GATE corrections, both from the
+#                   test audit, both documented in place below.
+#                   (a) `coverage.exclude_also` lost `"pass"` and `"\.\.\."`:
+#                       the first excluded every `except …: pass` body, so
+#                       the exception-swallowing branches — the riskiest
+#                       construct in the codebase — were exempt from the
+#                       measurement the gate is for. Cost: 15 statements
+#                       re-entered accounting, immaterial at ~13k.
+#                   (b) `PytestUnraisableExceptionWarning` downgraded from
+#                       error to a printed warning, after tracing the
+#                       offending unclosed event loop to pytest-asyncio's
+#                       own loop management rather than to platform code.
+#                       As an error it failed whichever test the GC
+#                       happened to interrupt — a different one each run.
 #              v13: platform-wide dependency refresh (2026-09-14), on explicit
 #                   operator request. Every `>=x,<x+1` cap that had fallen
 #                   behind its current major was opened to the current one:
@@ -66,7 +88,20 @@ requires-python = ">=3.13"
 # setuptools builds reject a dangling `readme = …` reference when the
 # file is absent. Add a real README here and restore this field if one is
 # authored.
-license = { text = "Proprietary" }
+# AGPL-3.0-or-later, not GPLv2 as first considered, and not by preference:
+# GPLv2's copyleft triggers on DISTRIBUTION, so anyone running a modified
+# AyWizz as a hosted service distributes nothing and owes nothing — the exact
+# case the licence was chosen to cover. AGPLv3 §13 extends the obligation to
+# users interacting with the software over a network. GPLv2 is also
+# incompatible with two main dependencies (`minio` and `kubernetes_asyncio`
+# are Apache-2.0, whose patent clause the FSF treats as an additional
+# restriction); Apache-2.0 → AGPLv3 is explicitly compatible.
+#
+# PEP 639 form (an SPDX expression STRING). The older
+# `license = { text = "…" }` table is rejected outright by the setuptools
+# in this toolchain — `project.license must be string` — so the table form
+# is not a stylistic choice here.
+license = "AGPL-3.0-or-later"
 
 dependencies = [
     # Core data & validation
@@ -166,6 +201,17 @@ test = [
     # here (test tier) rather than as a base dep: it is the TEST client that
     # moved, not the runtime client. Components keep calling out via httpx.
     "httpx2>=2.13,<3.0",
+    # Test-ORDER randomisation. Declared but DISABLED BY DEFAULT via
+    # `-p no:randomly` in `addopts` below — read that comment before
+    # enabling it, the reasoning is there and the trade is deliberate.
+    #
+    # Why it is wanted: the suite had no order randomisation at all, so
+    # inter-test contamination stays latent. Three intermittent failures on
+    # 2026-10-06 were evidence it exists (one of them an unclosed event loop
+    # leaking across tiers). Fixed order means such a defect surfaces only
+    # when something unrelated changes collection order — i.e. at the worst
+    # possible moment, blamed on the wrong change.
+    "pytest-randomly>=4.0,<5.0",
 ]
 
 dev = [
@@ -217,6 +263,24 @@ addopts = [
     # dedicated run_tests.sh target). Excluded from the default run so
     # CI does not require docker.
     "--ignore=tests/system",
+    # `pytest-randomly` is INSTALLED but OFF for the default gate.
+    #
+    # The plugin randomises collection order the moment it is importable,
+    # which would make the authoritative gate's result depend on a seed. The
+    # suite has known latent contamination (an event loop leaking between
+    # tiers, found 2026-10-06), so turning it on by default would redden CI
+    # non-deterministically and the first instinct would be to re-run rather
+    # than to investigate — the habit that makes a red build mean nothing.
+    #
+    # So the gate stays deterministic, and randomisation becomes a tool you
+    # point at the problem ON PURPOSE:
+    #     python -m pytest tests/unit tests/contract -p randomly
+    #     python -m pytest tests -p randomly -p no:cacheprovider
+    # A failure under `-p randomly` that passes without it IS a contamination
+    # bug — that is the signal this dependency exists to produce. The
+    # intended home for it is a scheduled, NON-BLOCKING CI job, so the noise
+    # never gates a merge.
+    "-p", "no:randomly",
 ]
 markers = [
     "unit: fast, isolated tests (no containers, no network)",
@@ -232,6 +296,38 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:testcontainers.*",
     "ignore::DeprecationWarning:docker.*",
+    # DOWNGRADED FROM ERROR TO A VISIBLE WARNING (2026-10-06), on evidence.
+    #
+    # An unraisable-exception warning fires when the garbage collector runs a
+    # `__del__` that raises. `error` turned that into a test FAILURE —
+    # attributed to whichever test happened to be executing when the GC
+    # fired, which is nobody's fault and not reproducible. It presented as
+    # `test_no_parallel_definitions` failing with
+    # `ExceptionGroup: multiple unraisable exception warnings (3
+    # sub-exceptions)` in a full-suite run, passing in isolation, at module
+    # level, at tier level, and on re-run. Two other intermittent failures
+    # the same day had the same shape.
+    #
+    # WHAT THE THREE SUB-EXCEPTIONS ACTUALLY ARE: one unclosed
+    # `_UnixSelectorEventLoop` plus the two AF_UNIX sockets of its
+    # self-pipe — a single leaked loop, not three leaks. Chased with
+    # `python -X tracemalloc=15`: the allocation resolves to `import asyncio`
+    # inside `pytest_asyncio/plugin.py`, i.e. the loop is created by
+    # PYTEST-ASYNCIO's own loop management (auto mode, with
+    # `loop_scope="session"` markers in the auth matrix alongside
+    # function-scoped loops elsewhere), not by any platform code.
+    #
+    # So this is a test-harness artefact, not a production resource leak,
+    # and promoting it to an error bought nothing while reddening builds at
+    # random — which trains people to re-run CI, the habit that costs more
+    # than the signal is worth. `default::` keeps it PRINTED in the warnings
+    # summary of every run, so a genuine `__del__` leak introduced later is
+    # still visible; it simply stops failing an unrelated test.
+    #
+    # Remove this entry if pytest-asyncio's loop handling is fixed upstream
+    # or the mixed loop scopes are unified — the warning disappearing is the
+    # signal that it can go.
+    "default::pytest.PytestUnraisableExceptionWarning",
     # anyio >= 4.15 deprecated the `anyio.abc.BlockingPortal` alias, and
     # `starlette.testclient` still imports it. The warning fires at IMPORT
     # time, so `error` turned it into a COLLECTION error — every module using
@@ -274,8 +370,24 @@ exclude_also = [
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
-    "pass",
-    "\\.\\.\\.",
+    # `"pass"` and `"\\.\\.\\."` WERE here and are deliberately gone
+    # (2026-10-06). Both matched far more than the stubs they were written
+    # for, and they matched exactly the code worth watching:
+    #
+    #   - `pass` excluded EVERY line consisting of `pass`, which includes the
+    #     body of every `except …: pass`. Exception-swallowing branches were
+    #     therefore invisible to coverage accounting — and the platform has
+    #     nine `contextlib.suppress(Exception)` sites (auto-KG extraction,
+    #     RAG conversation-turn ingestion, backup cleanup) whose failure
+    #     behaviour is the whole risk. Excluding the riskiest construct in
+    #     the codebase from the measurement is the opposite of what a
+    #     coverage gate is for.
+    #   - `\.\.\.` matched any line CONTAINING three dots, not just an
+    #     Ellipsis stub body — including strings and comments.
+    #
+    # Protocol / stub bodies that genuinely need the exemption should use an
+    # explicit `# pragma: no cover` with a reason, per CLAUDE.md §11.2 #2,
+    # so each one is a visible decision rather than a blanket regex.
     "def __repr__",
     "def __str__",
     "@(abc\\.)?abstractmethod",

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_dockerignore_spares_source.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/coherence/test_dockerignore_spares_source.py
 # Description: Refuses a `.dockerignore` pattern that would exclude SOURCE
 #              from a build context.
@@ -163,3 +163,80 @@ def test_there_is_source_to_check() -> None:
     dirs = _source_dirs()
     assert len(dirs) > 50
     assert any(d.endswith("c5_requirements/coverage") for d in dirs)
+
+
+# ---------------------------------------------------------------------------
+# The licence must travel with the conveyed work (AGPL-3.0-or-later)
+# ---------------------------------------------------------------------------
+
+_DOCKERFILES = (
+    _REPO / "infra" / "docker" / "Dockerfile.api",
+    _REPO / "infra" / "docker" / "Dockerfile.ui",
+)
+_LICENSE = _REPO / "LICENSE"
+
+
+def test_the_repository_carries_the_agpl_text() -> None:
+    """A copyleft licence with no licence text is not a licence.
+
+    Checks the canonical markers rather than a hash: the FSF text is fixed,
+    but a well-meant reformat (line endings, a wrapper header) would break a
+    hash while leaving a valid licence, and that failure would teach people
+    to delete the test.
+    """
+    assert _LICENSE.is_file(), f"{_LICENSE} is missing"
+    text = _LICENSE.read_text(encoding="utf-8")
+    assert "GNU AFFERO GENERAL PUBLIC LICENSE" in text
+    assert "Version 3, 19 November 2007" in text
+    # §13 is the whole reason AGPL was chosen over GPLv2: it is the clause
+    # that reaches a NETWORK deployment, which GPLv2's distribution trigger
+    # does not. Its absence would mean somebody swapped in plain GPLv3.
+    assert (
+        "13. Remote Network Interaction; Use with the GNU General Public"
+        " License." in text
+    ), (
+        "the LICENSE text has no §13 — that clause is the only thing that "
+        "makes a hosted deployment subject to copyleft, and it is why this "
+        "project is AGPL rather than GPL"
+    )
+    assert "END OF TERMS AND CONDITIONS" in text, "the text is truncated"
+
+
+@pytest.mark.parametrize("dockerfile", _DOCKERFILES, ids=lambda p: p.name)
+def test_every_tier_image_copies_the_licence(dockerfile: Path) -> None:
+    """An image is a CONVEYANCE, so it SHALL carry the licence text.
+
+    Neither tier image shipped one before the relicensing: `.dockerignore`
+    drops `*.md` and `requirements/`, and the COPY lists named only code. The
+    obligation would therefore have been breached by the BUILD rather than by
+    an operator — the kind of compliance gap nobody notices because nothing
+    fails.
+    """
+    assert dockerfile.is_file(), dockerfile
+    body = dockerfile.read_text(encoding="utf-8")
+    copies = [
+        line.strip()
+        for line in body.splitlines()
+        if line.strip().startswith("COPY") and "LICENSE" in line
+    ]
+    assert copies, (
+        f"{dockerfile.name} never copies LICENSE into the image. The "
+        "platform is AGPL-3.0-or-later; conveying it without the licence "
+        "text is a breach of §4. Add `COPY LICENSE …` to the RUNTIME stage."
+    )
+
+
+def test_the_build_context_is_not_excluding_the_licence() -> None:
+    """`.dockerignore` SHALL NOT drop LICENSE from the build context.
+
+    The `COPY LICENSE` above fails the build loudly if the file is excluded,
+    so this is not about catching a silent failure — it is about catching it
+    HERE, in a one-second test, rather than in an image build, which is the
+    same reasoning that made `**/coverage` so expensive to find.
+    """
+    offenders = [p for p in _patterns() if _excludes(p, "LICENSE")]
+    assert not offenders, (
+        f"these .dockerignore pattern(s) exclude LICENSE: {offenders}. The "
+        "image would fail to build on `COPY LICENSE`, or worse, silently "
+        "ship without it if that COPY is ever removed."
+    )

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: c6_tools.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/tools/c6_tools.py
 # Description: C9 tool adapters wrapping the C6 Validation Pipeline Registry.
 #              Three tools: list plugins, trigger a validation run, fetch
@@ -108,6 +108,11 @@ def _trigger_validation_tool(c6: ValidationService) -> Tool:
             artifacts=artifacts,
             tenant_id=actor.tenant_id,
             user_id=actor.user_id,
+            # inc3b: the project lives in a TOOL ARGUMENT, so C2 could not
+            # derive a project role into X-User-Roles (the forwarded uri is
+            # /api/v1/mcp). The remote wiring uses this to send the caller's
+            # proven role on `project_id`; the in-process wiring ignores it.
+            project_scopes=actor.project_scopes,
         )
         return response.model_dump(mode="json")
 

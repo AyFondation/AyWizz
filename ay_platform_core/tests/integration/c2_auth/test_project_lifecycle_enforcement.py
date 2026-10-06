@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_project_lifecycle_enforcement.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c2_auth/test_project_lifecycle_enforcement.py
 # Description: Integration tests for project LIFECYCLE-STATUS enforcement at
 #              the C2 `/verify` forward-auth boundary (E-100-002 v4). A
@@ -22,6 +22,7 @@ from ay_platform_core.c2_auth.models import (
     LoginRequest,
     ProjectCreate,
     ProjectStatus,
+    RBACProjectRole,
     TenantCreate,
     UserCreateRequest,
 )
@@ -39,17 +40,34 @@ def _client(app: httpx.ASGITransport) -> httpx.AsyncClient:
 
 
 async def _seed(service: AuthService) -> str:
-    """Seed a tenant + project + one member; return the member's bearer token."""
+    """Seed a tenant + project + one GRANTED member; return their bearer token.
+
+    **THE GRANT IS LOAD-BEARING, AND WAS MISSING.** The user was created but
+    never given a role on `proj-alpha`, so since E-100-002 v8 — which refuses
+    a project-content request from a caller with no grant on that project —
+    `/verify` returned 403 before the lifecycle check could run, and all four
+    tests here failed on the wrong refusal.
+
+    That was a fixture defect, not a conflict: the requirement these tests
+    exist for is that a member WITH access experiences the freeze ("an owner
+    must still see that their project is frozen"). A caller with no access
+    cannot observe anything about the project's status, which is correct and
+    is a different test. Granting `project_owner` makes the scenario the one
+    the assertions describe.
+    """
     await service.create_tenant(TenantCreate(tenant_id="t-acme", name="Acme"))
     await service.create_project(
         ProjectCreate(project_id="proj-alpha", name="Alpha"),
         tenant_id="t-acme",
         actor_id="system",
     )
-    await service.create_user(
+    user = await service.create_user(
         UserCreateRequest(
             username="dev", password="dev-pass-12!", tenant_id="t-acme"
         )
+    )
+    await service.grant_project_access(
+        "proj-alpha", user.user_id, RBACProjectRole.OWNER, actor_id="system"
     )
     token = await service.issue_token(
         LoginRequest(username="dev", password="dev-pass-12!")
