@@ -1,6 +1,6 @@
 # =============================================================================
 # File: remote.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c9_mcp/remote.py
 # Description: Thin HTTP adapters that expose the C5 + C6 service facades
 #              that C9 tools call. In tests we pass real in-process services;
@@ -40,6 +40,7 @@ from ay_platform_core.c6_validation.models import (
     RunTriggerResponse,
     ValidationRun,
 )
+from ay_platform_core.c9_mcp.tools.base import current_actor
 
 
 def _raise_for_http(resp: httpx.Response) -> None:
@@ -57,6 +58,38 @@ class RemoteRequirementsService:
     def __init__(self, base_url: str, client: httpx.AsyncClient) -> None:
         self._base = base_url.rstrip("/")
         self._client = client
+
+
+    def _headers(self, project_id: str) -> dict[str, str]:
+        """Forward-auth headers for a C5 call made on the caller's behalf.
+
+        **WHY THIS EXISTS.** These calls do NOT pass through C1, so nothing
+        injects forward-auth headers for them — and since E-100-002 v8 every
+        C5 project-content router carries an in-app floor requiring an
+        identity and a project grant. Before this, the adapter sent no
+        headers at all, so every C5 read tool would have answered 401 the
+        moment that floor landed.
+
+        The identity comes from C9's own request context (`current_actor`,
+        set by the router from the forward-auth headers C1 DID inject on
+        `/api/v1/mcp`), and the role comes from `X-Project-Scopes` keyed by
+        the project THIS tool call names. Nothing is invented: a caller with
+        no grant on `project_id` sends an empty role list and C5 refuses
+        them, which is correct. Reading the context here rather than
+        threading `project_scopes` through five service signatures keeps the
+        in-process wiring untouched — the tool handlers cannot tell the two
+        apart, which is the whole point of this adapter.
+        """
+        actor = current_actor()
+        headers: dict[str, str] = {}
+        if actor.user_id:
+            headers["X-User-Id"] = actor.user_id
+        if actor.tenant_id:
+            headers["X-Tenant-Id"] = actor.tenant_id
+        granted = roles_for_project(actor.project_scopes, project_id)
+        if granted:
+            headers["X-User-Roles"] = ",".join(sorted(granted))
+        return headers
 
     async def list_entities(
         self,
@@ -83,6 +116,7 @@ class RemoteRequirementsService:
         resp = await self._client.get(
             f"{self._base}/api/v1/projects/{project_id}/requirements/entities",
             params=params,
+            headers=self._headers(project_id),
         )
         _raise_for_http(resp)
         body = resp.json()
@@ -91,7 +125,8 @@ class RemoteRequirementsService:
 
     async def get_entity(self, project_id: str, entity_id: str) -> EntityPublic:
         resp = await self._client.get(
-            f"{self._base}/api/v1/projects/{project_id}/requirements/entities/{entity_id}"
+            f"{self._base}/api/v1/projects/{project_id}/requirements/entities/{entity_id}",
+            headers=self._headers(project_id),
         )
         _raise_for_http(resp)
         return EntityPublic.model_validate(resp.json())
@@ -109,6 +144,7 @@ class RemoteRequirementsService:
         resp = await self._client.get(
             f"{self._base}/api/v1/projects/{project_id}/requirements/documents",
             params=params,
+            headers=self._headers(project_id),
         )
         _raise_for_http(resp)
         body = resp.json()
@@ -119,7 +155,8 @@ class RemoteRequirementsService:
         self, project_id: str, slug: str
     ) -> DocumentPublic:
         resp = await self._client.get(
-            f"{self._base}/api/v1/projects/{project_id}/requirements/documents/{slug}"
+            f"{self._base}/api/v1/projects/{project_id}/requirements/documents/{slug}",
+            headers=self._headers(project_id),
         )
         _raise_for_http(resp)
         return DocumentPublic.model_validate(resp.json())
@@ -133,6 +170,7 @@ class RemoteRequirementsService:
         resp = await self._client.get(
             f"{self._base}/api/v1/projects/{project_id}/requirements/relations",
             params=params,
+            headers=self._headers(project_id),
         )
         _raise_for_http(resp)
         body = resp.json()

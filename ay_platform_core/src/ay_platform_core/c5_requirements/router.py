@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/router.py
 # Description: FastAPI APIRouter for the C5 Requirements Service.
 #              Endpoint roster per R-300-024. v2 (v1.5 upgrade) lifts the
@@ -24,6 +24,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
 from ay_platform_core.c5_requirements.models import (
     DocumentCreate,
     DocumentListResponse,
@@ -48,7 +51,19 @@ from ay_platform_core.c5_requirements.service import (
     get_service,
 )
 
-router = APIRouter(tags=["requirements"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["requirements"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 
 # ---------------------------------------------------------------------------

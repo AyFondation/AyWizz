@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 4
+# Version: 5
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/router.py
 # Description: FastAPI APIRouter for C7 per 400-SPEC §6.1. Identity comes
 #              from Traefik forward-auth headers (X-User-Id, X-User-Roles,
@@ -32,6 +32,9 @@ from fastapi import (
     status,
 )
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
 from ay_platform_core.c7_memory.kg.ontology import StructuralKGResult
 from ay_platform_core.c7_memory.models import (
     ChunkContent,
@@ -57,7 +60,19 @@ from ay_platform_core.c7_memory.models import (
 )
 from ay_platform_core.c7_memory.service import MemoryService, get_service
 
-router = APIRouter(tags=["memory"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["memory"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 # ---------------------------------------------------------------------------
 # RBAC helpers — identical pattern to C3/C4/C5

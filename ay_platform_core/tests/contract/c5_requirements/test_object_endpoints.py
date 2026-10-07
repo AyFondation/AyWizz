@@ -91,10 +91,38 @@ class TestCatalogAgreement:
         stale = set(self._object_specs()) - _routes()
         assert not stale, f"catalog entries with no live route: {stale}"
 
-    def test_reads_are_authenticated_and_writes_are_role_gated(self) -> None:
+    def test_every_object_endpoint_is_role_gated(self) -> None:
+        """Reads AND writes require a project role (E-100-002 v8).
+
+        **THIS ASSERTION WAS INVERTED FOR READS.** It used to expect
+        `authenticated` on every GET — i.e. "any logged-in caller may read
+        this project's objects, whoever they are" — and that is exactly the
+        exposure the 2026-10-06 audit found across 70 endpoints: a
+        `Scope.PROJECT` row promising isolation with no role gate behind it.
+        Verified live before the fix: a caller with a grant on `demo` alone
+        read `/api/v1/projects/not-mine/...` and got 200.
+
+        Reads are now gated at VIEWER level by the router-wide
+        `require_project_content_role`, so no legitimate reader loses
+        access; writes keep their stricter own gates, which the tests below
+        pin individually.
+        """
         for (method, path), spec in self._object_specs().items():
-            expected = "authenticated" if method == "GET" else "role_gated"
-            assert spec.auth.value == expected, (method, path)
+            assert spec.auth.value == "role_gated", (method, path)
+
+    def test_reads_are_viewer_level_and_writes_are_not(self) -> None:
+        """The floor must not become a write permission.
+
+        Without this, the test above would be satisfied by declaring every
+        route `role_gated` with viewer-level `accept_roles` — which would
+        hand a `project_viewer` the ability to create objects and break
+        leases. Reads accept any grant; writes do not accept a viewer.
+        """
+        for (method, path), spec in self._object_specs().items():
+            if method == "GET":
+                assert "project_viewer" in spec.accept_roles, (method, path)
+            else:
+                assert "project_viewer" not in spec.accept_roles, (method, path)
 
     def test_content_endpoints_exclude_the_content_blind_role(self) -> None:
         # E-100-002: platform_manager is content-blind, and every route here

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/objects/router.py
 # Description: FastAPI routes for the object-grain document model
 #              (310-SPEC-DOC-TRACEABILITY §4.1, §4.7, §4.10).
@@ -27,6 +27,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
+
 from .locks import LockHeldError, LockNotHeldError
 from .models import (
     DocObject,
@@ -48,7 +52,19 @@ from .service import (
 )
 from .storage import ObjectPathError
 
-router = APIRouter(tags=["objects"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["objects"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 _BASE = "/api/v1/projects/{project_id}/containers/{container}/objects"
 

@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/intake/router.py
 # Description: REST surface for supplied requirement intake — 310-SPEC §4.4 /
 #              §4.5.
@@ -45,6 +45,10 @@ from fastapi import (
 )
 from pydantic import ValidationError
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
+
 from .extraction import ExtractionError
 from .intervals import IntervalError, TextInterval
 from .models import (
@@ -63,7 +67,19 @@ from .models import (
 from .service import IntakeRefusedError, IntakeService
 from .storage import IntakePathError, SuppliedRequirementImmutableError
 
-router = APIRouter(tags=["intake"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["intake"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 _BASE = "/api/v1/projects/{project_id}/intake/drops/{drop_id}"
 

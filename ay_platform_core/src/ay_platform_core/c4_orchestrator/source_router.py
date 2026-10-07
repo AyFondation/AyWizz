@@ -1,6 +1,6 @@
 # =============================================================================
 # File: source_router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/source_router.py
 # Description: REST surface for the project source-files tree + ops
 #              (§5.18 — R-200-170..174). Provides a tree-shaped UX over
@@ -28,6 +28,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
 from ay_platform_core.c4_orchestrator.artifacts_router import (
     _get_service,
     _reject_platform_manager,
@@ -36,7 +39,19 @@ from ay_platform_core.c4_orchestrator.artifacts_router import (
 )
 from ay_platform_core.c4_orchestrator.artifacts_service import ArtifactsService
 
-router = APIRouter(tags=["source"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["source"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 
 def _require_editor_role(x_user_roles: str | None) -> None:

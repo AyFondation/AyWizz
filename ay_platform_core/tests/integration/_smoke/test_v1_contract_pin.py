@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_v1_contract_pin.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/_smoke/test_v1_contract_pin.py
 # Description: Trivial smoke tests pinning the contract of v1 endpoints
 #              that are otherwise covered only by the auth-matrix:
@@ -205,11 +205,21 @@ async def test_c7_memory_health_returns_ok(c7_app: FastAPI) -> None:
 async def test_c5_entity_versions_returns_501_stub(c5_app: FastAPI) -> None:
     """Point-in-time export deferred to v2 (R-300-080..083). The
     endpoint MUST exist and return 501 with a non-empty detail so
-    clients can detect the gap programmatically."""
+    clients can detect the gap programmatically.
+
+    A PROJECT ROLE IS REQUIRED TO SEE THE STUB, and must be: since
+    E-100-002 v8 every C5 project-content route carries a viewer-level
+    floor, so a caller with an identity but no grant gets 403. This test
+    sent `X-User-Id` alone and was the only one of the ten failures that
+    was NOT about 401-vs-403 ordering — it was an incomplete precondition.
+    The client that needs to detect this gap programmatically is an
+    AUTHORISED client; one without a grant has no business learning which
+    of a foreign project's routes are stubs.
+    """
     async with _client(c5_app) as c:
         response = await c.get(
             "/api/v1/projects/p-smoke/requirements/entities/E-100-001/versions/3",
-            headers={"X-User-Id": "u-smoke"},
+            headers={"X-User-Id": "u-smoke", "X-User-Roles": "project_viewer"},
         )
     assert response.status_code == 501
     assert response.json().get("detail")

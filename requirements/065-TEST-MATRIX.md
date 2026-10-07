@@ -107,53 +107,53 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `GET` | `/api/v1/orchestrator/runs/{run_id}/trace` | authenticated | tenant | any authenticated | — | — | 200 |
 | `GET` | `/api/v1/orchestrator/runs/{run_id}/events` | authenticated | tenant | any authenticated | — | — | 200 |
 | `POST` | `/api/v1/orchestrator/runs/{run_id}/steer` | authenticated | tenant | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs` | authenticated | project | any authenticated | `platform_manager` | arango · `c4_artifact_runs` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree` | authenticated | project | any authenticated | `platform_manager` | minio · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob` | authenticated | project | any authenticated | `platform_manager` | minio · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `c4_artifact_runs` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `orchestrator` | 200 |
 | `POST` | `/api/v1/admin/projects/{project_id}/artifacts/seed` | role_gated | tenant | `admin` · `tenant_admin` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/git/commits` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
-| `POST` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
-| `PUT` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/documents` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
-| `DELETE` | `/api/v1/projects/{project_id}/documents/{path:path}` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
-| `POST` | `/api/v1/projects/{project_id}/documents/mkdir` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
-| `POST` | `/api/v1/projects/{project_id}/documents/rename` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/documents/move` | authenticated | project | any authenticated | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/source/tree` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/git/commits` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `POST` | `/api/v1/projects/{project_id}/documents` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
+| `PUT` | `/api/v1/projects/{project_id}/documents/{path:path}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/documents` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/documents/{path:path}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `DELETE` | `/api/v1/projects/{project_id}/documents/{path:path}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
+| `POST` | `/api/v1/projects/{project_id}/documents/mkdir` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
+| `POST` | `/api/v1/projects/{project_id}/documents/rename` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `POST` | `/api/v1/projects/{project_id}/documents/move` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/source/tree` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/projects/{project_id}/source/mkdir` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 201 |
 | `POST` | `/api/v1/projects/{project_id}/source/rename` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/source/move` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/source/file/{path:path}/meta` | authenticated | project | any authenticated | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/source/file/{path:path}/meta` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `DELETE` | `/api/v1/projects/{project_id}/source/file/{path:path}` | role_gated | project | `project_owner` · `project_editor` | `platform_manager` | both · `c4_artifact_runs` · bucket `orchestrator` | 204 |
 ### c5_requirements
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
 |---|---|---|---|---|---|---|---|
-| `GET` | `/api/v1/projects/{project_id}/requirements/documents` | authenticated | project | any authenticated | — | arango · `c5_documents` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/documents` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/requirements/documents` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | authenticated | project | any authenticated | — | arango · `c5_documents` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 200 |
 | `PUT` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_documents` | 200 |
 | `DELETE` | `/api/v1/projects/{project_id}/requirements/documents/{slug}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c5_documents` | 204 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/entities` | authenticated | project | any authenticated | — | arango · `c5_entities` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | authenticated | project | any authenticated | — | arango · `c5_entities` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/entities` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 200 |
 | `PATCH` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 200 |
 | `DELETE` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `c5_entities` | 204 |
 | `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/history` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}` | authenticated | project | any authenticated | — | — | 501 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/relations` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/tailorings` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 501 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/relations` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/tailorings` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/projects/{project_id}/requirements/reindex` | role_gated | project | `project_owner` | `platform_manager` | — | 202 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/reindex/{job_id}` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/reindex/{job_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/projects/{project_id}/requirements/reconcile` | role_gated | project | `project_owner` | `platform_manager` | — | 200 |
-| `GET` | `/api/v1/projects/{project_id}/requirements/export` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/projects/{project_id}/requirements/export` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/projects/{project_id}/requirements/import` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | — | 501 |
-| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects` | authenticated | project | any authenticated | — | arango · `req_objects` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_objects` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/containers/{container}/objects` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_objects` · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}` | authenticated | project | any authenticated | — | both · `req_objects` · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions/{version}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/draft` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_objects` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions/{version}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/draft` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `PUT` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/draft` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/review` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_objects` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/lock` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `req_object_locks` | 200 |
@@ -165,44 +165,44 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `PUT` | `/api/v1/process/cycles/{cycle_id}/versions/{version}` | role_gated | tenant | `tenant_admin` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/process/cycles/{cycle_id}/versions/{version}/publish` | role_gated | tenant | `tenant_admin` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/process/cycles` | role_gated | project | `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/versions/{version}` | authenticated | project | any authenticated | — | both · `req_cycles` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/versions/{version}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `PUT` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/versions/{version}` | role_gated | project | `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/versions/{version}/publish` | role_gated | project | `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/resolved` | authenticated | project | any authenticated | — | both · `req_cycles` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/resolved` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `GET` | `/api/v1/process/workflows` | authenticated | tenant | any authenticated | — | both · `req_workflows` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/process/workflows` | role_gated | tenant | `tenant_admin` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 201 |
 | `GET` | `/api/v1/process/workflows/{workflow_id}/versions/{version}` | authenticated | tenant | any authenticated | — | both · `req_workflows` · bucket `requirements` | 200 |
 | `PUT` | `/api/v1/process/workflows/{workflow_id}/versions/{version}` | role_gated | tenant | `tenant_admin` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/process/workflows/{workflow_id}/versions/{version}/publish` | role_gated | tenant | `tenant_admin` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/process/workflows` | role_gated | project | `project_owner` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/versions/{version}` | authenticated | project | any authenticated | — | both · `req_workflows` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/versions/{version}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
 | `PUT` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/versions/{version}` | role_gated | project | `project_owner` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/versions/{version}/publish` | role_gated | project | `project_owner` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/containers/{container}/activity` | authenticated | project | any authenticated | — | both · `req_cycles` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/process/cycles/{cycle_id}/containers/{container}/activity` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_cycles` · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/coverage/allocations` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `req_allocations` | 201 |
 | `POST` | `/api/v1/projects/{project_id}/coverage/allocations/{requirement_id}/containers/{container}/accept` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `req_allocations` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/coverage/allocations/{requirement_id}/containers/{container}/return` | role_gated | project | `project_owner` | `platform_manager` | arango · `req_allocations` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/coverage/verdicts` | role_gated | project | `project_owner` | `platform_manager` | arango · `req_allocations` | 201 |
 | `POST` | `/api/v1/projects/{project_id}/coverage/links` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `req_object_edges` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/coverage/requirements/{requirement_id}` | authenticated | project | any authenticated | — | arango · `req_allocations` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/coverage/containers/{container}` | authenticated | project | any authenticated | — | arango · `req_allocations` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/coverage/suspect` | authenticated | project | any authenticated | — | arango · `req_object_edges` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/coverage/speculative` | authenticated | project | any authenticated | — | arango · `req_object_edges` | 200 |
-| `POST` | `/api/v1/projects/{project_id}/coverage/audit/unallocated` | authenticated | project | any authenticated | — | arango · `req_allocations` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/coverage/requirements/{requirement_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_allocations` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/coverage/containers/{container}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_allocations` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/coverage/suspect` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_object_edges` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/coverage/speculative` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_object_edges` | 200 |
+| `POST` | `/api/v1/projects/{project_id}/coverage/audit/unallocated` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_allocations` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 201 |
 | `POST` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/verify` | role_gated | project | `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/findings` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/findings` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/findings` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/split` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/fragments` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/rework` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/fragments` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/intake/drops/{drop_id}/rework` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/absorb/{drop_id}` | role_gated | project | `project_owner` | `platform_manager` | both · `req_changes` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/changes` | authenticated | project | any authenticated | — | arango · `req_changes` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/impact/{requirement_id}` | authenticated | project | any authenticated | — | arango · `req_object_edges` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/closure` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/changes` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_changes` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/impact/{requirement_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_object_edges` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/closure` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/qualify` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/qualify/accept` | role_gated | project | `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/disposition` | role_gated | project | `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
@@ -210,21 +210,21 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/propose` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_plans` | 201 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/ratify` | role_gated | project | `project_owner` | `platform_manager` | both · `req_plans` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/amend` | role_gated | project | `project_owner` | `platform_manager` | both · `req_plans` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/plans` | authenticated | project | any authenticated | — | arango · `req_plans` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}/versions/{version}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/plans` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | arango · `req_plans` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}/versions/{version}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/steps/{step_id}/begin` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_plans` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/steps/{step_id}/consumption` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_plans` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/steps/{step_id}/complete` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_plans` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/steps/{step_id}/fail` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | both · `req_plans` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/plans/{plan_id}/report` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/baseline-readiness` | authenticated | project | any authenticated | — | both · `req_changes` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/baseline-readiness` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_changes` | 200 |
 | `POST` | `/api/v1/projects/{project_id}/baselines/{tag}` | role_gated | project | `project_owner` | `platform_manager` | both · `req_baselines` | 201 |
-| `GET` | `/api/v1/projects/{project_id}/baselines` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/baselines/{tag}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/baselines/{tag}/render/{fmt}` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}/report` | authenticated | project | any authenticated | — | minio · bucket `requirements` | 200 |
-| `GET` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/resolved` | authenticated | project | any authenticated | — | both · `req_workflows` · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/baselines` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/baselines/{tag}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/baselines/{tag}/render/{fmt}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/plans/{plan_id}/report` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | minio · bucket `requirements` | 200 |
+| `GET` | `/api/v1/projects/{project_id}/process/workflows/{workflow_id}/resolved` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | both · `req_workflows` · bucket `requirements` | 200 |
 ### c6_validation
 
 | Method | Path | Auth | Scope | Accepted roles | Excluded | Backend | Status |
@@ -246,26 +246,26 @@ Authentication-mode coverage (`local` / `entraid` / `none`) is tested at the C2 
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/ingest-chunks` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 201 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-kg` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_kg_entities` | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/extract-structural` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_kg_entities` | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/blob` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}` | authenticated | project | any authenticated | — | — | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/enrichment-config` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/blob` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `PUT` | `/api/v1/memory/projects/{project_id}/enrichment-config` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_project_config` | 200 |
-| `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/kg/summary` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `DELETE` | `/api/v1/memory/projects/{project_id}/sources/{source_id}` | role_gated | project | `project_owner` | `platform_manager` | arango · `c7_sources` | 204 |
 | `POST` | `/api/v1/memory/projects/{project_id}/reembed` | role_gated | project | `project_owner` | `platform_manager` | arango · `memory_chunks` | 200 |
 | `PUT` | `/api/v1/memory/projects/{project_id}/live-docs/index` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 200 |
 | `DELETE` | `/api/v1/memory/projects/{project_id}/live-docs/index/{path:path}` | role_gated | project | `project_editor` · `project_owner` | `platform_manager` | arango · `memory_chunks` | 204 |
-| `GET` | `/api/v1/memory/projects/{project_id}/live-docs/kg-indexed` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/live-docs/kg-indexed` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/memory/entities/embed` | role_gated | tenant | `project_owner` | `platform_manager` | — | 201 |
-| `GET` | `/api/v1/memory/projects/{project_id}/quota` | authenticated | project | any authenticated | — | — | 200 |
+| `GET` | `/api/v1/memory/projects/{project_id}/quota` | role_gated | project | `project_viewer` · `project_editor` · `project_owner` | `platform_manager` | — | 200 |
 | `POST` | `/api/v1/memory/projects/{project_id}/refresh` | role_gated | project | `project_owner` | `platform_manager` | — | 501 |
 | `GET` | `/api/v1/memory/refresh/{job_id}` | authenticated | — | any authenticated | — | — | 501 |
 | `GET` | `/api/v1/memory/health` | open | — | *(open)* | — | — | 200 |

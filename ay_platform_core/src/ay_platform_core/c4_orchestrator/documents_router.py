@@ -1,6 +1,6 @@
 # =============================================================================
 # File: documents_router.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/documents_router.py
 # Description: REST surface for the chat-direct DocGen document API
 #              (D-015). CRUD on the project's `live-docs` artifact run :
@@ -58,10 +58,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
 from ay_platform_core.c4_orchestrator.artifacts_router import (
     _get_service,
     _reject_platform_manager,
@@ -70,7 +73,19 @@ from ay_platform_core.c4_orchestrator.artifacts_router import (
 )
 from ay_platform_core.c4_orchestrator.artifacts_service import ArtifactsService
 
-router = APIRouter(tags=["documents"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["documents"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +184,34 @@ class DocumentStructuralOpResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _require_project_editor(x_user_roles: str | None) -> None:
+    """Writes to a project's document tree need editor or owner.
+
+    **WHY THIS IS SEPARATE FROM THE ROUTER FLOOR.** The floor added in
+    E-100-002 v8 (`require_project_content_role`) asks only "does the caller
+    hold ANY grant on this project" — which is right for reads and far too
+    weak here: `POST`, `PUT`, `DELETE`, `mkdir`, `rename` and `move` on the
+    document tree would have become reachable by a `project_viewer`.
+
+    These six were among the 70 endpoints the 2026-10-06 audit found
+    catalogued `AUTHENTICATED` + `Scope.PROJECT`, and they are the ones that
+    made the finding urgent rather than theoretical: a project scope was
+    promised, nothing enforced it, and four of them MUTATE or DELETE a
+    project's authored documents. `_reject_platform_manager` was the only
+    role check on them, and it refuses exactly one global role.
+
+    Content-blind global roles are stripped first (E-100-002 v7), so an
+    `admin` with no project grant does not pass — consistent with every
+    other content gate in the platform and with the gateway boundary.
+    """
+    roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    roles -= {"admin", "tenant_admin"}
+    if not roles.intersection(("project_editor", "project_owner")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="requires one of: project_editor, project_owner",
+        )
+
 @router.post(
     "/api/v1/projects/{project_id}/documents",
     response_model=DocumentRef,
@@ -187,6 +230,7 @@ async def create_document(
     (overwrites). Triggers an incremental Gitea push (one commit).
     `X-Turn-Id` (the C3 response id) batches the per-file version."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     result = await service.write_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -216,6 +260,7 @@ async def update_document(
     can distinguish create vs update intent in its audit trail.
     `X-Turn-Id` (the C3 response id) batches the per-file version."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     result = await service.write_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -295,6 +340,7 @@ async def delete_document(
     """Delete a document from MinIO. 404 when the path is unknown.
     Gitea history is intentionally retained (audit ; D-015)."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     await service.delete_document(
         project_id=project_id, tenant_id=tenant_id, path=path,
     )
@@ -317,6 +363,7 @@ async def mkdir_document(
     """Materialise an empty directory by writing a `.keep` marker
     (R-200-161). 409 if the path already exists."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     result = await service.mkdir_document(
         project_id=project_id, tenant_id=tenant_id, path=body.path,
     )
@@ -339,6 +386,7 @@ async def rename_document(
     level (R-200-162). 404 on missing source, 409 on existing target,
     400 on self-rename or traversal cycle."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     result = await service.rename_document(
         project_id=project_id,
         tenant_id=tenant_id,
@@ -363,6 +411,7 @@ async def move_document(
     """Move a file or directory under a different directory. Reduces
     to `rename` with target = `<to_dir>/<basename(from_path)>`."""
     _reject_platform_manager(x_user_roles)
+    _require_project_editor(x_user_roles)
     result = await service.move_document(
         project_id=project_id,
         tenant_id=tenant_id,

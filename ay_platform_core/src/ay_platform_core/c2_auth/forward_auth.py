@@ -1,6 +1,6 @@
 # =============================================================================
 # File: forward_auth.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/forward_auth.py
 # Description: Wire format of the `X-Project-Scopes` forward-auth header
 #              (inc3b) — serialiser AND parser, deliberately in one module.
@@ -53,6 +53,10 @@
 # =============================================================================
 
 from __future__ import annotations
+
+import re
+
+from fastapi import Header, HTTPException, Request, status
 
 from ay_platform_core.c2_auth.models import RBACProjectRole
 
@@ -134,3 +138,88 @@ def roles_for_project(header: str | None, project_id: str) -> set[str]:
     if not project_id:
         return set()
     return parse_project_scopes(header).get(project_id, set())
+
+
+# ---------------------------------------------------------------------------
+# In-app enforcement — defence in depth behind the gateway boundary
+# ---------------------------------------------------------------------------
+
+#: Project roles that may READ project content. Any grant suffices; the
+#: distinction between viewer, editor and owner is the business of the
+#: individual write gates, not of this floor.
+PROJECT_CONTENT_ROLES: tuple[str, ...] = (
+    "project_viewer",
+    "project_editor",
+    "project_owner",
+)
+
+#: Global roles that are CONTENT-BLIND (E-100-002 v7) and therefore stripped
+#: before any content gate. An `admin` who needs to touch a project's content
+#: grants themselves a project role first, which is auditable.
+CONTENT_BLIND_GLOBAL_ROLES = frozenset({"admin", "tenant_admin"})
+
+_PROJECT_PATH_RE = re.compile(r"/projects/(?P<pid>[^/?#]+)/")
+
+
+def require_project_content_role(
+    request: Request,
+    x_user_id: str | None = Header(default=None),
+    x_user_roles: str | None = Header(default=None),
+) -> None:
+    """Router-level gate: a project-content route needs a project grant.
+
+    **WHY THIS IS A ROUTER DEPENDENCY AND NOT 69 EDITS.** An audit on
+    2026-10-06 found 70 endpoints across C4, C5 and C7 catalogued
+    `AUTHENTICATED` + `Scope.PROJECT` — a project scope promised with
+    nothing enforcing it. The gateway now refuses such a request
+    (`c2_auth.router._role_gated_project_id`), which closed the exposure.
+    This is the SECOND line: the gateway is one check, and a component
+    reached directly — a port-forward, a mesh topology, a mistaken
+    `expose:` — meets no gate at all without this. Attaching it per ROUTER
+    rather than per route also means a route nobody has written yet is
+    gated by default, which is the only way the count stops growing.
+
+    **IT SELF-LIMITS TO PROJECT PATHS, deliberately.** Two of the twelve
+    routers are mixed: `c7_memory.router` also serves `/api/v1/memory/
+    retrieve` (C3 calls it with global roles only — gating it would break
+    the RAG chat path) and `/health`; `c5_requirements.process.router` also
+    serves the TENANT-level `/api/v1/process/*`, whose scope is the tenant
+    header, not a project. So the predicate is the path, exactly as it is
+    at the gateway: no `/projects/<id>/` segment, no project gate. Using
+    the same predicate on both sides is the point — two lines of defence
+    that disagree about what they protect are one line of defence and one
+    source of 403s nobody can explain.
+
+    Raises:
+        HTTPException: 401 when the request carries no identity at all
+            (forward-auth did not run), 403 when it carries one but holds no
+            project role on the project in the path.
+    """
+    match = _PROJECT_PATH_RE.search(request.url.path)
+    if match is None:
+        return
+    # 401 BEFORE 403, and that distinction is not cosmetic. A router-level
+    # dependency runs ahead of the route's own `_require_actor`, so without
+    # this branch an ANONYMOUS caller received 403 ("you may not") where the
+    # platform has always answered 401 ("who are you?"). Nine
+    # `test_anonymous_*` tests across C5 caught it immediately — correctly:
+    # answering 403 to a request carrying no identity tells an unauthenticated
+    # caller that the resource exists and that their (absent) credentials were
+    # evaluated, and it diverges from `_require_actor`'s contract on every
+    # other route in the platform.
+    if not x_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-User-Id header missing (forward-auth not applied)",
+        )
+    roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+    roles -= CONTENT_BLIND_GLOBAL_ROLES
+    if roles.intersection(PROJECT_CONTENT_ROLES):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "requires a project role on this project "
+            f"({', '.join(PROJECT_CONTENT_ROLES)})"
+        ),
+    )

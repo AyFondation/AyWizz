@@ -456,7 +456,7 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/enrichment-config",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -468,7 +468,7 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/kg/summary",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -486,13 +486,13 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/live-docs/kg-indexed",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/quota",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -510,7 +510,7 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -534,31 +534,31 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/blob",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks.zip",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/chunks/{chunk_id}",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/diagnostics",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -582,25 +582,25 @@
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts.zip",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/memory/projects/{project_id}/sources/{source_id}/runs/{run_id}/artifacts/{artifact_path:path}",
       "component": "c7_memory",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
@@ -756,19 +756,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/artifacts/runs",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/artifacts/runs/{run_id}/blob",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/artifacts/runs/{run_id}/tree",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
@@ -804,19 +804,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/baseline-readiness",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/baselines",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/baselines/{tag}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -828,19 +828,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/baselines/{tag}/render/{fmt}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/changes",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -852,7 +852,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/changes/{drop_id}/{requirement_id}/closure",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -876,7 +876,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/containers/{container}/objects",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -888,13 +888,13 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/draft",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -930,13 +930,13 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/containers/{container}/objects/{object_id}/versions/{version}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -960,13 +960,13 @@
       "method": "POST",
       "path": "/api/v1/projects/{project_id}/coverage/audit/unallocated",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/coverage/containers/{container}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -978,19 +978,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/coverage/requirements/{requirement_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/coverage/speculative",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/coverage/suspect",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1002,61 +1002,61 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/documents",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
       "path": "/api/v1/projects/{project_id}/documents",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
       "path": "/api/v1/projects/{project_id}/documents/mkdir",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
       "path": "/api/v1/projects/{project_id}/documents/move",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
       "path": "/api/v1/projects/{project_id}/documents/rename",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "DELETE",
       "path": "/api/v1/projects/{project_id}/documents/{path:path}",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/documents/{path:path}",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
       "path": "/api/v1/projects/{project_id}/documents/{path:path}",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/git/commits",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/impact/{requirement_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1068,19 +1068,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/findings",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1092,7 +1092,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/intake/drops/{drop_id}/requirements/{requirement_id}/fragments",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1104,7 +1104,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/intake/drops/{drop_id}/rework",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1128,13 +1128,13 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/plans",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/plans/{plan_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1158,7 +1158,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/plans/{plan_id}/report",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1194,7 +1194,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/plans/{plan_id}/versions/{version}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1206,19 +1206,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/process/cycles/{cycle_id}/containers/{container}/activity",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/process/cycles/{cycle_id}/resolved",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/process/cycles/{cycle_id}/versions/{version}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -1242,13 +1242,13 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/process/workflows/{workflow_id}/resolved",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/process/workflows/{workflow_id}/versions/{version}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -1266,7 +1266,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/documents",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1284,7 +1284,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/documents/{slug}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PUT",
@@ -1296,7 +1296,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/entities",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "DELETE",
@@ -1308,7 +1308,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "PATCH",
@@ -1326,13 +1326,13 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/entities/{entity_id}/versions/{version}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/export",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1356,19 +1356,19 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/reindex/{job_id}",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/relations",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/requirements/tailorings",
       "component": "c5_requirements",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "DELETE",
@@ -1380,7 +1380,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/source/file/{path:path}/meta",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",
@@ -1404,7 +1404,7 @@
       "method": "GET",
       "path": "/api/v1/projects/{project_id}/source/tree",
       "component": "c4_orchestrator",
-      "auth": "authenticated"
+      "auth": "role_gated"
     },
     {
       "method": "POST",

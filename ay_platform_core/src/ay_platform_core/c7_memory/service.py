@@ -1,6 +1,6 @@
 # =============================================================================
 # File: service.py
-# Version: 11
+# Version: 12
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/service.py
 # Description: Facade for the C7 Memory Service. Wires ingestion (parse +
 #              chunk + embed + index), federated retrieval, entity-event

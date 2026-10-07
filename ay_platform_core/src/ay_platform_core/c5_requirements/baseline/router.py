@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/baseline/router.py
 # Description: REST surface for baselines and rendering — 310-SPEC §4.11.
 #
@@ -37,6 +37,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import ValidationError
 
+from ay_platform_core.c2_auth.forward_auth import (
+    require_project_content_role,
+)
+
 from .models import (
     BaselineListResponse,
     BaselineManifest,
@@ -55,7 +59,19 @@ from .service import (
 )
 from .storage import BaselineExistsError, BaselinePathError, BaselineStorage
 
-router = APIRouter(tags=["baseline"])
+# Defence in depth (E-100-002 v8). Every route below whose path carries a
+# `/projects/<id>/` segment requires a project grant on THAT project, in
+# addition to whatever stricter gate the individual route declares. The
+# gateway already refuses such a request, so this is the SECOND line: a
+# component reached directly — a port-forward, a mesh topology, a
+# mistaken `expose:` — meets no gate at all without it. Attached to the
+# ROUTER so a route nobody has written yet inherits it; the dependency
+# self-limits to project paths, leaving tenant-level and /health routes
+# in mixed routers untouched. See `c2_auth.forward_auth`.
+router = APIRouter(
+    tags=["baseline"],
+    dependencies=[Depends(require_project_content_role)],
+)
 
 _PROJECT = "/api/v1/projects/{project_id}"
 _BASELINES = _PROJECT + "/baselines"

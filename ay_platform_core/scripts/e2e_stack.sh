@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
 # File: e2e_stack.sh
-# Version: 10
+# Version: 11
+#
+# v11 (2026-10-06): `activate-workflows` waits for the ACTIVATION EVENT
+#   instead of the container health probe. n8n answers /healthz while still
+#   rebuilding its workflow dependency index, so `full` raced it: the seed
+#   imported and published both workflows, the restart happened, health went
+#   green, the tests ran, and the two upload tests failed with
+#   `Cannot POST /uploads/extract-and-ingest`. Re-running the same suite
+#   unchanged gave 50 passed / 0 failed — the signature of a race, and the
+#   same failure that has been reddening `ci-system-tests`.
+#   Two wrong versions of the check preceded the right one, both recorded in
+#   place: an HTTP probe through the gateway (answered 401 by forward-auth
+#   before ever reaching n8n, so it passed against a stack with no workflow)
+#   and an unbounded `docker logs` grep (matched the PREVIOUS boot's line
+#   instantly). The working form is `docker logs --since <pre-restart
+#   timestamp>` scanned for `Activated workflow "Extract & Ingest`.
 # Path: ay_platform_core/scripts/e2e_stack.sh
 # Description: One-stop helper for the system-test stack.
 #              Wraps `docker compose` + seed + `pytest tests/system/`.
@@ -323,19 +338,60 @@ cmd_system() {
 # ---------------------------------------------------------------------------
 cmd_activate_workflows() {
   _require_docker
+  # Timestamp BEFORE the restart, so the log scan below cannot be satisfied
+  # by the PREVIOUS boot's activation line. `docker logs` keeps the whole
+  # history across a restart, so an unbounded grep matches instantly and the
+  # wait becomes a no-op — the third way this one check managed to look
+  # correct while proving nothing.
+  local since
+  since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "==> Restarting C12 (n8n) to activate the published workflows"
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
     --profile test restart c12 \
     || echo "==> WARNING: c12 restart failed ; uploads will use a stale workflow"
-  # n8n re-runs its startup before the webhooks answer; the seed container
-  # waits on health, this does not, so give it the same grace.
-  echo "==> Waiting for C12 to report healthy again"
-  for _ in $(seq 1 30); do
-    state="$(docker inspect -f '{{.State.Health.Status}}' ay-c12-workflow 2>/dev/null || echo unknown)"
-    [ "$state" = "healthy" ] && break
+  # WAIT FOR THE WEBHOOK, NOT FOR THE CONTAINER.
+  #
+  # This loop used to poll the container's HEALTH, and that is not the
+  # condition the next step depends on: n8n answers its health probe while
+  # it is still rebuilding the workflow dependency index, and only then logs
+  # `Activated workflow "Extract & Ingest …"`. So `full` raced it — the seed
+  # imported and published correctly, the restart happened, health went
+  # green, the tests ran, and the two upload tests failed with
+  # `Cannot POST /uploads/extract-and-ingest`. Re-running the same suite
+  # unchanged a minute later gave 50 passed / 0 failed, which is the
+  # signature of a race rather than a defect, and it is the same failure
+  # that has been reddening `ci-system-tests` on the upload tests.
+  #
+  # OBSERVE THE ACTIVATION EVENT, do not infer it from an HTTP status.
+  #
+  # The first version of this loop probed the webhook URL through the
+  # gateway and treated "not 404" as registered. That proved NOTHING:
+  # `/uploads/*` carries `forward-auth-c2`, so an unauthenticated probe is
+  # answered 401 by Traefik BEFORE the request ever reaches n8n — the check
+  # would have passed against a stack with no workflow at all. (It did, on
+  # the first run: "webhook registered (answers HTTP 401)".) Authenticating
+  # the probe would mean minting a token here, i.e. duplicating the seeder.
+  #
+  # n8n logs the exact event we are waiting for, once per workflow:
+  #   Activated workflow "Extract & Ingest (C7 -> C12 -> C13 -> C7)"
+  # That line appears AFTER it has rebuilt the dependency index and
+  # registered the production webhooks — which is precisely the moment the
+  # health probe does not tell us about.
+  echo "==> Waiting for n8n to log the workflow activation"
+  local activated=0
+  for _ in $(seq 1 45); do
+    if docker logs --since "$since" ay-c12-workflow 2>&1 \
+         | grep -q 'Activated workflow "Extract & Ingest'; then
+      activated=1
+      break
+    fi
     sleep 2
   done
-  echo "    c12 health: ${state:-unknown}"
+  if [ "$activated" -eq 1 ]; then
+    echo "    workflows activated"
+  else
+    echo "==> WARNING: n8n never logged the activation after 90 s — uploads will fail" >&2
+  fi
 }
 
 cmd_full() {
