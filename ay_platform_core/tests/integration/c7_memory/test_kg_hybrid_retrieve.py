@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_kg_hybrid_retrieve.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/tests/integration/c7_memory/test_kg_hybrid_retrieve.py
 # Description: Phase F.2 integration test — KG-based hybrid retrieval.
 #              Wires real ArangoDB + a KGRepository populated by hand
@@ -227,6 +227,26 @@ async def test_retrieve_pulls_in_chunks_beyond_scan_cap(
                 # widening to be the only way the third source can
                 # appear in top_k.
                 retrieval_scan_cap=2,
+                # DENSE, and this is the load-bearing part (2026-10-07).
+                # `scan_cap` bounds the DENSE arm only. In `hybrid` mode
+                # the BM25 arm is capped separately
+                # (`limit=max(top_k * 5, 50)`) and `service.py` keeps
+                # lexical-only hits precisely WHEN the dense scan was
+                # truncated — "they may be live chunks beyond scan_cap,
+                # the recall win of the lexical arm". So the third source
+                # could arrive through BM25 instead of through KG
+                # expansion, and whether it did depended on whether the
+                # ArangoSearch view had consolidated yet: this test
+                # passed alone (cold view) and failed in a full-suite run
+                # (warm view) on the `cut_by_scan` precondition.
+                #
+                # Turning the lexical arm off is not a weakened
+                # precondition, it is the opposite. With it on, the
+                # closing `"cut source" in with_kg_ids` assertion could
+                # be satisfied by BM25 while KG expansion did nothing —
+                # the exact vacuity the comment below warns about for the
+                # scan-order assumption.
+                retrieval_mode="dense",
                 # Boost neutralised so this test isolates proposition A
                 # (the FETCH path) from proposition B (the boost).
                 kg_expansion_boost=1.0,

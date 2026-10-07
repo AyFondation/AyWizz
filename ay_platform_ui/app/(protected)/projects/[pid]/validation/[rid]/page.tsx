@@ -1,12 +1,19 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/validation/[rid]/page.tsx
 // Description: Validation run detail. Polls C6's `GET /runs/{rid}` for
 //              status until it hits `completed` or `failed`, then loads
-//              the paginated findings (severity / title / message /
+//              the paginated findings (severity / message / fix hint /
 //              location). Manual "Refresh" button bypasses the poll
 //              if the operator wants an immediate re-query.
+//
+//              v3 (2026-10-07) : this page read four fields and two enum
+//              members C6 does not serve, so it threw
+//              `undefined.length` on every completed run, never
+//              continued polling a `pending` one, and rendered
+//              uncoloured badges for `blocking` / `advisory`. See the
+//              v15 note in `lib/types.ts`.
 // =============================================================================
 
 "use client";
@@ -45,9 +52,9 @@ export default function RunDetailPage() {
     try {
       const run = await apiClient.getValidationRun(runId);
       // Only fetch findings when the run has produced them (status
-      // completed/failed). Server returns 0 findings for queued/running.
+      // completed/failed). Server returns 0 findings for pending/running.
       const page = await apiClient.listValidationFindings(runId, 500, 0);
-      setState({ status: "ready", run, findings: page.findings });
+      setState({ status: "ready", run, findings: page.items });
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setState({ status: "not-found" });
@@ -74,7 +81,7 @@ export default function RunDetailPage() {
         // Decide whether to continue polling.
         setState((curr) => {
           if (curr.status === "ready") {
-            if (curr.run.status === "queued" || curr.run.status === "running") {
+            if (curr.run.status === "pending" || curr.run.status === "running") {
               schedule();
             }
           } else if (curr.status === "loading") {
@@ -153,7 +160,10 @@ export default function RunDetailPage() {
       <section className="mt-8 rounded-lg border border-neutral-200 bg-white p-6">
         <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-500">Summary</h3>
         <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm md:grid-cols-3">
-          <Field label="Total findings" value={String(run.total_findings)} />
+          <Field
+            label="Findings"
+            value={`${run.findings_count.blocking} blocking · ${run.findings_count.advisory} advisory · ${run.findings_count.info} info`}
+          />
           <Field
             label="Completed at"
             value={run.completed_at ? new Date(run.completed_at).toLocaleString() : "(pending)"}
@@ -166,7 +176,7 @@ export default function RunDetailPage() {
         <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-500">Findings</h3>
         {findings.length === 0 ? (
           <p className="mt-3 text-sm text-neutral-500">
-            {run.status === "queued" || run.status === "running"
+            {run.status === "pending" || run.status === "running"
               ? "Run still in progress — findings will appear here when ready."
               : "No findings. The run completed without issues."}
           </p>
@@ -177,7 +187,7 @@ export default function RunDetailPage() {
                 <tr>
                   <th className="px-4 py-2">Severity</th>
                   <th className="px-4 py-2">Check</th>
-                  <th className="px-4 py-2">Title</th>
+                  <th className="px-4 py-2">Message</th>
                   <th className="px-4 py-2">Location</th>
                 </tr>
               </thead>
@@ -189,8 +199,10 @@ export default function RunDetailPage() {
                     </td>
                     <td className="px-4 py-2 font-mono text-xs text-neutral-700">{f.check_id}</td>
                     <td className="px-4 py-2 text-neutral-900">
-                      <div>{f.title}</div>
-                      <div className="text-xs text-neutral-500">{f.message}</div>
+                      <div>{f.message}</div>
+                      {f.fix_hint ? (
+                        <div className="text-xs text-neutral-500">{f.fix_hint}</div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-2 font-mono text-xs text-neutral-500">
                       {f.location ?? "—"}
@@ -208,7 +220,7 @@ export default function RunDetailPage() {
 
 function RunStatusBadge({ status }: { status: ValidationRun["status"] }) {
   const palette: Record<ValidationRun["status"], string> = {
-    queued: "bg-neutral-100 text-neutral-700",
+    pending: "bg-neutral-100 text-neutral-700",
     running: "bg-amber-100 text-amber-900",
     completed: "bg-emerald-100 text-emerald-900",
     failed: "bg-red-100 text-red-900",
@@ -220,10 +232,9 @@ function RunStatusBadge({ status }: { status: ValidationRun["status"] }) {
 
 function SeverityBadge({ severity }: { severity: FindingSeverity }) {
   const palette: Record<FindingSeverity, string> = {
+    blocking: "bg-red-100 text-red-900",
+    advisory: "bg-amber-100 text-amber-900",
     info: "bg-blue-100 text-blue-900",
-    warning: "bg-amber-100 text-amber-900",
-    error: "bg-red-100 text-red-900",
-    critical: "bg-red-200 text-red-950",
   };
   return (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${palette[severity]}`}>

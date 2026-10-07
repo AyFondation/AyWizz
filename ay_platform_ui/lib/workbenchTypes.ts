@@ -1,10 +1,38 @@
 // =============================================================================
 // File: workbenchTypes.ts
-// Version: 1
+// Version: 3
 // Path: ay_platform_ui/lib/workbenchTypes.ts
 // Description: TypeScript contracts for the traceability workbench —
 //              500-SPEC R-500-015..021, mirroring the C5 Pydantic models of
 //              310-SPEC §4.1 / §4.7 / §4.8 / §4.9.
+//
+//              v3 (2026-10-07) : five fields whose type was an INLINE
+//              object literal are promoted to named interfaces mirroring
+//              the C5 models they shadow — `BatchView`,
+//              `RatificationView`, `StepEstimateView`, `ImpactSetView`,
+//              `ImpactPathView` — plus `BatchKind`, which was `string`.
+//              An inline literal has no name to compare against, so
+//              `audit_ui_api_chain.py` skipped its members; naming them
+//              brought the audit from 115 to 117 of 129 call sites, with
+//              nothing left silently uncompared. They turned out to be
+//              correct, which is the answer one wants from a check and
+//              could not have had from a reading.
+//
+//              v2 (2026-10-07) : `AllocationCoverageView` is re-aligned
+//              with C5 `AllocationCoverage`. It had declared `is_covered`
+//              and `links` since it was written, and C5 served NEITHER —
+//              `is_covered` was a Python `@property` (computed, never
+//              serialised) and the links were discarded in `_classify`
+//              after being reduced to id tuples. The workbench therefore
+//              threw on `allocation.links.some(…)` and showed "not yet
+//              answered" for everything. C5 now serves both (`links`
+//              additively, `is_covered` as a `computed_field`), which is
+//              what `R-500-017` and `R-500-019` require: the latter says
+//              auto-accepted requirements SHALL be counted "from links
+//              actually marked auto-accepted, never inferred from a
+//              difference between totals", and no id tuple carries a
+//              state. Surfaced by `ay_platform_core/scripts/checks/
+//              audit_ui_api_chain.py`.
 //
 //              A SEPARATE MODULE, not an extension of `types.ts`. That file
 //              is 1385 lines covering six components; adding a seventh
@@ -96,9 +124,11 @@ export interface DocObjectList {
   objects: DocObjectSummary[];
 }
 
-/** A coverage link as the object panel expands it in place (`R-500-017`). */
+/** A coverage link as the object panel expands it in place (`R-500-017`).
+ *  Mirrors C5 `CoverageLink` (`extra="forbid"`). */
 export interface CoverageLinkView {
   object_id: string;
+  project_id: string;
   container: string;
   target_id: string;
   pinned_version: number;
@@ -108,9 +138,18 @@ export interface CoverageLinkView {
   at: string;
 }
 
-/** What one allocation of a requirement has delivered. */
+/** What one allocation of a requirement has delivered. Mirrors C5
+ *  `AllocationCoverage`; `is_covered` is a `computed_field` there, so it
+ *  is served rather than re-derived here. `links` and `is_covered` were
+ *  declared on this side long before C5 served either — the workbench
+ *  threw on `allocation.links.some(…)` and rendered "not yet answered"
+ *  unconditionally. Both are now on the wire (2026-10-07). */
 export interface AllocationCoverageView {
   container: string;
+  allocation_state: ReviewState;
+  covering_objects: string[];
+  weak_objects: string[];
+  stale_objects: string[];
   is_covered: boolean;
   links: CoverageLinkView[];
 }
@@ -185,14 +224,27 @@ export interface ChangeTicketView {
   opened_at: string;
   closed_at: string | null;
   closed_by: string | null;
-  impact: { seed_id: string; nodes: ImpactNodeView[] };
+  impact: ImpactSetView;
   dispositions: DispositionView[];
+}
+
+/** Mirror of C5 `ImpactSet` — everything one change reaches. The seed is
+ *  deliberately not a member of `nodes`. */
+export interface ImpactSetView {
+  seed_id: string;
+  nodes: ImpactNodeView[];
+}
+
+/** Mirror of C5 `ImpactPath` — one route from the change to an impacted
+ *  node, seed first. */
+export interface ImpactPathView {
+  nodes: string[];
 }
 
 export interface ImpactNodeView {
   node_id: string;
   container: string;
-  paths: { nodes: string[] }[];
+  paths: ImpactPathView[];
   paths_truncated: boolean;
 }
 
@@ -215,11 +267,30 @@ export interface TreatmentPlanView {
   plan_id: string;
   project_id: string;
   version: number;
-  batch: { kind: string; source: string; count: number };
+  batch: BatchView;
   steps: PlanStepView[];
   proposed_by: string;
   proposed_at: string;
-  ratification: { plan_version: number; actor: string; at: string } | null;
+  ratification: RatificationView | null;
+}
+
+/** C5 `BatchKind` — what a plan's batch is made of. Was `string`, which
+ *  meant the audit could not compare the members. */
+export type BatchKind = "change_set" | "supplied_requirements" | "container_authoring";
+
+/** Mirror of C5 `Batch` — what one plan concerns (`R-310-171`). */
+export interface BatchView {
+  kind: BatchKind;
+  source: string;
+  count: number;
+}
+
+/** Mirror of C5 `Ratification` — the decision that execution may begin
+ *  (`R-310-175`), carrying the plan version it approved. */
+export interface RatificationView {
+  plan_version: number;
+  actor: string;
+  at: string;
 }
 
 export interface PlanStepView {
@@ -227,14 +298,21 @@ export interface PlanStepView {
   scope: string[];
   effort: "batchable" | "arbitration-required" | "reflection-required";
   mode: "end-to-end" | "step-by-step";
-  estimate: {
-    tokens: number;
-    cost_eur: number;
-    duration_min: number;
-    review_items: number;
-  };
+  estimate: StepEstimateView;
   state: "pending" | "running" | "suspended" | "completed" | "failed";
   suspended_reason: string | null;
+}
+
+/** Mirror of C5 `StepEstimate` — the four figures a step declares before
+ *  it may be ratified. `review_items` has no default on the Python side:
+ *  reviewer capacity binds before budget does, so a zero would read as
+ *  "generates no review work", the one claim a plan must never make
+ *  silently. */
+export interface StepEstimateView {
+  tokens: number;
+  cost_eur: number;
+  duration_min: number;
+  review_items: number;
 }
 
 export interface TreatmentPlanList {

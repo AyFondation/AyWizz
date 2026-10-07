@@ -1,6 +1,6 @@
 // =============================================================================
 // File: apiClient.ts
-// Version: 14
+// Version: 16
 // Path: ay_platform_ui/lib/apiClient.ts
 // Description: Thin wrapper over `fetch` that prepends the runtime-config
 //              `apiBaseUrl` to every call and (optionally) attaches the
@@ -106,7 +106,7 @@ import type {
   QuotaWindow,
   RBACProjectRole,
   RequestCostBreakdown,
-  RequirementDocumentDetail,
+  RequirementDocument,
   RequirementDocumentList,
   RequirementEntityList,
   RestoreReport,
@@ -125,6 +125,7 @@ import type {
   TenantList,
   TenantPublic,
   TenantStorageReport,
+  TokenResponse,
   TraceEvent,
   UserAdminList,
   UserAdminView,
@@ -134,6 +135,7 @@ import type {
   UserProjectAccessList,
   ValidationPlugin,
   ValidationRun,
+  ValidationRunTrigger,
 } from "./types";
 import type {
   BaselineList,
@@ -309,12 +311,7 @@ export class ApiClient {
    *  owns persistence + decoded-claims state ; this method
    *  intentionally does NOT write to localStorage directly. */
   async login(username: string, password: string): Promise<string> {
-    type LoginResponse = {
-      access_token: string;
-      token_type: string;
-      expires_in: number;
-    };
-    const body = await this.request<LoginResponse>("/auth/login", {
+    const body = await this.request<TokenResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
@@ -1353,12 +1350,11 @@ export class ApiClient {
     );
   }
 
-  /** GET /api/v1/projects/{pid}/requirements/documents/{slug}. */
-  async getRequirementDocument(
-    projectId: string,
-    slug: string,
-  ): Promise<RequirementDocumentDetail> {
-    return this.request<RequirementDocumentDetail>(
+  /** GET /api/v1/projects/{pid}/requirements/documents/{slug}.
+   *  Same C5 `DocumentPublic` model as the listing — the detail route is
+   *  the one that populates `body`. */
+  async getRequirementDocument(projectId: string, slug: string): Promise<RequirementDocument> {
+    return this.request<RequirementDocument>(
       `/api/v1/projects/${encodeURIComponent(projectId)}/requirements/documents/${encodeURIComponent(slug)}`,
       { method: "GET" },
     );
@@ -1394,8 +1390,8 @@ export class ApiClient {
     domain: string;
     requirements?: unknown[];
     artifacts?: unknown[];
-  }): Promise<{ run_id: string }> {
-    return this.request<{ run_id: string }>(
+  }): Promise<ValidationRunTrigger> {
+    return this.request<ValidationRunTrigger>(
       `/api/v1/projects/${encodeURIComponent(payload.project_id)}/validation/runs`,
       {
         method: "POST",

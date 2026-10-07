@@ -1,6 +1,6 @@
 # =============================================================================
 # File: router.py
-# Version: 8
+# Version: 9
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/router.py
 # Description: FastAPI APIRouter for C2 Auth Service. 12 endpoints covering
 #              authentication, token verification, logout, user management,
@@ -126,15 +126,34 @@ async def _require_same_tenant_user(
 # ---------------------------------------------------------------------------
 
 
-@router.api_route(
-    "/config", methods=["GET", "HEAD"], response_model=AuthConfigResponse
-)
+@router.get("/config", response_model=AuthConfigResponse)
 async def get_config(service: AuthService = Depends(get_service)) -> AuthConfigResponse:
-    """Return current auth mode. No authentication required.
+    """Return current auth mode. No authentication required."""
+    return service.config_response()
 
-    HEAD is supported for connectivity / liveness probes that don't
-    want a body — Starlette strips the body automatically when the
-    method is HEAD.
+
+@router.head("/config", response_model=AuthConfigResponse, include_in_schema=False)
+async def head_config(
+    service: AuthService = Depends(get_service),
+) -> AuthConfigResponse:
+    """HEAD mirror of `GET /config` for connectivity / liveness probes.
+
+    Starlette strips the body on HEAD, so the two share one handler
+    contract and this exists only to answer the method.
+
+    WHY IT IS A SEPARATE ROUTE rather than
+    `api_route(methods=["GET", "HEAD"])`, which is what it was until
+    2026-10-07: FastAPI derives a route's `operationId` from
+    `list(route.methods)[0]` — the first element of a **set** — so a
+    multi-method route got ONE id, shared by both methods (invalid
+    OpenAPI: `operationId` must be unique) and, worse, **non-determi-
+    nistic between builds**, landing as `…_get` on one run and `…_head`
+    on the next. Any generated client would churn. `include_in_schema=
+    False` keeps the probe out of the document entirely, which is
+    honest — it carries no contract of its own.
+
+    Surfaced by `scripts/checks/audit_ui_api_chain.py`
+    (`openapi_schema_warning`).
     """
     return service.config_response()
 

@@ -1,12 +1,29 @@
 // =============================================================================
 // File: types.ts
-// Version: 14
+// Version: 16
 // Path: ay_platform_ui/lib/types.ts
 // Description: Wire-format type definitions for the platform's public
 //              bootstrap surface — `/runtime-config.json` (static, served
 //              from this app's origin) and `/ux/config` (dynamic, served
 //              by C2). snake_case fields match the Python wire format
 //              verbatim so there's no mapping layer to keep in sync.
+//
+//              v16 (2026-10-07) : `TokenResponse` and
+//              `ValidationRunTrigger` move here from inside
+//              `apiClient.ts`, where they were declared in the method
+//              body. A response type with no name in a wire-type module
+//              has nothing to compare against, so those two routes'
+//              shapes were unchecked; naming them closes the last two
+//              uncompared call sites (117 of 129 now compared, the rest
+//              being 204 DELETEs).
+//
+//              v15 (2026-10-07) : the C5 requirements + C6 validation
+//              wire types are re-aligned with the Python models they
+//              claim to mirror. Nine fields the UI read were never
+//              served and two string unions named states C6 cannot
+//              emit; see the comment above `ValidationRunStatus`.
+//              Surfaced by `ay_platform_core/scripts/checks/
+//              audit_ui_api_chain.py`, now in the coherence gate.
 //
 //              v11 (2026-05-19) : UNIFIED inline-event model.
 //              `StageEvent` + `ToolCallEvent` collapse into one
@@ -100,6 +117,15 @@ export interface UxConfig {
   /** Demo credentials for auto-fill in dev mode. null/undefined in
    *  production. */
   dev_credentials?: DevCredential[] | null;
+}
+
+/** Mirror of C2 `TokenResponse` — the successful-authentication body of
+ *  `POST /auth/login` and `POST /auth/token`. Named rather than declared
+ *  inside `login()` so the audit compares it against what C2 serves. */
+export interface TokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
 }
 
 /** Combined config available to every Client Component via
@@ -1038,39 +1064,55 @@ export interface MessageList {
 /** Document slug record (e.g. "300-SPEC-REQUIREMENTS-MGMT"). The list
  *  endpoint returns metadata only ; pull individual docs by slug to get
  *  the rendered Markdown content. */
+/** Mirror of C5 `DocumentPublic` (`extra="forbid"`). ONE backend model
+ *  serves both the listing and the detail route, so there is one type
+ *  here: `body` is the only difference and the model already makes it
+ *  optional. v15 replaced a `content` / `size_bytes` pair that C5 has
+ *  never served — the document viewer rendered an empty body. */
 export interface RequirementDocument {
+  project_id: string;
   slug: string;
   version: number;
-  status: string;
   language: string;
+  status: string;
+  entity_count: number;
+  derives_from: string[];
+  created_at: string;
   updated_at: string;
-  size_bytes?: number;
+  /** Markdown body. Populated by `GET /documents/{slug}` only; the
+   *  listing route leaves it null. */
+  body?: string | null;
 }
 
 export interface RequirementDocumentList {
   documents: RequirementDocument[];
 }
 
-/** Full document body with rendered Markdown content. */
-export interface RequirementDocumentDetail {
-  slug: string;
-  version: number;
-  status: string;
-  content: string;
-  language: string;
-  updated_at: string;
-}
-
-/** A typed requirement entity (R-/E-/D-/T-/Q- prefix). */
+/** Mirror of C5 `EntityPublic` (`extra="forbid"`). v15 replaced a
+ *  `payload` / `source_slug` pair C5 has never served — the entity's
+ *  content is `title` + `body` and its provenance is `document_slug`. */
 export interface RequirementEntity {
+  project_id: string;
   entity_id: string;
+  document_slug: string;
   type: string;
   version: number;
   status: string;
-  category?: string;
-  source_slug?: string;
-  // Free-form payload from the YAML block — keys vary by entity type.
-  payload: Record<string, unknown>;
+  category: string;
+  title: string;
+  body: string;
+  domain?: string | null;
+  derives_from: string[];
+  impacts: string[];
+  tailoring_of?: string | null;
+  override?: boolean | null;
+  supersedes?: string | null;
+  superseded_by?: string | null;
+  deprecated_reason?: string | null;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
 }
 
 export interface RequirementEntityList {
@@ -1081,42 +1123,91 @@ export interface RequirementEntityList {
 // C6 — Validation
 // ===========================================================================
 
-export type ValidationRunStatus = "queued" | "running" | "completed" | "failed";
-export type FindingSeverity = "info" | "warning" | "error" | "critical";
+// v15 (2026-10-07) : the whole C6 block below was written against a C6
+// that no longer exists, and nothing could see it — the backend's tests
+// assert the current shape and `run-detail.test.tsx` mocked the stale one,
+// so both tiers were green while the run page threw `undefined.length`.
+// Mirrors `c6_validation/models.py` (all `extra="forbid"`). Found by
+// `ay_platform_core/scripts/checks/audit_ui_api_chain.py`.
+//
+//   was `"queued"`                        → C6 `RunStatus.PENDING`
+//   was `"info"|"warning"|"error"|…`      → C6 `Severity` is
+//                                           blocking / advisory / info
+//   was `ValidationRun.total_findings`    → `findings_count` (by severity)
+//   was `Finding.title`                   → C6 serves `message` + `fix_hint`
+//   was `FindingPage.findings/limit/…`    → `run_id` / `total` / `items`
+export type ValidationRunStatus = "pending" | "running" | "completed" | "failed";
+export type FindingSeverity = "blocking" | "advisory" | "info";
+export type FindingStatus = "open" | "resolved" | "suppressed";
+
+/** Mirror of C6 `RunTriggerResponse` (HTTP 202). Named rather than
+ *  inline at the call site so the audit can compare it — an inline
+ *  `{ run_id: string }` resolved to no interface and the route's shape
+ *  went unchecked. */
+export interface ValidationRunTrigger {
+  run_id: string;
+  status: ValidationRunStatus;
+}
+
+/** C6 `RunSummaryCounts` — findings aggregated by severity. */
+export interface RunSummaryCounts {
+  blocking: number;
+  advisory: number;
+  info: number;
+}
 
 export interface ValidationRun {
   run_id: string;
   project_id: string;
   domain: string;
+  check_ids: string[];
   status: ValidationRunStatus;
+  findings_count: RunSummaryCounts;
   started_at: string;
   completed_at: string | null;
-  total_findings: number;
+  snapshot_uri?: string | null;
 }
 
 export interface Finding {
   finding_id: string;
   run_id: string;
   check_id: string;
+  domain: string;
   severity: FindingSeverity;
-  title: string;
+  status: FindingStatus;
+  artifact_ref?: string | null;
+  location?: string | null;
+  entity_id?: string | null;
   message: string;
-  location: string | null;
+  fix_hint?: string | null;
+  created_at: string;
 }
 
 export interface FindingPage {
-  findings: Finding[];
+  run_id: string;
   total: number;
-  limit: number;
-  offset: number;
+  items: Finding[];
 }
 
 /** Plugin descriptor returned by `GET /api/v1/validation/plugins`. */
-export interface ValidationPlugin {
-  plugin_id: string;
-  domain: string;
-  version: string;
+/** C6 `CheckSpec` — one check a plugin registers. */
+export interface ValidationCheckSpec {
+  check_id: string;
+  title: string;
+  severity_default: FindingSeverity;
   description: string;
+}
+
+/** Mirror of C6 `PluginDescriptor` (`extra="forbid"`). v15 replaced a
+ *  `plugin_id` / `description` pair C6 has never served — the domain
+ *  selector rendered "(undefined v1)" and reused `undefined` as the
+ *  React key for every option. */
+export interface ValidationPlugin {
+  domain: string;
+  name: string;
+  version: string;
+  artifact_formats: string[];
+  checks: ValidationCheckSpec[];
 }
 
 // ===========================================================================

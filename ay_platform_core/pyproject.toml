@@ -1,10 +1,12 @@
 # =============================================================================
 # File: pyproject.toml
-# Version: 16
+# Version: 17
 # Path: ay_platform_core/pyproject.toml
 # Description: Python project configuration for the ay_platform_core
 #              sub-project of the monorepo. Targets Python 3.13.
 #              Dependency versions pinned to Sept 2026 latest stable releases.
+#              v17 (2026-10-07): `mypy_path` gains `scripts/checks` so the
+#              UI↔API chain audit can be imported by its coherence test.
 #              v16 (2026-10-06): relicensed to AGPL-3.0-or-later (was
 #                   `Proprietary`). NOTE: both tier Dockerfiles already
 #                   carried `org.opencontainers.image.licenses=
@@ -463,7 +465,13 @@ no_implicit_optional = true
 show_error_codes = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "src"
+# `scripts/checks` is on the path because `tests/coherence/
+# test_ui_api_chain.py` imports `audit_ui_api_chain` — the audit is a
+# reusable script first and a gate second, so its logic lives with the
+# other `scripts/checks/` audits rather than in the test tree. Only the
+# modules a checked file actually imports are followed, so this does not
+# newly typecheck the other check scripts.
+mypy_path = "src:scripts/checks"
 
 [[tool.mypy.overrides]]
 module = [

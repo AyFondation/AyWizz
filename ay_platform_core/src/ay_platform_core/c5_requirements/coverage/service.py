@@ -579,6 +579,7 @@ def _classify(
     covering: list[str] = []
     weak: list[str] = []
     stale: list[str] = []
+    matched: list[CoverageLink] = []
     for link in links:
         # BOTH filters live here on purpose. Filtering only by container let
         # a container-wide link set be attributed to every requirement in it,
@@ -586,6 +587,9 @@ def _classify(
         # an object answering a different one.
         if link["container"] != container or link["target_id"] != target_id:
             continue
+        # Kept alongside the id tuples: `R-500-019` needs the link's own
+        # `state`, which no id can carry. See `AllocationCoverage.links`.
+        matched.append(_coverage_link_from_row(link))
         object_id = link["object_id"]
         is_stale = current_version is not None and current_version > int(
             link["pinned_version"]
@@ -604,6 +608,27 @@ def _classify(
         covering_objects=tuple(sorted(covering)),
         weak_objects=tuple(sorted(weak)),
         stale_objects=tuple(sorted(set(stale))),
+        links=tuple(sorted(matched, key=lambda link: link.object_id)),
+    )
+
+
+def _coverage_link_from_row(row: dict[str, Any]) -> CoverageLink:
+    """Rebuild a `CoverageLink` from a `req_object_edges` document.
+
+    The AQL does `RETURN e`, so the row also carries Arango's `_key` /
+    `_id` / `_rev` / `_from` / `_to`; `CoverageLink` is `extra="forbid"`,
+    so the fields are named explicitly rather than splatted.
+    """
+    return CoverageLink(
+        object_id=row["object_id"],
+        project_id=row["project_id"],
+        container=row["container"],
+        target_id=row["target_id"],
+        pinned_version=int(row["pinned_version"]),
+        strength=CoverageStrength(row["strength"]),
+        state=ReviewState(row["state"]),
+        actor=row["actor"],
+        at=datetime.fromisoformat(row["at"]),
     )
 
 

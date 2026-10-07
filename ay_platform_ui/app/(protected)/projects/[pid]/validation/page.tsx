@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 3
+// Version: 4
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/validation/page.tsx
 // Description: Validation kick-off (Phase F). v1 scope : trigger a run
 //              (one of the installed plugins / domains) ; on 202 jump
@@ -8,6 +8,12 @@
 //              progress + findings. A real "list runs by project"
 //              endpoint doesn't exist yet on C6, so there's no list
 //              view here — the kick-off form is the only entry point.
+//
+//              v4 (2026-10-07) : the domain selector read `plugin_id`,
+//              which C6's `PluginDescriptor` does not serve — it
+//              rendered "(undefined v1.0)" and gave every <option> the
+//              same `undefined` React key. Reads `name` now. See the
+//              v15 note in `lib/types.ts`.
 //
 // @relation implements:R-500-006
 // =============================================================================
@@ -122,8 +128,8 @@ export default function ValidationPage() {
                 data-testid="trigger-domain-select"
               >
                 {plugins.plugins.map((p) => (
-                  <option key={p.plugin_id} value={p.domain}>
-                    {p.domain} ({p.plugin_id} v{p.version})
+                  <option key={`${p.domain}:${p.name}`} value={p.domain}>
+                    {p.domain} ({p.name} v{p.version})
                   </option>
                 ))}
               </select>

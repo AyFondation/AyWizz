@@ -46,7 +46,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from ..objects.models import ReviewState
 
@@ -291,10 +298,35 @@ class AllocationCoverage(BaseModel):
     covering_objects: tuple[str, ...] = ()
     weak_objects: tuple[str, ...] = ()
     stale_objects: tuple[str, ...] = ()
+    links: tuple[CoverageLink, ...] = ()
+    """The links this classification was derived from.
 
+    ADDED 2026-10-07. The three tuples above keep only OBJECT IDS, which
+    discards `state`, `strength`, `actor` and `at` — and `R-500-019`
+    requires the workbench to count auto-accepted requirements "from
+    links actually marked auto-accepted, never inferred from a difference
+    between totals", while `R-500-017` expands a link in place. Neither
+    is derivable from an id. The links were already in `_classify`'s hand
+    and thrown away, so this costs no extra query.
+
+    Surfaced by `scripts/checks/audit_ui_api_chain.py`: the UI declared
+    `AllocationCoverageView.links` all along and received `undefined`,
+    so `allocation.links.some(…)` threw and took the workbench's
+    `autoAcceptedIds` memo — and `LinkExpansion` — with it.
+    """
+
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_covered(self) -> bool:
-        """True when at least one accepted, non-weak, non-stale object answers it."""
+        """True when at least one accepted, non-weak, non-stale object answers it.
+
+        A `computed_field`, not a plain `property`, so it REACHES THE WIRE:
+        the UI rendered "not yet answered" unconditionally because
+        `is_covered` was computed server-side and never serialised. This
+        does not weaken `R-310-096` ("coverage is a conclusion, and a
+        settable conclusion can disagree with its own evidence") — a
+        computed field is output-only and still cannot be set.
+        """
         return bool(self.covering_objects)
 
 

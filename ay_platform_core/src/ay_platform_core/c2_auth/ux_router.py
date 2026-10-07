@@ -1,6 +1,6 @@
 # =============================================================================
 # File: ux_router.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/ux_router.py
 # Description: Public `/ux/config` endpoint hosted by C2 (which already
 #              owns the platform's public auth surface). Returns the
@@ -28,9 +28,7 @@ from ay_platform_core.c2_auth.service import AuthService, get_service
 ux_router = APIRouter(tags=["ux"])
 
 
-@ux_router.api_route(
-    "/config", methods=["GET", "HEAD"], response_model=UXConfigResponse,
-)
+@ux_router.get("/config", response_model=UXConfigResponse)
 async def get_ux_config(
     service: AuthService = Depends(get_service),
 ) -> UXConfigResponse:
@@ -40,4 +38,14 @@ async def get_ux_config(
     this with the static `runtime-config.json` (deployment-time API
     URL) before first render.
     """
+    return service.ux_config_response()
+
+
+@ux_router.head("/config", response_model=UXConfigResponse, include_in_schema=False)
+async def head_ux_config(
+    service: AuthService = Depends(get_service),
+) -> UXConfigResponse:
+    """HEAD mirror of `GET /ux/config`. See `c2_auth/router.py::head_config`
+    for why this is a separate route and not `methods=["GET", "HEAD"]`
+    (non-deterministic, duplicated `operationId`)."""
     return service.ux_config_response()

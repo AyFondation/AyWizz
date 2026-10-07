@@ -1,12 +1,20 @@
 // =============================================================================
 // File: validation.test.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/tests/integration/validation.test.tsx
 // Description: Tests for the Validation kick-off page. renderWithProviders
 //              (useConfigState) + mocked navigation, C6 plugins + run-trigger
 //              endpoints via MSW. Covers : plugins ready → domain form +
 //              trigger → navigate to the run detail ; plugins empty + error
 //              states ; trigger HTTP error surfaced.
+//
+//              v3 (2026-10-07) : the plugin fixture served `plugin_id`,
+//              which C6's `PluginDescriptor` does not have, so the domain
+//              selector rendered "(undefined v1.0)" and reused `undefined`
+//              as the React key of every option. Now TYPED as
+//              `ValidationPlugin`, which `tsc` enforces and
+//              `ay_platform_core/tests/coherence/test_ui_api_chain.py`
+//              pins to the Python model.
 // =============================================================================
 
 import { screen, waitFor } from "@testing-library/react";
@@ -15,6 +23,7 @@ import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ValidationPage from "@/app/(protected)/projects/[pid]/validation/page";
+import type { ValidationPlugin } from "@/lib/types";
 import { server } from "../helpers/msw-server";
 import { renderWithProviders } from "../helpers/render";
 
@@ -40,6 +49,21 @@ const PLUGINS = "/api/v1/validation/plugins";
 // an unhandled request and these tests would fail — which is the point.
 const RUNS = "/api/v1/projects/p1/validation/runs";
 
+const CODE_PLUGIN: ValidationPlugin = {
+  domain: "code",
+  name: "code-checks",
+  version: "1.0",
+  artifact_formats: ["markdown"],
+  checks: [
+    {
+      check_id: "C-001",
+      title: "Requirement has an implementing artifact",
+      severity_default: "blocking",
+      description: "Every R- entity needs an `@relation implements:` marker.",
+    },
+  ],
+};
+
 beforeEach(() => {
   mockRouter.push.mockClear();
 });
@@ -47,9 +71,7 @@ beforeEach(() => {
 describe("ValidationPage", () => {
   it("lists plugin domains and triggers a run → navigates to the run detail", async () => {
     server.use(
-      http.get(PLUGINS, () =>
-        HttpResponse.json([{ plugin_id: "code-checks", domain: "code", version: "1.0" }]),
-      ),
+      http.get(PLUGINS, () => HttpResponse.json([CODE_PLUGIN])),
       http.post(RUNS, () => HttpResponse.json({ run_id: "run-9" })),
     );
     renderWithProviders(<ValidationPage />);
@@ -79,9 +101,7 @@ describe("ValidationPage", () => {
 
   it("surfaces a trigger error without navigating", async () => {
     server.use(
-      http.get(PLUGINS, () =>
-        HttpResponse.json([{ plugin_id: "code-checks", domain: "code", version: "1.0" }]),
-      ),
+      http.get(PLUGINS, () => HttpResponse.json([CODE_PLUGIN])),
       http.post(RUNS, () => HttpResponse.json({ detail: "bad" }, { status: 422 })),
     );
     renderWithProviders(<ValidationPage />);

@@ -1,7 +1,15 @@
 // =============================================================================
 // File: workbench-regions.test.tsx
+// Version: 2
 // Path: ay_platform_ui/tests/integration/workbench-regions.test.tsx
 // Description: The workbench regions — 500-SPEC R-500-016 … R-500-021.
+//
+//              v2 (2026-10-07) : the coverage fixtures gained the fields
+//              C5 actually serves (`allocation_state`, the three object
+//              tuples, `project_id` on each link). They were already
+//              typed as `RequirementCoverageView`, so `tsc` named every
+//              gap the moment the type stopped claiming data C5 never
+//              sent — which is the whole argument for typing fixtures.
 //
 //              THE TESTS THAT CARRY THE REQUIREMENTS, as opposed to the ones
 //              that merely render:
@@ -114,10 +122,15 @@ const REQ_COVERAGE: RequirementCoverageView = {
   allocations: [
     {
       container: "030-ARCH",
+      allocation_state: "accepted",
+      covering_objects: ["AD-100"],
+      weak_objects: [],
+      stale_objects: [],
       is_covered: true,
       links: [
         {
           object_id: "AD-100",
+          project_id: "p1",
           container: "030-ARCH",
           target_id: "CUST-001",
           pinned_version: 4,
@@ -135,6 +148,7 @@ const SUSPECT: SuspectLinkList = {
   links: [
     {
       object_id: "AD-100",
+      project_id: "p1",
       container: "030-ARCH",
       target_id: "CUST-001",
       pinned_version: 4,

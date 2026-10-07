@@ -1,6 +1,6 @@
 // =============================================================================
 // File: page.tsx
-// Version: 2
+// Version: 3
 // Path: ay_platform_ui/app/(protected)/projects/[pid]/requirements/[slug]/page.tsx
 // Description: Single requirements document — fetches the full Markdown
 //              content from C5 and renders it inside a styled <pre>
@@ -8,6 +8,10 @@
 //              corpus is human-readable as-is and adding a renderer
 //              dep is deferred). Header surfaces version + status +
 //              update timestamp.
+//
+//              v3 (2026-10-07) : reads `doc.body`. C5's `DocumentPublic`
+//              has never had a `content` field, so this rendered an
+//              empty document. See the v15 note in `lib/types.ts`.
 //
 // @relation implements:R-500-005
 // =============================================================================
@@ -20,13 +24,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { MessageBody } from "@/components/message-body";
 import { ApiClient, ApiError } from "@/lib/apiClient";
-import type { RequirementDocumentDetail } from "@/lib/types";
+import type { RequirementDocument } from "@/lib/types";
 
 import { useConfigState } from "../../../../../providers";
 
 type DetailState =
   | { status: "loading" }
-  | { status: "ready"; doc: RequirementDocumentDetail }
+  | { status: "ready"; doc: RequirementDocument }
   | { status: "not-found" }
   | { status: "error"; message: string };
 
@@ -126,7 +130,7 @@ export default function RequirementDocumentPage() {
         data-testid="document-content"
       >
         <div className="text-sm leading-relaxed text-neutral-900">
-          <MessageBody content={doc.content} />
+          <MessageBody content={doc.body ?? ""} />
         </div>
       </article>
     </main>
