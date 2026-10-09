@@ -7,7 +7,6 @@ Path: README.md
 # AyWizz
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Commercial License](https://img.shields.io/badge/license-commercial%20available-orange.svg)](LICENSE-COMMERCIAL.md)
 ![tests](https://github.com/AyFondation/AyWizz/actions/workflows/ci-tests.yml/badge.svg?branch=main)
 ![build](https://github.com/AyFondation/AyWizz/actions/workflows/ci-build-images.yml/badge.svg?branch=main)
 ![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Sorriso/69f0ecb4365b782a836a18852d8189ed/raw/aywizz-coverage.json)
