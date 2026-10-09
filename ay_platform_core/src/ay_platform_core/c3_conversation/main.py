@@ -1,8 +1,13 @@
 # =============================================================================
 # File: main.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c3_conversation/main.py
 # Description: FastAPI app factory for C3 Conversation Service.
+#              v6 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 #              v4 (2026-05-16): wires the chat-direct DocGen tool loop
 #              (D-015 / Phase 2.C.2) — a `DocumentToolClient` is
@@ -37,6 +42,7 @@ from fastapi import FastAPI
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c3_conversation.db.repository import ConversationRepository
 from ay_platform_core.c3_conversation.document_tools import DocumentToolClient
 from ay_platform_core.c3_conversation.router import router
@@ -165,7 +171,7 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
         if document_tools is not None:
             await document_tools.aclose()
 
-    app = FastAPI(title="C3 Conversation Service", lifespan=lifespan)
+    app = FastAPI(title="C3 Conversation Service", lifespan=lifespan, **docs_urls("c3"))
     # Order matters in Starlette: last added = outermost. We want
     # TraceContext to run FIRST (so AuthGuard's reject log carries
     # trace_id), so AuthGuard is added FIRST (innermost).
@@ -177,7 +183,39 @@ def create_app(config: ConversationConfig | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c3_conversation"}
+
+    describe_app(
+        app,
+        summary="Conversations: chat turns, retrieval-augmented answers, SSE streaming.",
+        description="""
+C3 owns the conversation record and the answer pipeline. A posted message is
+answered from the project's own material: recent turns of the same
+conversation, the vector index, the knowledge graph, and the files the
+caller referenced. The pipeline's stages are streamed as they happen.
+
+### Streaming
+
+The message route answers `text/event-stream`, not JSON. Each event is a
+named SSE frame — pipeline stages arrive as they complete and the answer
+arrives in token deltas, so a client renders progress rather than waiting.
+A non-streaming client may read the persisted message afterwards instead.
+
+### Retrieval is project-scoped
+
+C3 calls C7 on the caller's behalf and forwards the identity it received.
+A conversation can only ever retrieve from its own project; there is no
+parameter that widens it.
+""",
+    )
 
     return app
 

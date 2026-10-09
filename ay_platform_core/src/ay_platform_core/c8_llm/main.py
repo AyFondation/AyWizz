@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c8_llm/main.py
 # Description: C8 cost receiver — the in-process FastAPI service of the C8
 #              tier (the LiteLLM proxy itself is off-the-shelf, §4.5). It
@@ -13,6 +13,12 @@
 #              Internal-only : reached from the proxy inside the cluster
 #              network, never from users — no forward-auth guard. A
 #              NetworkPolicy SHALL restrict ingress to the proxy in prod.
+#
+#              v3 (2026-10-09): the `/health` probe carries a docstring,
+#              like the other nine components'. This module is NOT in
+#              `api_docs`'s nine HTTP components — it is internal-only and
+#              has no `/docs` surface — so it gains the prose and nothing
+#              else.
 #
 # @relation implements:R-100-114
 # @relation implements:R-800-070
@@ -131,6 +137,14 @@ def create_app(config: CostReceiverConfig | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c8_cost_receiver"}
 
     return app

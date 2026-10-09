@@ -1,10 +1,15 @@
 # =============================================================================
 # File: main.py
-# Version: 8
+# Version: 9
 # Path: ay_platform_core/src/ay_platform_core/c4_orchestrator/main.py
 # Description: FastAPI app factory for C4 Orchestrator. Wires the in-process
 #              dispatcher backed by a real C8 LLM client (the C8 URL is read
 #              from C4_LLM_GATEWAY_URL).
+#              v9 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 #              v6 (2026-05-22) : the OpenHands `generate` engine (V2 #2 /
 #              R-200-029) is built with an `OpenHandsEngineConfig` derived
@@ -49,6 +54,7 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 from minio import Minio
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c2_auth.gitea_client import GiteaClient
 from ay_platform_core.c4_orchestrator.artifacts_router import (
     router as artifacts_router,
@@ -281,7 +287,7 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + servi
         if nats_publisher is not None:
             await nats_publisher.aclose()
 
-    app = FastAPI(title="C4 Orchestrator", lifespan=lifespan)
+    app = FastAPI(title="C4 Orchestrator", lifespan=lifespan, **docs_urls("c4"))
     app.add_middleware(AuthGuardMiddleware, component="c4_orchestrator")
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
     register_quota_handler(app)  # QuotaExceededError → 429
@@ -294,7 +300,40 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + clients + servi
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c4_orchestrator"}
+
+    describe_app(
+        app,
+        summary="The five-phase production pipeline, its artifacts and its source tree.",
+        description="""
+C4 drives the pipeline a project's work moves through — brainstorm, spec,
+plan, generate, dual review — with a hard gate between phases. It owns the
+run record, the trace of what each phase did, the documents a run produced,
+and the project's generated source tree.
+
+### Human-in-the-loop at the gates, autonomous inside a phase
+
+A run stops at a phase boundary and waits. `blocked` is a normal terminal
+state, not a failure: it means the pipeline needs a decision it is not
+entitled to make. Feedback and resume routes are how that decision is
+delivered.
+
+### Document mutations need `project_editor`
+
+Reading a project's documents or source tree takes any project role.
+Creating, updating, deleting, renaming or moving one takes
+`project_editor` or `project_owner` — a `project_viewer` is refused with
+403.
+""",
+    )
 
     return app
 

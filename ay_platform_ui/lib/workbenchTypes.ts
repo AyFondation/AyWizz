@@ -1,10 +1,21 @@
 // =============================================================================
 // File: workbenchTypes.ts
-// Version: 3
+// Version: 4
 // Path: ay_platform_ui/lib/workbenchTypes.ts
 // Description: TypeScript contracts for the traceability workbench —
 //              500-SPEC R-500-015..021, mirroring the C5 Pydantic models of
 //              310-SPEC §4.1 / §4.7 / §4.8 / §4.9.
+//
+//              v4 (2026-10-09) : `Finding` → `WorkbenchFinding`. It
+//              collided with C6's wire-model `Finding` in `lib/types.ts`
+//              — one derived view model, one wire model, same name.
+//              TypeScript resolved them by import so nothing was broken,
+//              but the collision is a live trap: the UI↔API audit merged
+//              the two modules into one namespace and the shadowed type
+//              produced eight confident, wrong findings. This one is the
+//              one that moved because it is NOT a wire type:
+//              `buildFindings()` derives it client-side and no C5 route
+//              serves one.
 //
 //              v3 (2026-10-07) : five fields whose type was an INLINE
 //              object literal are promoted to named interfaces mirroring
@@ -393,7 +404,18 @@ export type FindingKind =
  * requires each finding to cite them: a finding a reviewer cannot locate
  * is a notification, not a finding.
  */
-export interface Finding {
+/** A workbench finding. NOT a wire type — `buildFindings()` derives these
+ *  client-side from coverage / suspect / speculative data, and no C5 route
+ *  ever serves one.
+ *
+ *  v3 (2026-10-07) renamed it from `Finding`, which collided with C6's
+ *  wire-model `Finding` in `lib/types.ts`. TypeScript resolved the two by
+ *  import so nothing was broken, but the collision is a live trap: the
+ *  UI↔API audit merged the two modules into one namespace and the shadowed
+ *  type produced eight confident, wrong findings before the resolution was
+ *  made per-import. A derived view model and a wire model should not share
+ *  a name. */
+export interface WorkbenchFinding {
   kind: FindingKind;
   criterion: string;
   location: string;

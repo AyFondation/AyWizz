@@ -1,6 +1,6 @@
 // =============================================================================
 // File: findings-region.tsx
-// Version: 1
+// Version: 2
 // Path: ay_platform_ui/components/workbench/findings-region.tsx
 // Description: The permanently mounted findings region — 500-SPEC R-500-018,
 //              realising 310-SPEC R-310-223 / R-310-224.
@@ -14,7 +14,7 @@
 //
 //              EVERY FINDING CITES ITS CRITERION AND ITS LOCATION, because
 //              R-310-223 says so and because a finding a reviewer cannot
-//              locate is a notification. `Finding` makes both fields
+//              locate is a notification. `WorkbenchFinding` makes both
 //              required, so an un-locatable finding does not typecheck.
 //
 //              CLICKING A FINDING SELECTS ITS SUBJECT. The whole point of
@@ -31,9 +31,9 @@
 import {
   type ContainerCoverageView,
   FINDING_META,
-  type Finding,
   type SpeculativeList,
   type SuspectLinkList,
+  type WorkbenchFinding,
 } from "@/lib/workbenchTypes";
 import { useSelection } from "./selection-context";
 
@@ -53,8 +53,8 @@ export function buildFindings({
   coverage: ContainerCoverageView | null;
   suspect: SuspectLinkList | null;
   speculative: SpeculativeList | null;
-}): Finding[] {
-  const findings: Finding[] = [];
+}): WorkbenchFinding[] {
+  const findings: WorkbenchFinding[] = [];
 
   if (coverage) {
     // R-310-224: while a container is open, what it owes and has not
@@ -121,7 +121,7 @@ export function buildFindings({
   return findings;
 }
 
-const TONE: Record<Finding["kind"], string> = {
+const TONE: Record<WorkbenchFinding["kind"], string> = {
   "coverage-gap": "border-l-rose-500",
   "suspect-link": "border-l-amber-500",
   "weak-coverage": "border-l-amber-500",

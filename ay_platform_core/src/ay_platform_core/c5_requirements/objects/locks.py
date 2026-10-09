@@ -1,9 +1,17 @@
 # =============================================================================
 # File: locks.py
-# Version: 2
+# Version: 3
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/objects/locks.py
 # Description: Lease-based exclusive locks on document objects
 #              (310-SPEC-DOC-TRACEABILITY §4.10).
+#
+#              v3 (2026-10-09): the stale-lock RETRY path now treats a
+#              unique-constraint violation as a refusal like the other two
+#              acquisition paths already did. Several losers of the first
+#              INSERT can reach that retry together, and all but one got a
+#              raw `[ERR 1210]` — a 500 for behaving correctly. Surfaced by
+#              the eight-replica stress test in a FULL-SUITE run and not in
+#              isolation, because contention is what reaches the branch.
 #
 #              Held in ArangoDB rather than MinIO because acquisition needs an
 #              atomic compare-and-set, which object storage does not offer.
@@ -262,11 +270,40 @@ class LockManager:
         if current is None:
             # Released between the conflict and this read. Retry once: the
             # lock is free again and the INSERT path can decide cleanly.
-            cursor = self._db.aql.execute(
-                "INSERT @doc IN req_object_locks RETURN NEW",
-                bind_vars={"doc": doc},
-            )
-            return cast(dict[str, Any], next(iter(cursor))), True
+            #
+            # THIS RETRY IS ITSELF A RACE, and leaving it unguarded was a
+            # defect (found 2026-10-09 by the eight-replica stress test in
+            # a full-suite run, not in isolation — contention is what
+            # reaches this branch at all). Several losers of the first
+            # INSERT can arrive here together, all see a released lock,
+            # and all retry; exactly one wins and the others got a raw
+            # `[ERR 1210] unique constraint violated` — a 500 for
+            # behaving correctly, which is the one outcome
+            # `_is_acquisition_conflict` exists to prevent on the other
+            # two paths.
+            #
+            # Losing the retry is a refusal, and there is no third attempt:
+            # re-reading tells the caller who holds it now, and a lock that
+            # has been taken between the conflict and the retry is simply
+            # held. A loop here would trade a wrong 500 for an unbounded
+            # one.
+            try:
+                cursor = self._db.aql.execute(
+                    "INSERT @doc IN req_object_locks RETURN NEW",
+                    bind_vars={"doc": doc},
+                )
+                return cast(dict[str, Any], next(iter(cursor))), True
+            except Exception as exc:
+                if not _is_acquisition_conflict(exc):
+                    raise
+                retried = self._db.collection(COLL_LOCKS).get(doc["_key"])
+                if retried is not None:
+                    return cast(dict[str, Any], retried), False
+                # Released AGAIN between the retry's conflict and this
+                # read. Report refused with the row we were trying to
+                # write: the caller learns the acquisition did not happen,
+                # which is true, instead of a database error.
+                return doc, False
         return cast(dict[str, Any], current), False
 
     async def acquire(

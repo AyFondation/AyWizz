@@ -1,8 +1,17 @@
 # =============================================================================
 # File: routers.yml
-# Version: 15
+# Version: 16
 # Path: infra/c1_gateway/dynamic/routers.yml
 # Description: Traefik HTTP router definitions.
+#
+#              v16 (2026-10-09) routes the GENERATED API DOCUMENTATION.
+#              Nine routers, one per component, because every FastAPI app
+#              serves its own `/docs` and a single `PathPrefix(/docs)`
+#              rule could reach only one of them. Until now no router
+#              claimed `/docs` at all, so the whole generated
+#              documentation fell to `ui-catchall` and was unreachable
+#              through the gateway. Behind `forward-auth-c2` — see the
+#              block's own comment for the bearer-vs-browser consequence.
 #
 #              v15 (2026-10-05) closes an 83-endpoint routing hole found by
 #              auditing the route catalogue against these rules. Adds
@@ -57,6 +66,7 @@
 #     /api/v1/memory/*                 → C7 [forward-auth-c2, secure-hdrs]
 #     /api/v1/mcp, /api/v1/mcp/*       → C9 [forward-auth-c2, secure-hdrs]
 #     /uploads/*                       → C12 [forward-auth-c2, secure-hdrs]
+#     /docs/<service>/*                → that service [forward-auth-c2]
 #     <everything else>                → UI (priority 1)                   public
 #
 # @relation R-100-039 R-100-042 R-100-015 A-C1-1
@@ -489,6 +499,125 @@ http:
     c12-uploads:
       rule: "PathPrefix(`/uploads`)"
       service: c12
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # -------------------------------------------------------------------------
+    # Generated API documentation — one router per component.
+    #
+    # WHY NINE ROUTERS AND NOT ONE. Every component serves FastAPI's
+    # generated `/docs`, `/redoc` and `/openapi.json`, so a single rule on
+    # `PathPrefix(`/docs`)` could only ever reach one of them. Before this
+    # block NO router claimed `/docs` at all: it fell to `ui-catchall` and
+    # the whole generated documentation of the platform was unreachable
+    # through the gateway. Each app now serves its docs under its own
+    # SERVICE NAME (`api_docs.docs_urls`), so the path and the backend are
+    # the same string and no `stripPrefix` is involved — which also keeps
+    # Swagger UI's absolute reference to its spec resolvable.
+    #
+    # BEHIND forward-auth-c2, per the operator's decision: the API surface
+    # is not published to anonymous callers. CONSEQUENCE, stated plainly
+    # because it is easy to be surprised by it — `/auth/verify` reads a
+    # BEARER header (`HTTPBearer`), and a browser navigating to one of
+    # these URLs sends none, since the platform keeps its token in
+    # `localStorage` rather than a cookie. So these are reachable by any
+    # client that sets `Authorization: Bearer …` (curl, Postman, a client
+    # generator) and NOT by clicking a link. Browser access would need the
+    # UI to proxy the spec with the token attached; that is not built.
+    #
+    # Priority 50: above `ui-catchall` (1), below nothing it can collide
+    # with — no other rule claims `/docs`.
+    # -------------------------------------------------------------------------
+
+    docs-c2:
+      rule: "PathPrefix(`/docs/c2`)"
+      service: c2
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c3:
+      rule: "PathPrefix(`/docs/c3`)"
+      service: c3
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c4:
+      rule: "PathPrefix(`/docs/c4`)"
+      service: c4
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c5:
+      rule: "PathPrefix(`/docs/c5`)"
+      service: c5
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c6:
+      rule: "PathPrefix(`/docs/c6`)"
+      service: c6
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c7:
+      rule: "PathPrefix(`/docs/c7`)"
+      service: c7
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c9:
+      rule: "PathPrefix(`/docs/c9`)"
+      service: c9
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    # `/docs/c8-admin` and `/docs/c16-backup` carry a hyphen, so their
+    # prefixes cannot be confused with `/docs/c8…` of another service.
+    docs-c8-admin:
+      rule: "PathPrefix(`/docs/c8-admin`)"
+      service: c8-admin
+      entryPoints:
+        - web
+      middlewares:
+        - forward-auth-c2
+        - secure-headers
+      priority: 50
+
+    docs-c16-backup:
+      rule: "PathPrefix(`/docs/c16-backup`)"
+      service: c16-backup
       entryPoints:
         - web
       middlewares:

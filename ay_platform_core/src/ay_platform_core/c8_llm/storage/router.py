@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.storage.models import (
     ProjectStorageReport,
     ProjectStorageSeries,
@@ -24,7 +25,7 @@ from ay_platform_core.c8_llm.storage.models import (
 )
 from ay_platform_core.c8_llm.storage.service import StorageService
 
-router = APIRouter(tags=["storage"])
+router = APIRouter(tags=["storage"], responses=ROLE_GATED_RESPONSES)
 
 _OPERATOR_ROLES: tuple[str, ...] = ("platform_manager", "admin", "tenant_admin")
 _PLATFORM_ROLES: tuple[str, ...] = ("platform_manager",)

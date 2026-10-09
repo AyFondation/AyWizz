@@ -1,8 +1,13 @@
 # =============================================================================
 # File: main.py
-# Version: 8
+# Version: 9
 # Path: ay_platform_core/src/ay_platform_core/c5_requirements/main.py
 # Description: FastAPI app factory for C5 Requirements Service.
+#              v9 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 #              v8: mounts baselines and rendering (310-SPEC §4.11) and
 #              binds the six lookups of BaselineService — each a question
@@ -39,6 +44,7 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 from minio import Minio
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c5_requirements.absorption.repository import (
     AbsorptionRepository,
 )
@@ -97,6 +103,30 @@ from ay_platform_core.observability import (
 )
 from ay_platform_core.observability.auth_guard import AuthGuardMiddleware
 from ay_platform_core.observability.config import LoggingSettings
+
+#: `/docs` prose for this component. A module constant rather than an
+#: argument inside `create_app`, because prose is not control flow and
+#: the composition root is already at ruff's statement ceiling — the
+#: function should read as wiring.
+_SUMMARY = "Requirements, traceability and the treatment pipeline."
+_DESCRIPTION = """
+C5 owns the requirement corpus of a project and everything derived from it:
+typed entities (`R-`, `E-`, `D-`, `T-`, `Q-`), the documents they are
+authored in, the allocation of a requirement to a container, the coverage
+links that answer it, the change tickets a modification opens, and the
+treatment plans that schedule the work.
+
+**Every route here is project content.** The path names the project, and
+the gateway refuses a caller holding no role on it before the request
+arrives — so a 403 from this component is about the project in the URL, not
+about the caller's global role.
+
+Coverage is a **conclusion, never a stored flag** (`R-310-096`): the
+`is_covered` fields you read are computed from the links and cannot be set.
+A requirement allocated to three containers and answered in two is
+*partially* covered, which the API reports as not covered — reporting it
+green is the failure the rule exists to prevent.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +336,25 @@ def _wire_traceability(
     )
 
 
+def _mount_routers(app: FastAPI) -> None:
+    """Mount the eight 310-SPEC sub-surfaces.
+
+    Extracted for the same reason `_wire_traceability` was: the
+    composition root sits at ruff's statement ceiling, and eight
+    identical lines are the part of it a reader skips. One image, N
+    containers (R-100-114 v2) is unchanged — these are routers on one
+    app, not components.
+    """
+    app.include_router(router)
+    app.include_router(objects_router)
+    app.include_router(process_router)
+    app.include_router(coverage_router)
+    app.include_router(intake_router)
+    app.include_router(absorption_router)
+    app.include_router(execution_router)
+    app.include_router(baseline_router)
+
+
 def create_app(config: RequirementsConfig | None = None) -> FastAPI:
     cfg = config or RequirementsConfig()
     log_cfg = LoggingSettings()
@@ -362,17 +411,10 @@ def create_app(config: RequirementsConfig | None = None) -> FastAPI:
             repository._ensure_collections_sync()
         yield
 
-    app = FastAPI(title="C5 Requirements Service", lifespan=lifespan)
+    app = FastAPI(title="C5 Requirements Service", lifespan=lifespan, **docs_urls("c5"))
     app.add_middleware(AuthGuardMiddleware, component="c5_requirements")
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
-    app.include_router(router)
-    app.include_router(objects_router)
-    app.include_router(process_router)
-    app.include_router(coverage_router)
-    app.include_router(intake_router)
-    app.include_router(absorption_router)
-    app.include_router(execution_router)
-    app.include_router(baseline_router)
+    _mount_routers(app)
     app.state.requirements_service = service
     app.state.object_service = object_service
     app.state.process_service = process_service
@@ -382,9 +424,18 @@ def create_app(config: RequirementsConfig | None = None) -> FastAPI:
     app.state.execution_service = execution_service
     app.state.baseline_service = baseline_service
     app.state.baseline_storage = traceability.baseline_storage
+    describe_app(app, summary=_SUMMARY, description=_DESCRIPTION)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c5_requirements"}
 
     return app

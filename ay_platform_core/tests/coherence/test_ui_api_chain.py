@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_ui_api_chain.py
-# Version: 3
+# Version: 4
 # Path: ay_platform_core/tests/coherence/test_ui_api_chain.py
 # Description: Refuses a response FIELD the UI reads and the backend does not
 #              serve — the sixth and last link of the UI→API chain, and the
@@ -27,6 +27,14 @@
 #              `undefined.length` in production with its test green — the
 #              same two-internally-consistent-sides shape as the upload-405
 #              defect.
+#
+#              v4 (2026-10-09) splits `required` from NULLABLE. They were
+#              one rule, and that rule was wrong in both directions: it
+#              reported seventeen false positives (a required-but-nullable
+#              field whose UI type was already correct) while missing the
+#              dangerous case altogether — a value the server may send as
+#              `null` that the UI declares non-nullable, which no compiler
+#              will guard. `ui_ignores_nullable` now blocks on it.
 #
 #              v3 (2026-10-07) adds THE REQUEST DIRECTION, which was the
 #              last unguarded half of the same defect class: paths and

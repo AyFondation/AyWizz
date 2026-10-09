@@ -1,11 +1,16 @@
 # =============================================================================
 # File: main.py
-# Version: 6
+# Version: 7
 # Path: ay_platform_core/src/ay_platform_core/c8_admin/main.py
 # Description: FastAPI app factory for the C8 admin tier (R-100-114). Hosts the
 #              platform LLM registry admin surface behind Traefik forward-auth.
 #              Deployed via the shared image with `COMPONENT_MODULE=c8_admin`
 #              (uvicorn `ay_platform_core.c8_admin.main:app`).
+#              v7 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 #              Wires: Arango registry repository + SecretCipher (master key
 #              from env) + LLMRegistryService. On startup it ensures the
@@ -25,6 +30,7 @@ import yaml
 from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c8_admin.config import C8AdminConfig
 from ay_platform_core.c8_llm.client import LLMGatewayClient
 from ay_platform_core.c8_llm.config import ClientSettings, LiteLLMConfig
@@ -240,7 +246,7 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
         yield
         await reembed_notifier.aclose()
 
-    app = FastAPI(title="C8 Admin", lifespan=lifespan)
+    app = FastAPI(title="C8 Admin", lifespan=lifespan, **docs_urls("c8-admin"))
     app.add_middleware(
         AuthGuardMiddleware,
         component="c8_admin",
@@ -278,7 +284,39 @@ def create_app(  # noqa: PLR0915 - cohesive app factory: repos + services + rout
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c8_admin"}
+
+    describe_app(
+        app,
+        summary="LLM and embedding registries, model catalogues, quotas and storage.",
+        description="""
+C8's admin surface is where models, providers and spending limits are
+configured. The registry declares which upstream models exist and what they
+cost; the per-tenant catalogue declares which of those a tenant may use; the
+per-project selection declares which it does use.
+
+### Provider credentials are never returned
+
+A provider's API key is accepted on write, encrypted at rest, and never
+appears in any response — the read models carry the provider's identity and
+configuration, not its secret. A deployment without the master key still
+serves every read route and refuses key management.
+
+### Quotas clamp downward
+
+Limits are set at four levels — global, tenant, project, user — and the
+effective limit is the smallest of those that apply. Raising a project's cap
+above its tenant's does not widen it.
+""",
+    )
 
     return app
 

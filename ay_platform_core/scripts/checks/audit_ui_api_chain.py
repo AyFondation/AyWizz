@@ -1,10 +1,32 @@
 #!/usr/bin/env python3
 # =============================================================================
 # File: audit_ui_api_chain.py
-# Version: 1
+# Version: 2
 # Path: ay_platform_core/scripts/checks/audit_ui_api_chain.py
-# Description: Joins every HTTP call the UI makes to the RESPONSE SHAPE the
-#              backend actually serves, and reports the field-level drift.
+# Description: Joins every HTTP call the UI makes to the SHAPES the backend
+#              actually accepts and serves, in BOTH directions, and reports
+#              the field-level drift.
+#
+#              v2 adds the REQUEST direction (`compare_request`): the body
+#              the client sends and the query parameters it names, against
+#              the route's `requestBody` schema and its `required` query
+#              params. Severity there is SYMMETRIC — the request models are
+#              `extra="forbid"`, so an unexpected key is a 422 and a missing
+#              `required` field is a 422 too. It found nothing, which is
+#              itself informative: a bad request key is an immediate loud
+#              422 in development, a bad response field a silent
+#              `undefined`, and that asymmetry is why every defect this
+#              audit has found sat on the response side.
+#
+#              v2 also splits `required` from NULLABLE, which were
+#              conflated. In JSON Schema `required` means the KEY is always
+#              present and says nothing about the value, so Pydantic's
+#              `trigram: str | None` is required AND nullable — the UI's
+#              `string | null` was right and the single combined rule
+#              reported seventeen false positives on it. Splitting them
+#              also exposed the check that was missing entirely:
+#              `ui_ignores_nullable`, a value the server may send as `null`
+#              that the UI declares non-nullable.
 #
 #              WHY THIS EXISTS. Five of the six links in the UI→API chain are
 #              already guarded, each by its own check:
@@ -160,9 +182,13 @@ _OPAQUE_TS_TYPES = frozenset({"void", "unknown", "Blob", "string", "number", "bo
 #: response ones: the request models are `extra="forbid"`, so a key the
 #: server does not accept is a 422, and a `required` field the client
 #: never sends is a 422 as well.
+#: `ui_ignores_nullable` blocks for the same reason as
+#: `ui_reads_absent_field`: a value the server may send as `null` that the
+#: UI declares non-nullable is a dereference the compiler will not guard.
 BLOCKING = frozenset(
     {
         "ui_reads_absent_field",
+        "ui_ignores_nullable",
         "field_type_mismatch",
         "enum_member_unhandled",
         "ui_sends_unaccepted_field",
@@ -873,6 +899,30 @@ _SCALAR_FAMILIES: dict[str, frozenset[str]] = {
 }
 
 
+def _schema_is_nullable(node: dict[str, Any], schemas: dict[str, Any]) -> bool:
+    """Whether the schema admits `null` as a value.
+
+    SEPARATE FROM `required`, and conflating the two was a real defect in
+    this audit. In JSON Schema `required` means the KEY is always present;
+    it says nothing about the value. Pydantic's `trigram: str | None`
+    (no default) is required AND nullable, so the UI's `string | null` was
+    right and only its `?` was wrong — yet the single combined rule
+    reported the whole declaration as a mismatch.
+
+    Splitting them also exposes the case the combined rule could not see
+    at all: a field the server may send as `null` that the UI does NOT
+    declare nullable, which is a dereference waiting to happen.
+    """
+    resolved = _deref(node, schemas, frozenset())
+    if resolved.get("type") == "null":
+        return True
+    return any(
+        isinstance(alt, dict)
+        and (alt.get("type") == "null" or _schema_is_nullable(alt, schemas))
+        for alt in (resolved.get("anyOf") or resolved.get("oneOf") or [])
+    )
+
+
 def _schema_families(node: dict[str, Any], schemas: dict[str, Any]) -> set[str]:
     """JSON-Schema `type` values a node may take, flattening `anyOf`."""
     out: set[str] = set()
@@ -1004,14 +1054,28 @@ def _compare_field(
             )
         )
 
-    if is_required and (field.optional or field.nullable):
+    served_nullable = _schema_is_nullable(prop, route.schemas)
+    if served_nullable and not field.nullable:
+        findings.append(
+            Finding(
+                "ui_ignores_nullable",
+                call.client_method,
+                call.http,
+                call.path,
+                f"{where}: {route.component} may serve `null` and the UI "
+                f"declares `{field.type}` — any dereference is unguarded",
+            )
+        )
+    if is_required and field.optional:
         findings.append(
             Finding(
                 "ui_optional_backend_required",
                 call.client_method,
                 call.http,
                 call.path,
-                f"{where} is always sent but the UI treats it as optional",
+                f"{where}: the key is ALWAYS present (the `?` is noise)"
+                + ("" if not served_nullable else "; its VALUE may be null, "
+                   "which `| null` already covers"),
             )
         )
     return findings

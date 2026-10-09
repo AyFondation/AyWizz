@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.registry.embedding_models import (
     EmbeddingModelListResponse,
     EmbeddingModelPublic,
@@ -33,7 +34,7 @@ from ay_platform_core.c8_llm.registry.embedding_service import (
     KeyManagementUnavailableError,
 )
 
-router = APIRouter(tags=["embedding-registry"])
+router = APIRouter(tags=["embedding-registry"], responses=ROLE_GATED_RESPONSES)
 
 _ROLES: tuple[str, ...] = ("platform_manager",)
 

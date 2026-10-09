@@ -1,6 +1,6 @@
 # =============================================================================
 # File: main.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/main.py
 # Description: FastAPI app factory for C2 Auth Service. Used by the
 #              production container (uvicorn ay_platform_core.c2_auth.main:app)
@@ -9,6 +9,11 @@
 #              are bootstrapped during the lifespan; in `local` auth mode an
 #              admin user is also bootstrapped from C2_LOCAL_ADMIN_*
 #              (R-100-118 v2).
+#              v6 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 #              v5: mounts the preferences_router at
 #              `/api/v1/users/me/preferences` (any authenticated user,
@@ -42,6 +47,7 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c2_auth.admin_router import router as admin_router
 from ay_platform_core.c2_auth.config import AuthConfig
 from ay_platform_core.c2_auth.db.repository import AuthRepository
@@ -461,7 +467,31 @@ def create_app(config: AuthConfig | None = None) -> FastAPI:
         if gitea is not None:
             await gitea.aclose()
 
-    app = FastAPI(title="C2 Auth Service", lifespan=lifespan)
+    app = FastAPI(title="C2 Auth Service", lifespan=lifespan, **docs_urls("c2"))
+    # TWO DIFFERENT FACTS, deliberately two lists. An earlier pass here
+    # merged them and the document came out wrong.
+    #
+    # `guard_exempt` — paths that need no INJECTED IDENTITY HEADERS.
+    # `unauthenticated` — paths that need no TOKEN AT ALL.
+    #
+    # `/auth/verify` is in the first and not the second: it is the
+    # forward-auth endpoint, so it is reached before any identity has been
+    # injected, and its whole job is to verify a bearer token. Documenting
+    # it as needing no token would describe the opposite of what it does.
+    # `/auth/login` and `/auth/token` take credentials rather than a token
+    # and still answer 401 when those are wrong, so they declare their own
+    # 401 with that meaning rather than inheriting "no verified identity".
+    guard_exempt = (
+        "/health",
+        "/auth/config",
+        "/auth/login",
+        "/auth/token",
+        "/auth/verify",
+        "/ux/config",
+    )
+    unauthenticated = frozenset(
+        {"/health", "/auth/config", "/auth/login", "/auth/token", "/ux/config"}
+    )
     # AuthGuardMiddleware (innermost, runs after TraceContext) — C2's
     # public auth surface (login/token/verify/config + the UX
     # bootstrap config) is exempt; every other path requires
@@ -469,14 +499,7 @@ def create_app(config: AuthConfig | None = None) -> FastAPI:
     app.add_middleware(
         AuthGuardMiddleware,
         component="c2_auth",
-        exempt_prefixes=[
-            "/health",
-            "/auth/config",
-            "/auth/login",
-            "/auth/token",
-            "/auth/verify",
-            "/ux/config",
-        ],
+        exempt_prefixes=list(guard_exempt),
     )
     app.add_middleware(TraceContextMiddleware, sample_rate=log_cfg.trace_sample_rate)
     app.include_router(router, prefix="/auth")
@@ -489,8 +512,61 @@ def create_app(config: AuthConfig | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c2_auth"}
 
+    describe_app(
+        app,
+        summary="Authentication, tenants, projects and the role model.",
+        description="""
+C2 is the platform's identity authority. It issues the bearer token every
+other component's requests are measured against, and it is the only
+component that can verify one — which is why its own token surface is
+reached without `forward-auth` (that would be circular) and authenticates
+itself in-process instead.
+
+### Getting a token
+
+`POST /auth/login` with a username and password returns an `access_token`.
+Send it as `Authorization: Bearer <token>` on every other call in this
+document and in every other component's.
+
+### The role model (`E-100-002`)
+
+Global roles — `platform_manager`, `admin` (alias `tenant_admin`), `user` —
+govern the PLATFORM: tenants, projects, members, quotas. Project roles —
+`project_owner`, `project_editor`, `project_viewer` — govern a project's
+CONTENT, and they are granted per project.
+
+The two do not substitute for one another. `admin` and `tenant_admin` are
+**content-blind** by design: they can create a project and manage its
+members, and they cannot read its requirements, sources or conversations
+without also holding a role on it. `platform_manager` is content-blind
+across every tenant. That separation is the point of the model, not an
+oversight — so expect a 403 on project content from an otherwise
+all-powerful administrator.
+
+### Routes reachable without a token
+
+`POST /auth/login`, `POST /auth/token`, `GET /auth/config`,
+`GET /ux/config`, `GET /health`. Everything else refuses with 401.
+
+`POST /auth/login` and `POST /auth/token` take credentials instead of a
+token, and answer 401 when they are wrong — a different 401 from the one
+every other route means. `GET /auth/verify` is the gateway's own
+forward-auth hop: it requires a bearer token like any other route, and is
+documented here because an operator may need to call it directly when
+diagnosing a 403.
+""",
+        public_paths=unauthenticated,
+    )
     return app
 
 

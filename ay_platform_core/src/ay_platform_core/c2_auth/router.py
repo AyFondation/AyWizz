@@ -1,10 +1,16 @@
 # =============================================================================
 # File: router.py
-# Version: 9
+# Version: 10
 # Path: ay_platform_core/src/ay_platform_core/c2_auth/router.py
 # Description: FastAPI APIRouter for C2 Auth Service. 12 endpoints covering
 #              authentication, token verification, logout, user management,
 #              and session administration.
+#              v10 (2026-10-09): `/login` and `/token` declare their OWN
+#              401. `api_docs.describe_app` adds a platform-wide "no
+#              verified identity" 401 to every authenticated operation and
+#              deliberately skips these two, because they take CREDENTIALS
+#              rather than a token — their 401 means a wrong username or
+#              password, which is a different statement.
 #
 #              v3 (2026-06-01, E-100-002 fix): `/verify` forward-auth now
 #              propagates the caller's PROJECT-SCOPED role for the project
@@ -50,6 +56,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -72,6 +79,17 @@ from ay_platform_core.c2_auth.models import (
 from ay_platform_core.c2_auth.service import AuthService, get_service
 
 router = APIRouter(tags=["auth"])
+
+#: The 401 of the two credential-taking routes. Distinct from the
+#: platform-wide "no verified identity" 401 that `api_docs.describe_app`
+#: adds everywhere else: here a token is not expected, credentials are,
+#: and this is what a wrong username or password answers.
+_BAD_CREDENTIALS: dict[str, Any] = {
+    "description": "Unknown username, wrong password, or a disabled account.",
+    "content": {
+        "application/json": {"schema": {"$ref": "#/components/schemas/ErrorBody"}}
+    },
+}
 _bearer = HTTPBearer()
 
 
@@ -158,7 +176,15 @@ async def head_config(
     return service.config_response()
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+    # Declared per-route because this 401 means something else than the
+    # platform-wide one: these two routes take CREDENTIALS, not a token,
+    # so `describe_app` deliberately exempts them from the "no verified
+    # identity" 401 and they state their own.
+    responses={401: _BAD_CREDENTIALS},
+)
 async def token_grant(
     form_data: OAuth2PasswordRequestForm = Depends(),
     service: AuthService = Depends(get_service),
@@ -168,7 +194,9 @@ async def token_grant(
     return await service.issue_token(request)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login", response_model=TokenResponse, responses={401: _BAD_CREDENTIALS}
+)
 async def login(
     body: LoginRequest,
     service: AuthService = Depends(get_service),

@@ -21,6 +21,7 @@ from fastapi import (
     status,
 )
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.registry.probe_models import (
     ModelProbeResult,
     ProviderProbeResult,
@@ -38,7 +39,7 @@ from ay_platform_core.c8_llm.registry.provider_service import (
     ProviderNotFoundError,
 )
 
-router = APIRouter(tags=["llm-provider"])
+router = APIRouter(tags=["llm-provider"], responses=ROLE_GATED_RESPONSES)
 
 _PROVIDER_ROLES: tuple[str, ...] = ("platform_manager",)
 

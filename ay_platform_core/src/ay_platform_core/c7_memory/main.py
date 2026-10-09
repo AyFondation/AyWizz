@@ -1,11 +1,16 @@
 # =============================================================================
 # File: main.py
-# Version: 5
+# Version: 6
 # Path: ay_platform_core/src/ay_platform_core/c7_memory/main.py
 # Description: FastAPI app factory for C7 Memory Service. v3 wires
 #              `MemorySourceStorage` (MinIO blob storage for uploaded
 #              source files) — required by the multipart upload
 #              endpoint added in Phase B of the v1 functional plan.
+#              v6 (2026-10-09): `describe_app` enriches the
+#              generated OpenAPI document — app description + real
+#              version, the gateway-injected identity headers hidden
+#              (the document was advertising them as caller-supplied),
+#              and the derivable 401 / 404 responses declared.
 #
 # @relation implements:R-100-114
 # =============================================================================
@@ -19,6 +24,7 @@ from arango import ArangoClient  # type: ignore[attr-defined]
 from fastapi import FastAPI
 from minio import Minio
 
+from ay_platform_core.api_docs import describe_app, docs_urls
 from ay_platform_core.c7_memory.c12_client import C12WebhookClient
 from ay_platform_core.c7_memory.config import MemoryConfig
 from ay_platform_core.c7_memory.db.repository import MemoryRepository
@@ -132,7 +138,7 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
         await c12_client.aclose()
         await llm_resolver.aclose()
 
-    app = FastAPI(title="C7 Memory Service", lifespan=lifespan)
+    app = FastAPI(title="C7 Memory Service", lifespan=lifespan, **docs_urls("c7"))
     app.add_middleware(
         AuthGuardMiddleware,
         component="c7_memory",
@@ -145,7 +151,41 @@ def create_app(config: MemoryConfig | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
+        """Liveness probe for the kubelet (R-100-114).
+
+        Answers `ok` whenever the process serves requests, and
+        deliberately checks NO dependency: a probe that fails because
+        ArangoDB is slow takes the pod out of service for a condition
+        restarting it cannot fix. Reachable without a token — the
+        kubelet has none.
+        """
         return {"status": "ok", "component": "c7_memory"}
+
+    describe_app(
+        app,
+        summary="Sources, chunks, embeddings, the knowledge graph, and retrieval.",
+        description="""
+C7 owns a project's retrievable material. An uploaded source is stored,
+extracted, chunked, embedded and indexed; entities and relations are
+extracted into a knowledge graph alongside. Retrieval fuses a dense vector
+arm with a BM25 lexical arm and expands the result through the graph.
+
+### Upload is asynchronous
+
+`POST /sources/upload` takes the bytes and answers 202 with the source in
+`pending`. Extraction and indexing happen out of band; poll the source to
+watch `parse_status` move to `indexed`, or to `failed` with the reason
+recorded on the row. A 202 means the hand-off succeeded, not that the
+document is searchable yet.
+
+### Retrieval is not a database query
+
+Results are ranked, not filtered: a chunk's score combines cosine
+similarity, lexical rank and a boost for graph adjacency to a stronger hit.
+Asking the same question twice over an unchanged corpus returns the same
+ranking, but adding a source can reorder everything.
+""",
+    )
 
     return app
 

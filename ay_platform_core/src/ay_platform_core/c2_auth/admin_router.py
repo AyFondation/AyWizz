@@ -26,6 +26,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c2_auth.models import (
     JWTClaims,
     ProjectList,
@@ -43,7 +44,7 @@ from ay_platform_core.c2_auth.models import (
 )
 from ay_platform_core.c2_auth.service import AuthService, get_service
 
-router = APIRouter(tags=["admin"])
+router = APIRouter(tags=["admin"], responses=ROLE_GATED_RESPONSES)
 _bearer = HTTPBearer()
 
 

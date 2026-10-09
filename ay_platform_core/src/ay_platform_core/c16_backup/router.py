@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c16_backup.models import (
     BackupRecord,
     RestoreReport,
@@ -35,7 +36,7 @@ from ay_platform_core.c16_backup.service import BackupService, RestoreValidation
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-router = APIRouter(tags=["backups"])
+router = APIRouter(tags=["backups"], responses=ROLE_GATED_RESPONSES)
 
 # Roles allowed on a backup operation. `project_owner` is resolved by C2 for the
 # path's {project_id}; `tenant_admin`/`admin` + `platform_manager` are global.

@@ -78,6 +78,12 @@ async def list_plugins(
     _user: str = Depends(_require_actor),
     service: ValidationService = Depends(get_service),
 ) -> list[PluginDescriptor]:
+    """Every installed validation plugin, with the checks it registers.
+
+    Read this first: a plugin's `domain` is what `POST .../runs`
+    accepts, and its `checks` are the `check_id` values a `Finding`
+    will cite back at you.
+    """
     return service.list_plugins()
 
 
@@ -86,6 +92,12 @@ async def list_domains(
     _user: str = Depends(_require_actor),
     service: ValidationService = Depends(get_service),
 ) -> DomainList:
+    """The domains that have a plugin installed.
+
+    The same information as `GET /plugins` reduced to the one field a
+    caller needs to trigger a run, for a client that only wants to
+    populate a selector.
+    """
     return DomainList(domains=service.list_domains())
 
 
@@ -168,6 +180,12 @@ async def get_run(
     _user: str = Depends(_require_actor),
     service: ValidationService = Depends(get_service),
 ) -> ValidationRun:
+    """One run's status and aggregate result.
+
+    Poll this until `status` leaves `pending` and `running`. Findings
+    are only complete once it has: asking for them earlier returns what
+    has been recorded so far, which is not the same as none.
+    """
     return await service.get_run(run_id)
 
 
@@ -182,6 +200,14 @@ async def list_findings(
     _user: str = Depends(_require_actor),
     service: ValidationService = Depends(get_service),
 ) -> FindingPage:
+    """One run's findings, paginated.
+
+    `total` counts the whole run rather than this page, so a client
+    knows whether to ask again. `limit` is capped at 1000 and a value
+    outside [1, 1000] is refused with 400 rather than clamped — a
+    silently clamped page makes a caller believe it has seen
+    everything.
+    """
     if limit < 1 or limit > 1000:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -203,6 +229,11 @@ async def get_finding(
     _user: str = Depends(_require_actor),
     service: ValidationService = Depends(get_service),
 ) -> Finding:
+    """One finding, by id.
+
+    For following a finding cited elsewhere — a run report, a trace, an
+    MCP tool result — without paging through its run.
+    """
     return await service.get_finding(finding_id)
 
 
@@ -218,5 +249,11 @@ async def get_finding(
 async def health(
     service: ValidationService = Depends(get_service),
 ) -> dict[str, str]:
+    """Liveness. Answers `ok` whenever the process serves requests.
+
+    It does NOT check the plugin registry or the store: a readiness
+    probe that fails on a dependency takes the pod out of service for a
+    condition restarting it will not fix.
+    """
     _ = service
     return {"status": "ok"}

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.registry.embedding_catalog_models import (
     EmbeddingCatalogListResponse,
     EmbeddingCatalogModelPublic,
@@ -30,7 +31,7 @@ from ay_platform_core.c8_llm.registry.embedding_models import (
     EmbeddingModelListResponse,
 )
 
-router = APIRouter(tags=["embedding-catalog"])
+router = APIRouter(tags=["embedding-catalog"], responses=ROLE_GATED_RESPONSES)
 
 _ROLES: tuple[str, ...] = ("admin", "tenant_admin")
 

@@ -24,6 +24,7 @@ from fastapi import (
     status,
 )
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.registry.models import (
     LLMModelUpsert,
     LLMRegistryListResponse,
@@ -34,7 +35,7 @@ from ay_platform_core.c8_llm.registry.service import (
     ModelNotFoundError,
 )
 
-router = APIRouter(tags=["llm-registry"])
+router = APIRouter(tags=["llm-registry"], responses=ROLE_GATED_RESPONSES)
 
 _REGISTRY_ROLES: tuple[str, ...] = ("platform_manager",)
 
