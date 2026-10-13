@@ -32,6 +32,7 @@ from fastapi import (
     status,
 )
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c2_auth.forward_auth import (
     require_project_content_role,
 )
@@ -679,6 +680,7 @@ async def delete_source(
     "/api/v1/memory/entities/embed",
     response_model=ChunkPublic,
     status_code=status.HTTP_201_CREATED,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def embed_entity(
     payload: EntityEmbedRequest,

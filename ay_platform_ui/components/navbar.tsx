@@ -1,11 +1,16 @@
 // =============================================================================
 // File: navbar.tsx
-// Version: 9
+// Version: 10
 // Path: ay_platform_ui/components/navbar.tsx
 // Description: Top header rendered on every protected page. Brand
 //              (left) is read from the runtime config ; user menu
 //              (right) is read from the auth provider's decoded JWT
 //              claims. Logout button clears auth + redirects to login.
+//
+//              v10 (2026-10-12) : adds the API link. The generated
+//              documentation is otherwise unreachable by clicking —
+//              `/docs/<service>` sits behind `forward-auth-c2`, which
+//              reads a bearer HEADER, and a navigation carries none.
 //
 //              v8 (E-100-002 v7) : the tenant operator `admin`
 //              (= tenant_admin) is now a content-blind, tenant-scoped
@@ -263,6 +268,24 @@ export function Navbar() {
             <BuildStamp />
           </div>
           <QuotaIndicator />
+          {/* The generated API documentation. Discoverable from the bar
+           *  because it is otherwise unreachable by clicking: the
+           *  per-component `/docs/<service>` pages sit behind
+           *  `forward-auth-c2`, which reads a bearer HEADER, and a browser
+           *  navigation carries none. This link goes to the UI page that
+           *  fetches the spec WITH the token. */}
+          <Link
+            href="/docs"
+            className={[
+              "hidden rounded-md border px-3 py-1.5 text-sm font-medium sm:block",
+              pathname?.startsWith("/docs")
+                ? "border-neutral-900 bg-neutral-900 text-white"
+                : "border-neutral-300 text-neutral-700 hover:bg-neutral-50",
+            ].join(" ")}
+            data-testid="navbar-link-docs"
+          >
+            API
+          </Link>
           <Link
             href="/preferences"
             className={[

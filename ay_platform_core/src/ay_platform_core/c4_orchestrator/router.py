@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c4_orchestrator.models import (
     RunCreate,
     RunFeedback,
@@ -101,6 +102,14 @@ async def create_run(
     tenant_id: str = Depends(_require_tenant),
     service: OrchestratorService = Depends(get_service),
 ) -> RunPublic:
+    """Start a pipeline run on a project.
+
+    The run moves through brainstorm → spec → plan → generate → dual
+    review with a HARD GATE between phases. It is asynchronous: this
+    returns as soon as the run is recorded, and the work happens behind
+    it. Poll `GET /runs/{run_id}`, or follow `/runs/{run_id}/events` for
+    the live trace.
+    """
     return await service.start_run(payload, tenant_id=tenant_id, user_id=user_id)
 
 
@@ -113,6 +122,14 @@ async def get_run(
     _user: str = Depends(_require_actor),
     service: OrchestratorService = Depends(get_service),
 ) -> RunPublic:
+    """One run's state and the phase it stands at.
+
+    `blocked` is a NORMAL terminal state, not a failure: it means the
+    pipeline reached a gate and needs a decision it is not entitled to
+    make. Answer it with `POST /runs/{run_id}/feedback`, then
+    `/resume`. Treating `blocked` as an error is the most common
+    misreading of this API.
+    """
     return await service.get_run(run_id)
 
 
@@ -126,12 +143,20 @@ async def submit_feedback(
     _user: str = Depends(_require_actor),
     service: OrchestratorService = Depends(get_service),
 ) -> RunPublic:
+    """Give a blocked run the decision it is waiting for.
+
+    This is the human half of human-in-the-loop: the run stopped at a
+    phase boundary on purpose, and the feedback is what the next phase
+    is allowed to act on. It is recorded on the run, so the decision
+    stays auditable alongside what it produced.
+    """
     return await service.handle_feedback(run_id, payload)
 
 
 @router.post(
     "/api/v1/orchestrator/runs/{run_id}/resume",
     response_model=RunPublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def resume_run(
     run_id: str,
@@ -140,7 +165,17 @@ async def resume_run(
     x_user_roles: str | None = Header(default=None),
     service: OrchestratorService = Depends(get_service),
 ) -> RunPublic:
-    # Content op on a project run — project_owner (admin is content-blind, v7).
+    """Resume a blocked or failed run.
+
+    `strategy` chooses what resuming MEANS: `retry` re-runs the phase
+    that stopped, `skip-phase` accepts its output as-is and advances, and
+    `abort` closes the run. They are not interchangeable — skipping a
+    phase means its gate was never satisfied, which the run records.
+
+    Requires `project_owner`. Deliberately NOT open to a global `admin`:
+    resuming spends LLM budget and alters project content, and both are
+    content decisions (`E-100-002` v7 makes `admin` content-blind).
+    """
     _require_role(x_user_roles, required=("project_owner",))
     return await service.resume_run(run_id, payload)
 

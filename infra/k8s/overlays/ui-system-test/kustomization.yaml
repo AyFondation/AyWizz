@@ -1,0 +1,71 @@
+# =============================================================================
+# File: kustomization.yaml
+# Version: 1
+# Path: infra/k8s/overlays/ui-system-test/kustomization.yaml
+# Description: Overlay for the UI system tier — the Playwright specs in
+#              `ay_platform_ui/tests/system/` driving a real browser against
+#              a real kind cluster.
+#
+#              WHY A SEPARATE OVERLAY AND NOT THREE FLIPPED FLAGS.
+#              `overlays/system-test` sets `C2_UX_DEV_MODE_ENABLED=false`
+#              and `C2_DEMO_SEED_ENABLED=false` deliberately, and that is
+#              exactly why the Playwright specs could not run: with no
+#              seeded accounts `source-upload.spec.ts` gets 403, and with
+#              dev mode off `/ux/config` returns no `dev_credentials`, which
+#              is the panel `demo-seed-login.spec.ts` asserts.
+#
+#              Flipping them in place would have published demo credentials
+#              from the overlay the PYTHON `system_k8s` tier uses, i.e. from
+#              the artifact whose value is being production-shaped. Layering
+#              instead keeps each overlay honest about what it is for: the
+#              base stays closed, and the three flags that open a stack up
+#              live in exactly one file, named for the tier that needs them.
+#              Kustomize composes overlays for precisely this.
+#
+#              NO NEW POD, NO NEW COMPONENT (DV-03): this adds configuration
+#              to the same manifests, nothing else.
+#
+#              WHAT IT OPENS, and the bound on it: `C2_DEMO_SEED_ENABLED`
+#              provisions one tenant, four users (super-root /
+#              tenant-admin / project-editor / project-viewer) and two
+#              projects with their grants, idempotently, in C2's lifespan.
+#              `C2_UX_DEV_MODE_ENABLED` makes `/ux/config` return those
+#              credentials in plaintext so the login page can auto-fill
+#              them. Both are gated on `C2_AUTH_MODE=local`, the passwords
+#              are well-known literals in `system-test`, and the cluster
+#              this applies to is an ephemeral kind cluster torn down at
+#              the end of the run. A production overlay sets neither.
+#
+# Usage:
+#   ay_platform_core/scripts/run_k8s_system_tests.sh --ui
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aywizz
+
+resources:
+  - ../system-test
+
+# `behavior: merge` so only these three keys change and every other
+# literal of `../system-test` is inherited — a `create` here would
+# silently replace the whole ConfigMap and drop ~120 settings.
+configMapGenerator:
+  - name: aywizz-config
+    behavior: merge
+    literals:
+      # The demo seed: C2's lifespan provisions the four accounts the
+      # Playwright specs log in as. Without it `source-upload.spec.ts`
+      # authenticates as nobody and the upload answers 403.
+      - C2_DEMO_SEED_ENABLED=true
+      # Publishes those accounts through `/ux/config` so the login page
+      # renders its dev-credentials panel — the thing
+      # `demo-seed-login.spec.ts` asserts, and the reason
+      # `_global-setup.ts` warns when it is absent.
+      - C2_UX_DEV_MODE_ENABLED=true
+      # The upload spec drives a project-scoped write, so the UI needs the
+      # file-download affordance its page links to. Already true in
+      # `system-test`; restated here because the spec depends on it and a
+      # silent change upstream would be hard to trace from a browser
+      # failure.
+      - C2_UX_FEATURE_FILE_DOWNLOAD_ENABLED=true

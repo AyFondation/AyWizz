@@ -1,6 +1,6 @@
 // =============================================================================
 // File: source-upload.spec.ts
-// Version: 3
+// Version: 4
 // Path: ay_platform_ui/tests/system/source-upload.spec.ts
 //
 // v3 (2026-06-01, R-100-081 v3): the upload is now a multipart POST to C7
@@ -45,24 +45,47 @@
 
 import { expect, test } from "@playwright/test";
 
-// Credentials + project provisioned by `e2e_stack.sh` → `seed_e2e.py`
-// (ADMIN_USER=alice / seed-password, global `admin`; DEMO_PROJECT=demo).
-const ADMIN_USER = "alice";
-const ADMIN_PASSWORD = "seed-password";
-const DEMO_PROJECT = "demo";
+// -----------------------------------------------------------------------------
+// WHO UPLOADS, and why it is not an admin.
+//
+// v4 (2026-10-12): this spec authenticated as `alice` — a GLOBAL `admin` —
+// and wrote to project `demo`. Run against a real K8s stack it answered
+// **403 "requires a project role on this project"**, and that is the
+// platform working as designed, not a defect: E-100-002 v7 makes `admin`
+// and `tenant_admin` CONTENT-BLIND, and v8 made the gateway enforce it
+// (`_role_gated_project_id` at `/auth/verify`). A test that uses a global
+// administrator to write project content asserts the opposite of the rule
+// the platform exists to keep.
+//
+// It was also written for a DIFFERENT seeder: `alice`/`seed-password` and
+// project `demo` come from `seed_e2e.py` (the compose stack), while a K8s
+// stack is provisioned by C2's own `_ensure_demo_seed` — which grants
+// `project_editor` to `project-editor` on `project-test` and
+// `project-docgen`, and grants `alice` nothing.
+//
+// So: the demo-seed editor, on a demo-seed project. That identity holds a
+// real project role, which is what both the gateway gate and C7's own
+// `project_editor` requirement ask for — and it is the same account the
+// four `demo-seed-login` specs use, so one precondition covers the tier.
+// Overridable by env for a stack seeded differently, with no edit needed.
+// -----------------------------------------------------------------------------
+const UPLOAD_USER = process.env.SYSTEM_UPLOAD_USER ?? "project-editor";
+const UPLOAD_PASSWORD = process.env.SYSTEM_UPLOAD_PASSWORD ?? "dev-editor";
+const UPLOAD_PROJECT = process.env.SYSTEM_UPLOAD_PROJECT ?? "project-test";
 
 test.describe("Source upload pipeline (real stack, D-020)", () => {
   test("upload webhook is routed and accepts POST (regression: the 405 bug)", async ({
     request,
   }) => {
-    // 1. Real login against C2 (no MSW). seed_e2e provisions `alice`.
+    // 1. Real login against C2 (no MSW), as the demo-seed editor.
     const loginResp = await request.post("/auth/login", {
-      data: { username: ADMIN_USER, password: ADMIN_PASSWORD },
+      data: { username: UPLOAD_USER, password: UPLOAD_PASSWORD },
     });
     expect(
       loginResp.ok(),
-      `login failed (${loginResp.status()}) — is the stack up + seeded? ` +
-        `run: ay_platform_core/scripts/e2e_stack.sh full`,
+      `login failed (${loginResp.status()}) for ${UPLOAD_USER} — is the stack ` +
+        `demo-seeded? K8s: infra/k8s/run.sh dev ; compose: ` +
+        `ay_platform_core/scripts/e2e_stack.sh full`,
     ).toBeTruthy();
     const { access_token: token } = (await loginResp.json()) as { access_token: string };
     expect(token, "no access_token in /auth/login response").toBeTruthy();
@@ -72,7 +95,7 @@ test.describe("Source upload pipeline (real stack, D-020)", () => {
     //    it stores the raw bytes + triggers the C12 workflow async, returns
     //    202). The tenant is taken server-side from the forward-auth header.
     const sourceId = `sys-upload-${Date.now()}`;
-    const resp = await request.post(`/api/v1/memory/projects/${DEMO_PROJECT}/sources/upload`, {
+    const resp = await request.post(`/api/v1/memory/projects/${UPLOAD_PROJECT}/sources/upload`, {
       headers: { Authorization: `Bearer ${token}` },
       multipart: {
         file: {

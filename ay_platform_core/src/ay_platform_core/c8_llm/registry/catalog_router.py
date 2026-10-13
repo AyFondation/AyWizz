@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.registry.catalog_models import (
     ProjectModelsResponse,
     ProjectModelsUpdate,
@@ -73,7 +74,11 @@ def get_catalog_service(request: Request) -> TenantCatalogService:
     return request.app.state.catalog_service  # type: ignore[no-any-return]
 
 
-@router.get("/api/v1/llm/catalog", response_model=TenantCatalogListResponse)
+@router.get(
+    "/api/v1/llm/catalog",
+    response_model=TenantCatalogListResponse,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def list_catalog(
     _user: str = Depends(_require_actor),
     tenant_id: str = Depends(_require_tenant),
@@ -85,7 +90,11 @@ async def list_catalog(
     return TenantCatalogListResponse(models=await service.list_catalog(tenant_id))
 
 
-@router.get("/api/v1/llm/catalog/available", response_model=LLMRegistryListResponse)
+@router.get(
+    "/api/v1/llm/catalog/available",
+    response_model=LLMRegistryListResponse,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def list_available_models(
     _user: str = Depends(_require_actor),
     tenant_id: str = Depends(_require_tenant),
@@ -133,7 +142,8 @@ async def resolve_model(
 
 
 @router.put(
-    "/api/v1/llm/catalog/{model_id}", response_model=TenantCatalogModelPublic
+    "/api/v1/llm/catalog/{model_id}", response_model=TenantCatalogModelPublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def upsert_catalog_model(
     model_id: str,
@@ -159,6 +169,7 @@ async def upsert_catalog_model(
     "/api/v1/llm/catalog/{model_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def remove_catalog_model(
     model_id: str,

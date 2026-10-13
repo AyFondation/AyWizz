@@ -80,5 +80,12 @@ async def list_tools(
 async def health(
     server: MCPServer = Depends(get_server),
 ) -> dict[str, str]:
+    """Liveness of the MCP surface.
+
+    Distinct from the component's own `/health`: this one sits behind
+    the gateway, so a 200 here also proves the route is published and
+    the forward-auth hop works — which is what an agent integrator
+    needs to know before debugging a tool call.
+    """
     _ = server
     return {"status": "ok"}

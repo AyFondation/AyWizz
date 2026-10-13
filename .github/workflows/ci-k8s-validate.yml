@@ -30,6 +30,14 @@ on:
       - "ay_platform_core/scripts/run_k8s_system_tests.sh"
       - "ay_platform_core/tests/system/k8s/**"
       - ".github/workflows/ci-k8s-validate.yml"
+      # L5 drives a BROWSER against the deployed UI, so the UI's own
+      # sources and its system specs must trigger this workflow. Their
+      # absence would have reproduced, exactly, the `.dockerignore` defect
+      # recorded below: the job that would catch the regression does not
+      # run, because the file that caused it is not under `infra/`.
+      - "ay_platform_ui/**"
+      - "ay_platform_core/scripts/run_ui_system_tests.sh"
+      - "infra/k8s/overlays/ui-system-test/**"
       # `.dockerignore` decides what the api image CONTAINS. Its absence
       # from this filter is how `**/coverage` shipped: the pattern was
       # written for vitest's report directory, it also matched the Python
@@ -52,6 +60,14 @@ on:
       - "ay_platform_core/scripts/run_k8s_system_tests.sh"
       - "ay_platform_core/tests/system/k8s/**"
       - ".github/workflows/ci-k8s-validate.yml"
+      # L5 drives a BROWSER against the deployed UI, so the UI's own
+      # sources and its system specs must trigger this workflow. Their
+      # absence would have reproduced, exactly, the `.dockerignore` defect
+      # recorded below: the job that would catch the regression does not
+      # run, because the file that caused it is not under `infra/`.
+      - "ay_platform_ui/**"
+      - "ay_platform_core/scripts/run_ui_system_tests.sh"
+      - "infra/k8s/overlays/ui-system-test/**"
       # `.dockerignore` decides what the api image CONTAINS. Its absence
       # from this filter is how `**/coverage` shipped: the pattern was
       # written for vitest's report directory, it also matched the Python
@@ -142,3 +158,69 @@ jobs:
 
       - name: Run L4 system tests
         run: bash ay_platform_core/scripts/run_k8s_system_tests.sh
+
+  # ---------------------------------------------------------------------------
+  # L5 — the UI system tier: a real browser against the real deployed edge.
+  #
+  # WHY IT IS A JOB AND NOT A STEP OF L4. It needs a DIFFERENT overlay
+  # (`ui-system-test`, which enables the demo seed — without it every
+  # project-scoped write answers 403) and a browser, and it must not make
+  # L4's stack carry dev affordances. Separate jobs keep each tier's stack
+  # honest about what it is.
+  #
+  # WHY IT IS HERE AT ALL. `ay_platform_ui/tests/system/` held five specs
+  # that NOTHING executed — `npm run test:system` and
+  # `playwright.system.config.ts` both existed, the specs listed correctly,
+  # and no script or workflow called them. It is the only tier that drives a
+  # browser through the deployed platform, which is the class
+  # `source-upload.spec.ts` exists to guard: a mocked test encodes the same
+  # wrong contract as the code it tests, so it cannot catch front/back drift.
+  # ---------------------------------------------------------------------------
+  l5-ui-system-tests:
+    name: L5 — Playwright system tier (real browser, live K8s)
+    runs-on: ubuntu-latest
+    needs: l1-static-lint
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.24.0
+
+      - name: Set up Node.js 25
+        uses: actions/setup-node@v5
+        with:
+          node-version: "25"
+          cache: "npm"
+          cache-dependency-path: ay_platform_ui/package-lock.json
+
+      - name: Install UI dependencies
+        run: npm ci
+        working-directory: ay_platform_ui
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('ay_platform_ui/package-lock.json') }}
+
+      # `--with-deps` HERE and not in the wrapper: the runner is root and
+      # needs the OS libraries, while a devcontainer user cannot apt-get.
+      # The wrapper then runs with `--skip-browser-install`.
+      - name: Install Playwright browser + OS deps
+        run: npx playwright install --with-deps chromium
+        working-directory: ay_platform_ui
+
+      - name: Run L5 UI system tests
+        run: bash ay_platform_core/scripts/run_k8s_system_tests.sh --ui --skip-browser-install
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-system-report-${{ github.run_id }}
+          path: ay_platform_ui/playwright-report/
+          retention-days: 14

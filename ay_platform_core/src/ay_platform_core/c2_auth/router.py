@@ -62,6 +62,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c2_auth.forward_auth import serialize_project_scopes
 from ay_platform_core.c2_auth.models import (
     AuthConfigResponse,
@@ -469,7 +470,12 @@ async def logout(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/users", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/users",
+    response_model=UserPublic,
+    status_code=status.HTTP_201_CREATED,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def create_user(
     body: UserCreateRequest,
     claims: JWTClaims = Depends(_require_admin_or_tenant_admin),
@@ -482,7 +488,7 @@ async def create_user(
     return await service.create_user(scoped)
 
 
-@router.get("/users/{user_id}", response_model=UserPublic)
+@router.get("/users/{user_id}", response_model=UserPublic, responses=ROLE_GATED_RESPONSES)
 async def get_user(
     user_id: str,
     _claims: JWTClaims = Depends(_require_same_tenant_user),
@@ -492,7 +498,7 @@ async def get_user(
     return await service.get_user(user_id)
 
 
-@router.patch("/users/{user_id}", response_model=UserPublic)
+@router.patch("/users/{user_id}", response_model=UserPublic, responses=ROLE_GATED_RESPONSES)
 async def update_user(
     user_id: str,
     body: UserUpdateRequest,
@@ -503,7 +509,11 @@ async def update_user(
     return await service.update_user(user_id, body)
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def disable_user(
     user_id: str,
     _claims: JWTClaims = Depends(_require_same_tenant_user),
@@ -513,7 +523,11 @@ async def disable_user(
     await service.disable_user(user_id)
 
 
-@router.post("/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/users/{user_id}/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def reset_password(
     user_id: str,
     body: ResetPasswordRequest,
@@ -530,7 +544,7 @@ async def reset_password(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/sessions", response_model=list[SessionInfo])
+@router.get("/sessions", response_model=list[SessionInfo], responses=ROLE_GATED_RESPONSES)
 async def list_sessions(
     _claims: JWTClaims = Depends(_require_admin),
     service: AuthService = Depends(get_service),
@@ -539,7 +553,11 @@ async def list_sessions(
     return await service.list_sessions()
 
 
-@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def revoke_session(
     session_id: str,
     _claims: JWTClaims = Depends(_require_admin),

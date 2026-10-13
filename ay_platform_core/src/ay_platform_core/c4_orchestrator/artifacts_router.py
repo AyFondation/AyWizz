@@ -124,6 +124,11 @@ async def list_artifact_runs(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> ArtifactRunList:
+    """Runs that produced artifacts in this project, newest first.
+
+    The entry point for browsing what the pipeline generated: pick a run
+    here, then read its tree. A run with no artifacts does not appear.
+    """
     _reject_platform_manager(x_user_roles)
     runs = await service.list_runs(
         project_id=project_id, tenant_id=tenant_id,
@@ -143,6 +148,12 @@ async def get_artifact_tree(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> ArtifactTree:
+    """The file tree one run produced.
+
+    Metadata only — paths, sizes, kinds. Fetch a file's bytes with
+    `/runs/{run_id}/blob`, which is a separate route because a tree
+    walk should not carry megabytes a caller did not ask for.
+    """
     _reject_platform_manager(x_user_roles)
     return await service.get_tree(
         run_id=run_id, project_id=project_id, tenant_id=tenant_id,

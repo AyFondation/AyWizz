@@ -57,13 +57,36 @@ class MessageRole(StrEnum):
 class ConversationPublic(BaseModel):
     """Public view of a conversation — no internal metadata."""
 
-    id: UUID
-    owner_id: str
-    project_id: str | None = None
-    title: str
-    created_at: datetime
-    updated_at: datetime
-    message_count: int = 0
+    id: UUID = Field(description="Stable identifier of this conversation.")
+    owner_id: str = Field(
+        description=(
+            "The user who owns it. A conversation is PRIVATE to its owner: "
+            "there is no sharing parameter, and another member of the same "
+            "project cannot read it."
+        )
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "The project this conversation retrieves from. Null means a "
+            "project-less chat — the LLM answers with no RAG context, "
+            "because retrieval is scoped to a project and there is nothing "
+            "to scope it to."
+        ),
+    )
+    title: str = Field(
+        description=(
+            "Display title. Defaults to a placeholder on creation and is "
+            "replaced once the first exchange gives it a subject."
+        )
+    )
+    created_at: datetime = Field(description="When it was opened (UTC).")
+    updated_at: datetime = Field(
+        description="When a message was last appended (UTC) — the sort key a listing uses."
+    )
+    message_count: int = Field(
+        default=0, description="Messages in it, user and assistant turns together."
+    )
 
 
 class InlineEvent(BaseModel):
@@ -132,8 +155,16 @@ class PromptReferenceRange(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    start_line: int = Field(ge=1)
-    end_line: int = Field(ge=1)
+    start_line: int = Field(
+        ge=1, description="First line of the excerpt, 1-indexed and INCLUSIVE."
+    )
+    end_line: int = Field(
+        ge=1,
+        description=(
+            "Last line, 1-indexed and INCLUSIVE — so a single-line excerpt "
+            "has `start_line == end_line`, not `end_line = start + 1`."
+        ),
+    )
 
 
 class PromptReference(BaseModel):
@@ -145,20 +176,47 @@ class PromptReference(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["file", "excerpt"]
-    source: Literal["live-docs", "source"]
-    path: str = Field(min_length=1, max_length=512)
-    range: PromptReferenceRange | None = None
+    kind: Literal["file", "excerpt"] = Field(
+        description=(
+            "`file` attaches the whole document; `excerpt` attaches only "
+            "`range`. The distinction is a cost decision as much as a "
+            "precision one — a whole file spends context the answer may not "
+            "need."
+        )
+    )
+    source: Literal["live-docs", "source"] = Field(
+        description=(
+            "Which tree `path` is resolved against: `live-docs` for the "
+            "project's authored documents, `source` for its generated code. "
+            "The same path can exist in both."
+        )
+    )
+    path: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Path within that tree, relative to the project root.",
+    )
+    range: PromptReferenceRange | None = Field(
+        default=None,
+        description="Required for `excerpt`, ignored for `file`.",
+    )
 
 
 class MessagePublic(BaseModel):
     """Public view of a single message."""
 
-    id: UUID
-    conversation_id: UUID
-    role: MessageRole
-    content: str
-    timestamp: datetime
+    id: UUID = Field(description="Stable identifier of this message.")
+    conversation_id: UUID = Field(description="The conversation it belongs to.")
+    role: MessageRole = Field(
+        description="Who produced it — the user, or the assistant."
+    )
+    content: str = Field(
+        description=(
+            "The text. For an assistant turn this is the final answer, "
+            "already assembled from the token deltas the SSE stream emitted."
+        )
+    )
+    timestamp: datetime = Field(description="When it was recorded (UTC).")
     events: list[InlineEvent] | None = Field(
         default=None,
         description="Unified inline-activity ledger captured during "
@@ -201,13 +259,32 @@ class ConversationInternal(BaseModel):
 
 
 class ConversationCreate(BaseModel):
-    title: str = Field(default="New Conversation", max_length=255)
-    project_id: str | None = None
+    title: str = Field(
+        default="New Conversation",
+        max_length=255,
+        description="Display title. The default is a placeholder meant to be replaced.",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "The project to retrieve from. Omit for a chat with no RAG "
+            "context. The caller must hold a role on it."
+        ),
+    )
 
 
 class ConversationUpdate(BaseModel):
-    title: str | None = Field(default=None, max_length=255)
-    project_id: str | None = None
+    title: str | None = Field(
+        default=None, max_length=255, description="New title. Omit to leave it."
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "Re-point the conversation at another project. Omit to leave it. "
+            "Past turns are NOT re-retrieved — only subsequent ones use the "
+            "new scope."
+        ),
+    )
 
 
 class MessageRequest(BaseModel):
@@ -218,9 +295,25 @@ class MessageRequest(BaseModel):
     context block. Either field is optional ; missing/empty values
     are silently dropped from the assembled prompt."""
 
-    content: str = Field(min_length=1)
-    user_prompt: str | None = Field(default=None, max_length=4000)
-    project_prompt: str | None = Field(default=None, max_length=4000)
+    content: str = Field(min_length=1, description="The user's message.")
+    user_prompt: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "The caller's own system-prompt addendum, forwarded from their "
+            "stored preference. Sent per message rather than read "
+            "server-side so a client can override it for one turn."
+        ),
+    )
+    project_prompt: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "The project's system-prompt addendum, same mechanism. Both are "
+            "prepended AHEAD of the retrieved context block, so they frame "
+            "the answer rather than compete with the evidence."
+        ),
+    )
     # Tranche B (R-200-180) — up to 10 file/excerpt references the
     # operator pinned to this turn. Server-resolved and inlined as a
     # separate system block before the user message. Empty list and
@@ -241,16 +334,26 @@ class MessageRequest(BaseModel):
 
 
 class ConversationListResponse(BaseModel):
-    conversations: list[ConversationPublic]
+    conversations: list[ConversationPublic] = Field(
+        description="The caller's own conversations, most recently updated first."
+    )
 
 
 class ConversationResponse(BaseModel):
-    conversation: ConversationPublic
+    conversation: ConversationPublic = Field(
+        description=(
+            "Wrapped rather than returned bare so the envelope can gain a\n"
+            "field without breaking every client — the same reason\n"
+            "`DomainList` wraps a list of strings."
+        )
+    )
 
 
 class MessageListResponse(BaseModel):
-    messages: list[MessagePublic]
+    messages: list[MessagePublic] = Field(
+        description="The conversation's turns in chronological order, oldest first."
+    )
 
 
 class MessageResponse(BaseModel):
-    message: MessagePublic
+    message: MessagePublic = Field(description="The recorded message.")

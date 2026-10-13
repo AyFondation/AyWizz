@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c2_auth.models import (
     ProjectCreate,
     ProjectList,
@@ -96,6 +97,7 @@ def _require_role_intersect(
     "",
     response_model=ProjectPublic,
     status_code=status.HTTP_201_CREATED,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def create_project(
     body: ProjectCreate,
@@ -104,6 +106,19 @@ async def create_project(
     x_user_roles: str | None = Header(default=None),
     service: AuthService = Depends(get_service),
 ) -> ProjectPublic:
+    """Create a project in the caller's tenant.
+
+    Requires `admin` or `tenant_admin` — a PLATFORM power, and the only
+    place that distinction is comfortable: creating a project is
+    governance, not content.
+
+    NOTE, because it surprises people: the creator gets NO project role
+    from this. `admin` and `tenant_admin` are content-blind
+    (`E-100-002`), so whoever just created the project cannot read its
+    requirements, sources or conversations until someone grants them a
+    `project_*` role on it — possibly themselves, via the members
+    routes below. That separation is the model, not an oversight.
+    """
     _require_role_intersect(x_user_roles, ("admin", "tenant_admin"))
     return await service.create_project(body, tenant_id, actor_id)
 
@@ -147,7 +162,7 @@ async def get_project(
     return await service.get_project(project_id, tenant_id)
 
 
-@router.patch("/{project_id}", response_model=ProjectPublic)
+@router.patch("/{project_id}", response_model=ProjectPublic, responses=ROLE_GATED_RESPONSES)
 async def update_project(
     project_id: str,
     body: ProjectUpdate,
@@ -171,6 +186,7 @@ async def update_project(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def delete_project(
     project_id: str,
@@ -179,6 +195,16 @@ async def delete_project(
     x_user_roles: str | None = Header(default=None),
     service: AuthService = Depends(get_service),
 ) -> None:
+    """Delete a project.
+
+    Requires `admin` or `tenant_admin`, and is confined to the caller's
+    own tenant: a cross-tenant target answers 404, not 403, so the
+    existence of another tenant's project is not disclosed.
+
+    Consider `POST /{project_id}/archive` instead when the intent is to
+    stop work rather than to erase it — archiving freezes the project
+    read-only and keeps its content auditable.
+    """
     _require_role_intersect(x_user_roles, ("admin", "tenant_admin"))
     await service.delete_project(project_id, tenant_id)
 
@@ -202,6 +228,18 @@ async def grant_project_member(
     x_user_roles: str | None = Header(default=None),
     service: AuthService = Depends(get_service),
 ) -> None:
+    """Grant a user a role ON this project.
+
+    This is what makes project CONTENT reachable. A global `admin` can
+    create a project and manage its members and still read nothing in it
+    (`E-100-002`); the grant is the only thing that opens the content,
+    and it opens exactly one project.
+
+    Allowed to `admin` / `tenant_admin` (governance) and to
+    `project_owner` (the project's own authority), so a tenant
+    administrator is not a bottleneck for every membership change.
+    Re-granting overwrites, so the call is idempotent on the role.
+    """
     _require_role_intersect(
         x_user_roles, ("admin", "tenant_admin", "project_owner"),
     )
@@ -221,6 +259,15 @@ async def revoke_project_member(
     x_user_roles: str | None = Header(default=None),
     service: AuthService = Depends(get_service),
 ) -> None:
+    """Revoke a user's role on this project.
+
+    Takes effect on the NEXT request: the caller's roles are resolved
+    per request by the gateway, so a revoked member loses access as soon
+    as their current request finishes — their existing token is not
+    invalidated and does not need to be.
+
+    Idempotent: revoking a role nobody holds is not an error.
+    """
     _require_role_intersect(
         x_user_roles, ("admin", "tenant_admin", "project_owner"),
     )

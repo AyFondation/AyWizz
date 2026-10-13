@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c8_llm.quota.models import (
     ConsumptionReport,
     ProjectConsumptionReport,
@@ -79,7 +80,7 @@ def get_quota_service(request: Request) -> QuotaService:
     return request.app.state.quota_service  # type: ignore[no-any-return]
 
 
-@router.get("/admin/v1/quota/policy", response_model=QuotaPolicy)
+@router.get("/admin/v1/quota/policy", response_model=QuotaPolicy, responses=ROLE_GATED_RESPONSES)
 async def get_quota_policy(
     _user: str = Depends(_require_actor),
     x_user_roles: str | None = Header(default=None),
@@ -90,7 +91,7 @@ async def get_quota_policy(
     return await service.get_policy()
 
 
-@router.put("/admin/v1/quota/policy", response_model=QuotaPolicy)
+@router.put("/admin/v1/quota/policy", response_model=QuotaPolicy, responses=ROLE_GATED_RESPONSES)
 async def put_quota_policy(
     body: QuotaPolicyUpdate,
     _user: str = Depends(_require_actor),
@@ -102,7 +103,7 @@ async def put_quota_policy(
     return await service.set_policy(body.windows)
 
 
-@router.get("/admin/v1/quota/status", response_model=QuotaStatus)
+@router.get("/admin/v1/quota/status", response_model=QuotaStatus, responses=ROLE_GATED_RESPONSES)
 async def get_quota_status(
     tenant_id: str,
     project_id: str | None = None,
@@ -123,7 +124,11 @@ async def get_quota_status(
     return await service.evaluate(tenant_id, project_id=project_id)
 
 
-@router.get("/admin/v1/quota/consumption", response_model=ConsumptionReport)
+@router.get(
+    "/admin/v1/quota/consumption",
+    response_model=ConsumptionReport,
+    responses=ROLE_GATED_RESPONSES,
+)
 async def get_consumption(
     _user: str = Depends(_require_actor),
     x_user_roles: str | None = Header(default=None),
@@ -140,6 +145,7 @@ async def get_consumption(
 @router.get(
     "/admin/v1/quota/consumption/projects",
     response_model=ProjectConsumptionReport,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def get_project_consumption(
     tenant_id: str | None = None,
@@ -158,7 +164,8 @@ async def get_project_consumption(
 
 
 @router.get(
-    "/admin/v1/quota/consumption/tenants", response_model=ConsumptionReport
+    "/admin/v1/quota/consumption/tenants", response_model=ConsumptionReport,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def get_tenant_consumption_days(
     _user: str = Depends(_require_actor),
@@ -172,7 +179,8 @@ async def get_tenant_consumption_days(
 
 
 @router.get(
-    "/admin/v1/quota/consumption/users", response_model=UserConsumptionReport
+    "/admin/v1/quota/consumption/users", response_model=UserConsumptionReport,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def get_user_consumption(
     tenant_id: str | None = None,
@@ -192,6 +200,7 @@ async def get_user_consumption(
 @router.get(
     "/admin/v1/quota/requests/{correlation}/breakdown",
     response_model=RequestCostBreakdown,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def get_request_breakdown(
     correlation: str,

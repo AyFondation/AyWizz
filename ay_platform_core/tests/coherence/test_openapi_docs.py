@@ -1,6 +1,6 @@
 # =============================================================================
 # File: test_openapi_docs.py
-# Version: 2
+# Version: 4
 # Path: ay_platform_core/tests/coherence/test_openapi_docs.py
 # Description: Guards the OpenAPI document each component generates, so the
 #              documentation cannot quietly rot back to what it was.
@@ -117,7 +117,7 @@ def test_the_audit_can_read_every_component(report: Report) -> None:
 
 
 def test_operation_prose_does_not_regress(report: Report) -> None:
-    """RATCHET. 101 of 272 operations have no description.
+    """RATCHET. 82 of 272 operations have no description.
 
     FastAPI derives an operation's `description` from the handler's
     docstring, so this number is exactly "how many handlers are
@@ -125,15 +125,15 @@ def test_operation_prose_does_not_regress(report: Report) -> None:
     without a docstring would otherwise be invisible.
     """
     missing = report.count("no_description")
-    assert missing <= 101, (
-        f"{missing} operations have no description, up from 101 on "
+    assert missing <= 82, (
+        f"{missing} operations have no description, up from 82 on "
         "2026-10-09. FastAPI reads this from the handler's docstring — add "
         "one to the new route rather than raising this number."
     )
 
 
-def test_role_gated_403_coverage_does_not_regress(report: Report) -> None:
-    """RATCHET. 30 role-gated routes do not yet declare their 403.
+def test_every_role_gated_route_declares_its_403(report: Report) -> None:
+    """ABSOLUTE, reached 2026-10-12: every role-gated route declares a 403.
 
     `describe_app` declares it automatically wherever the GATEWAY's own
     predicate applies — a project-content path — because that is derivable
@@ -148,30 +148,39 @@ def test_role_gated_403_coverage_does_not_regress(report: Report) -> None:
     `403_on_ungated_route` test above is the referee for that.
     """
     missing = report.count("role_gated_without_403")
-    assert missing <= 30, (
-        f"{missing} role-gated routes declare no 403, up from 30 on "
-        "2026-10-09. Add `responses=ROLE_GATED_RESPONSES` to the route "
-        "(not the router, unless EVERY route in it is gated)."
+    assert missing == 0, (
+        f"{missing} role-gated route(s) declare no 403. This reached ZERO on "
+        "2026-10-12 and is an absolute, not a ratchet: the catalogue saying a "
+        "route is ROLE_GATED is a promise that it refuses, and a document "
+        "that omits the refusal leaves a consumer unable to distinguish "
+        "'cannot fail' from 'nobody wrote it down'.\n\n"
+        "Add `responses=ROLE_GATED_RESPONSES` to the ROUTE — not the router, "
+        "unless EVERY route in it is gated. Most are mixed, and a "
+        "router-level attachment claimed a refusal 43 operations could not "
+        "produce, which `test_the_document_makes_no_false_statement` blocks."
     )
 
 
 def test_field_prose_does_not_regress(report: Report) -> None:
-    """RATCHET. 1302 of 1393 schema fields carry no description.
+    """RATCHET. 1274 of 1393 schema fields carry no description.
 
     The largest remaining gap and the only one that is pure prose: these
     are the request and response bodies, and no rule derives what a field
     MEANS. Pinned as a ceiling so the batches that reduce it cannot be
     undone by a new model landing bare.
 
-    1414 of 1447 before the first batch. The totals moved too, and for a
+    1414 of 1447 before the first batch, 1302 after C6, 1274 after C3.
+    FULLY DOCUMENTED at the operation level as of 2026-10-12: C2, C3, C4,
+    C6, C9, C16. Remaining: C5 (57), C8 (14), C7 (11) — the next batches.
+    Historical note on the totals. The totals moved too, and for a
     reason worth recording: FastAPI's own `HTTPValidationError` and
     `ValidationError` are excluded now (54 fields across nine
     components), because their prose is not ours to write and a metric
     that cannot reach zero teaches the reader to ignore it. C6's models
     account for the other 58.
     """
-    assert report.undescribed_fields <= 1302, (
+    assert report.undescribed_fields <= 1274, (
         f"{report.undescribed_fields} schema fields have no description, up "
-        "from 1302 on 2026-10-09. Add `Field(description=...)` to the new "
+        "from 1274 on 2026-10-12. Add `Field(description=...)` to the new "
         "model's fields."
     )

@@ -201,6 +201,15 @@ async def rename_source(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> SourceStructuralOpResult:
+    """Rename a file in a run's generated source tree.
+
+    A STRUCTURAL edit, so it is recorded as a commit on the project's
+    Gitea repository rather than applied in place — the tree a run
+    produced stays reconstructible at every version.
+
+    Requires `project_editor` or `project_owner`: a `project_viewer`
+    reads the tree and cannot reshape it.
+    """
     _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     result: dict[str, Any] = await service.rename_source(
@@ -226,6 +235,14 @@ async def move_source(
     x_user_roles: str | None = Header(default=None),
     service: ArtifactsService = Depends(_get_service),
 ) -> SourceStructuralOpResult:
+    """Move a file to another directory in a run's source tree.
+
+    Distinct from rename because the target is a DIRECTORY, not a path:
+    the filename is preserved, which is what a drag-and-drop in the tree
+    means and what a caller would otherwise have to recompute.
+
+    Same gate and same commit semantics as rename.
+    """
     _reject_platform_manager(x_user_roles)
     _require_editor_role(x_user_roles)
     result: dict[str, Any] = await service.move_source(

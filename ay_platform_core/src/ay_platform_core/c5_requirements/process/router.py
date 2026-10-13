@@ -32,6 +32,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import ValidationError
 
+from ay_platform_core.api_docs import ROLE_GATED_RESPONSES
 from ay_platform_core.c2_auth.forward_auth import (
     require_project_content_role,
 )
@@ -161,6 +162,7 @@ async def list_tenant_cycles(
     f"{_TENANT}/cycles",
     response_model=CyclePublic,
     status_code=status.HTTP_201_CREATED,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def create_tenant_cycle(
     payload: CycleDraftCreate,
@@ -197,6 +199,7 @@ async def get_tenant_cycle(
 @router.put(
     f"{_TENANT}/cycles/{{cycle_id}}/versions/{{version}}",
     response_model=CyclePublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def update_tenant_cycle(
     cycle_id: str,
@@ -214,6 +217,7 @@ async def update_tenant_cycle(
 @router.post(
     f"{_TENANT}/cycles/{{cycle_id}}/versions/{{version}}/publish",
     response_model=CyclePublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def publish_tenant_cycle(
     cycle_id: str,
@@ -245,6 +249,7 @@ async def list_tenant_workflows(
     f"{_TENANT}/workflows",
     response_model=WorkflowPublic,
     status_code=status.HTTP_201_CREATED,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def create_tenant_workflow(
     payload: WorkflowDraftCreate,
@@ -281,6 +286,7 @@ async def get_tenant_workflow(
 @router.put(
     f"{_TENANT}/workflows/{{workflow_id}}/versions/{{version}}",
     response_model=WorkflowPublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def update_tenant_workflow(
     workflow_id: str,
@@ -300,6 +306,7 @@ async def update_tenant_workflow(
 @router.post(
     f"{_TENANT}/workflows/{{workflow_id}}/versions/{{version}}/publish",
     response_model=WorkflowPublic,
+    responses=ROLE_GATED_RESPONSES,
 )
 async def publish_tenant_workflow(
     workflow_id: str,

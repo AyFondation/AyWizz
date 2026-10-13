@@ -56,6 +56,12 @@ async def list_conversations(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> ConversationListResponse:
+    """The caller's own conversations, most recently updated first.
+
+    Scoped to the caller and not to a project: a conversation is private
+    to its owner, so there is no parameter that widens this and no way to
+    list another member's chats on a shared project.
+    """
     conversations = await svc.list_conversations(user_id)
     return ConversationListResponse(conversations=conversations)
 
@@ -66,6 +72,13 @@ async def create_conversation(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> ConversationResponse:
+    """Open a conversation.
+
+    `project_id` decides whether the chat has RAG context at all: with
+    one, every turn retrieves from that project; without, the model
+    answers from the prompt alone. It can be changed later, but past
+    turns are not re-retrieved.
+    """
     conv = await svc.create_conversation(user_id, payload)
     return ConversationResponse(conversation=conv)
 
@@ -76,6 +89,11 @@ async def get_conversation(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> ConversationResponse:
+    """One conversation's metadata, without its messages.
+
+    404 — not 403 — when it belongs to someone else: the existence of
+    another user's conversation is itself not the caller's business.
+    """
     conv = await svc.get_conversation(conversation_id, user_id)
     return ConversationResponse(conversation=conv)
 
@@ -87,6 +105,12 @@ async def update_conversation(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> ConversationResponse:
+    """Rename a conversation, or re-point it at another project.
+
+    Only the fields present in the body change. Re-pointing affects
+    SUBSEQUENT turns only — the answers already recorded were retrieved
+    from the old project and are not rewritten.
+    """
     conv = await svc.update_conversation(conversation_id, user_id, payload)
     return ConversationResponse(conversation=conv)
 
@@ -97,6 +121,12 @@ async def delete_conversation(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> None:
+    """Delete a conversation and its messages.
+
+    A soft delete: the record is marked rather than removed, so the LLM
+    cost already attributed to its turns stays auditable. It disappears
+    from every listing and read regardless.
+    """
     await svc.delete_conversation(conversation_id, user_id)
 
 
@@ -111,6 +141,13 @@ async def list_messages(
     user_id: str = Depends(_current_user),
     svc: ConversationService = Depends(_get_service),
 ) -> MessageListResponse:
+    """A conversation's turns, oldest first.
+
+    Each assistant message carries the `events` ledger of what the
+    pipeline did to produce it — the same inline events the SSE stream
+    emitted live, persisted so the reasoning is auditable after the fact
+    and not only while watching.
+    """
     messages = await svc.list_messages(conversation_id, user_id)
     return MessageListResponse(messages=messages)
 
